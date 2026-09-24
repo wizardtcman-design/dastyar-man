@@ -1,4 +1,6 @@
 
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -26,9 +28,7 @@ val hasSigning = ksStoreB64.isNotBlank() && ksKeyAlias.isNotBlank()
 val releaseKeystore = layout.buildDirectory.file("release.keystore").get().asFile
 if (hasSigning) {
     releaseKeystore.parentFile.mkdirs()
-    releaseKeystore.writeBytes(
-        java.util.Base64.getMimeDecoder().decode(ksStoreB64)
-    )
+    releaseKeystore.writeBytes(Base64.getMimeDecoder().decode(ksStoreB64))
 }
 
 android {
