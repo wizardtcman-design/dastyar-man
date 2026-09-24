@@ -1,4 +1,3 @@
-import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -27,6 +26,37 @@ android {
     val chatUrl: String = System.getenv("ATRIA_BASE_URL")
         ?: "https://api.atria-asi.ai"
 
+    // Release signing: the keystore is decoded from a GitHub Secret at build
+    // time. Locally it can come from keystore.properties (never committed).
+    val ksProps = java.util.Properties().apply {
+        val f = rootProject.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    val ksStoreB64: String = System.getenv("KEYSTORE_BASE64") ?: ""
+    val ksStorePass: String = System.getenv("KEYSTORE_PASSWORD")
+        ?: (project.findProperty("KEYSTORE_PASSWORD") as String?) ?: ""
+    val ksKeyAlias: String = System.getenv("KEY_ALIAS")
+        ?: (project.findProperty("KEY_ALIAS") as String?) ?: ""
+    val ksKeyPass: String = System.getenv("KEY_PASSWORD")
+        ?: (project.findProperty("KEY_PASSWORD") as String?) ?: ""
+
+    val releaseKeystore = layout.buildDirectory.file("release.keystore").get().asFile
+    if (ksStoreB64.isNotBlank()) {
+        releaseKeystore.parentFile.mkdirs()
+        releaseKeystore.writeBytes(java.util.Base64.getMimeDecoder().decode(ksStoreB64))
+    }
+
+    signingConfigs {
+        if (ksStoreB64.isNotBlank() && ksKeyAlias.isNotBlank()) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = ksStorePass
+                keyAlias = ksKeyAlias
+                keyPassword = ksKeyPass
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -34,6 +64,9 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "ATRIA_API_KEY", "\"$aiKey\"")
             buildConfigField("String", "ATRIA_BASE_URL", "\"$chatUrl\"")
+            if (ksStoreB64.isNotBlank() && ksKeyAlias.isNotBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isMinifyEnabled = false

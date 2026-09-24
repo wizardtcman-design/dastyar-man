@@ -35,6 +35,10 @@ jobs:
       - name: Build Release APK
         env:
           ATRIA_API_KEY: ${{ secrets.ATRIA_API_KEY }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Rename APKs
@@ -43,6 +47,13 @@ jobs:
           cp app/build/outputs/apk/debug/*.apk out/dastyar-man-debug.apk || true
           cp app/build/outputs/apk/release/*.apk out/dastyar-man-release.apk || true
           ls -la out
+
+      - name: Verify APK signatures
+        run: |
+          for f in out/*.apk; do
+            echo "--- $f"
+            $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs "$f" || exit 1
+          done
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
