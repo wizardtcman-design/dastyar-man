@@ -22,6 +22,46 @@ object Dates {
         return s.map { c -> if (c in '0'..'9') faDigits[c - '0'] else c }.joinToString("")
     }
 
+    /** Persian digits for a float, trimmed of a trailing ".0". */
+    fun fa(v: Float, decimals: Int = 1): String {
+        if (v <= 0f) return fa(0)
+        val whole = v.toInt()
+        val rounded = if (v == whole.toFloat()) fa(whole)
+        else fa("%.${decimals}f".format(v))
+        return rounded
+    }
+
+    /**
+     * Persian digits for a value while it is being typed. An empty or zero
+     * value shows nothing, so number fields never carry a stray leading zero.
+     */
+    fun faField(v: Int): String = if (v == 0) "" else fa(v)
+
+    fun faField(v: Float): String =
+        if (v <= 0f) "" else if (v == v.toInt().toFloat()) fa(v.toInt()) else fa(v)
+
+    /** Persian digits for a value that should always be visible, including zero. */
+    fun faAlways(v: Int): String = fa(v)
+
+    /** Parses a number typed by the user, accepting Persian or Latin digits. */
+    fun parseNum(s: String): Float? {
+        if (s.isBlank()) return null
+        val faDigits = "۰۱۲۳۴۵۶۷۸۹"
+        val normalized = buildString {
+            s.forEach { c ->
+                val idx = faDigits.indexOf(c)
+                when {
+                    idx >= 0 -> append(('0' + idx))
+                    c.isDigit() || c == '.' -> append(c)
+                }
+            }
+        }
+        return normalized.toFloatOrNull()
+    }
+
+    /** Time like "09:00" rendered with Persian digits. */
+    fun faTime(hhmm: String): String = fa(hhmm)
+
     /** Cycle day, wrapped into the cycle length. 0 when unknown. */
     fun cycleDay(lastPeriodIso: String, cycleLength: Int): Int {
         if (parse(lastPeriodIso) == null) return 0

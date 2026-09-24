@@ -32,6 +32,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".notifications.DailyReminderReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".notifications.BootReceiver"
             android:exported="false">
             <intent-filter>

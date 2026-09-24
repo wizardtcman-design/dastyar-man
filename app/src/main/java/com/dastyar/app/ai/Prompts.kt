@@ -275,4 +275,33 @@ $recentUserMessages
 حداکثر ۳ خط. کلیدها کوتاه و فارسی باشند.
 """.trimIndent()
     }
+
+    /**
+     * Prompt for the dashboard card that explains the user's declared condition.
+     * It explains a condition the user already told us about; it never diagnoses
+     * and never replaces the doctor.
+     */
+    fun conditionPrompt(conditions: String, medications: String, profile: Profile?): String {
+        val who = StringBuilder()
+        if (profile?.age?.let { it > 0 } == true) who.append("سن کاربر: ${profile.age}. ")
+        if (profile?.weightKg?.let { it > 0f } == true) who.append("وزن: ${profile.weightKg} کیلوگرم. ")
+        return """
+کاربر در پروفایل خود این شرایط را اعلام کرده است:
+«$conditions»
+داروهای اعلام‌شده: ${medications.ifBlank { "هیچ" }}
+$who
+
+یک توضیح کوتاه و آرام درباره این شرایط بده. خروجی را دقیقاً در این سه بخش بنویس:
+
+📌 چیستی | یک جمله ساده: این شرایط معمولاً چیست
+🩺 نکته مراقبتی | یک یا دو نکته ساده و بی‌خطر برای زندگی روزمره با این شرایط
+👩⚕️ پیگیری | یک جمله: چه زمانی بهتر است با پزشک در میان بگذارد
+
+قواعد:
+- این توضیح آموزشی است، نه تشخیص. هیچ‌جا نگو کاربر قطعاً این بیماری را دارد.
+- هیچ دارو یا دوزی تجویز نکن.
+- ادعا نکن این شرایط علت یک علامت خاص کاربر است.
+- فارسی، ساده، گرم و بدون ترس‌آفرینی بنویس.
+""".trimIndent()
+    }
 }

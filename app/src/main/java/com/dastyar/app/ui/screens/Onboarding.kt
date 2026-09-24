@@ -1,5 +1,9 @@
 package com.dastyar.app.ui.screens
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,7 +24,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dastyar.app.audio.VoicePlayer
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Jalali
 import com.dastyar.app.data.Profile
@@ -32,7 +35,6 @@ import com.dastyar.app.ui.theme.Green
 import com.dastyar.app.ui.theme.Pink
 import com.dastyar.app.ui.theme.Purple
 import com.dastyar.app.ui.theme.Rose
-import kotlinx.coroutines.launch
 
 private val STEP_LABELS = listOf(
     "اطلاعات شخصی",
@@ -51,12 +53,13 @@ private val STEP_LABELS = listOf(
 fun OnboardingFlow(vm: MainViewModel) {
     var step by remember { mutableIntStateOf(0) }
     var draft by remember { mutableStateOf(Profile(id = 1)) }
-    var showWelcome by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     val total = STEP_LABELS.size
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val scrollState = rememberScrollState()
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
 
     // Whenever the step changes, jump back to the top so the user always starts
     // the new page at the beginning instead of mid-scroll.
@@ -77,101 +80,86 @@ fun OnboardingFlow(vm: MainViewModel) {
             )
     ) {
         Column(Modifier.fillMaxSize()) {
-            if (!showWelcome) {
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(scrollState)
-                        .padding(horizontal = 18.dp)
-                ) {
-                    Spacer(Modifier.height(16.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(15.dp))
-                                .background(
-                                    Brush.linearGradient(listOf(Purple, Pink))
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) { Text("🌱", fontSize = 23.sp) }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                "دستیار من",
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "چند سؤال کوتاه تا بهتر بشناسمت",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 18.dp)
+            ) {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(
+                                Brush.linearGradient(listOf(Purple, Pink))
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) { Text("🌱", fontSize = 23.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            "دستیار من",
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "چند سؤال کوتاه تا بهتر بشناسمت",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-
-                    Spacer(Modifier.height(18.dp))
-                    StepBadge(step, total, STEP_LABELS[step])
-                    Spacer(Modifier.height(18.dp))
-
-                    when (step) {
-                        0 -> PersonalSection(draft) { draft = it }
-                        1 -> PeriodSection(draft) { draft = it }
-                        2 -> SkinSection(draft) { draft = it }
-                        3 -> FatigueSection(draft) { draft = it }
-                        4 -> FinishSection(draft) { draft = it }
-                    }
-                    Spacer(Modifier.height(20.dp))
                 }
 
-                // sticky footer with the navigation buttons
-                Surface(
-                    tonalElevation = 6.dp,
-                    color = MaterialTheme.colorScheme.surface
+                Spacer(Modifier.height(18.dp))
+                StepBadge(step, total, STEP_LABELS[step])
+                Spacer(Modifier.height(18.dp))
+
+                when (step) {
+                    0 -> PersonalSection(draft) { draft = it }
+                    1 -> PeriodSection(draft) { draft = it }
+                    2 -> SkinSection(draft) { draft = it }
+                    3 -> FatigueSection(draft) { draft = it }
+                    4 -> FinishSection(draft) { draft = it }
+                }
+                Spacer(Modifier.height(20.dp))
+            }
+
+            // sticky footer with the navigation buttons
+            Surface(
+                tonalElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    if (step > 0) {
+                        OutlinedButton(
+                            onClick = { step-- },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(54.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) { Text("قبلی") }
+                    }
+                    GradientButton(
+                        text = if (step == total - 1) "شروع کنیم 🌱" else "بعدی ←",
+                        modifier = Modifier.weight(if (step > 0) 1.5f else 1f)
                     ) {
-                        if (step > 0) {
-                            OutlinedButton(
-                                onClick = { step-- },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(54.dp),
-                                shape = RoundedCornerShape(16.dp)
-                            ) { Text("قبلی") }
-                        }
-                        GradientButton(
-                            text = if (step == total - 1) "شروع کنیم 🌱" else "بعدی ←",
-                            modifier = Modifier.weight(if (step > 0) 1.5f else 1f)
-                        ) {
-                            if (step < total - 1) {
-                                step++
-                            } else {
-                                vm.saveProfile(draft.copy(onboardingDone = true))
-                                showWelcome = true
-                                scope.launch {
-                                    VoicePlayer.ensureWelcome(ctx, draft.firstName)
-                                        .onSuccess { VoicePlayer.play(it) }
-                                }
+                        if (step < total - 1) {
+                            step++
+                        } else {
+                            vm.saveProfile(draft.copy(onboardingDone = true))
+                            if (Build.VERSION.SDK_INT >= 33) {
+                                launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                         }
                     }
                 }
-            } else {
-                WelcomeScreen(
-                    name = draft.firstName.ifBlank { "دوست من" },
-                    onContinue = { vm.saveProfile(draft.copy(onboardingDone = true)) },
-                    onReplay = {
-                        scope.launch {
-                            VoicePlayer.ensureWelcome(ctx, draft.firstName)
-                                .onSuccess { VoicePlayer.play(it) }
-                        }
-                    }
-                )
             }
         }
     }
@@ -682,7 +670,7 @@ fun FatigueSection(p: Profile, onChange: (Profile) -> Unit) {
 
 @Composable
 fun FinishSection(p: Profile, onChange: (Profile) -> Unit) {
-    QuestionCard("🌱", "با چه اسمی صدایت کنم؟", "این اسم در پیام خوش‌آمدگویی استفاده می‌شود", Green) {
+    QuestionCard("🌱", "با چه اسمی صدایت کنم؟", "با همین اسم صدایت می‌کنم", Green) {
         OutlinedTextField(
             value = p.firstName,
             onValueChange = { onChange(p.copy(firstName = it)) },
@@ -692,63 +680,7 @@ fun FinishSection(p: Profile, onChange: (Profile) -> Unit) {
             singleLine = true
         )
     }
-    Spacer(Modifier.height(14.dp))
-
-    QuestionCard("🔊", "یه پیام خوش‌آمدگویی با صدای طبیعی", accent = Purple) {
-        Text(
-            "بعد از تأیید، پیام «خوش اومدی ${p.firstName.ifBlank { "..." }} جان 🌱 من دستیار تو هستم» پخش می‌شود.",
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
 }
 
 // ---------------------------------------------------------------- welcome end
 
-@Composable
-private fun WelcomeScreen(name: String, onContinue: () -> Unit, onReplay: () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(22.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(28.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))))
-                .padding(30.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("🌱", fontSize = 58.sp)
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "خوش اومدی $name جان",
-                    fontSize = 25.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "من دستیار تو هستم.",
-                    fontSize = 17.sp,
-                    color = Color.White.copy(alpha = .92f)
-                )
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-        OutlinedButton(
-            onClick = onReplay,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) { Text("پخش دوباره صدا 🔊") }
-        Spacer(Modifier.height(12.dp))
-        GradientButton("ورود به داشبورد 🏠") { onContinue() }
-    }
-}

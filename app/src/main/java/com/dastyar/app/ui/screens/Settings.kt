@@ -17,10 +17,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.ai.AiClient
+import com.dastyar.app.ai.ApiKeys
 import com.dastyar.app.data.Health
-import com.dastyar.app.audio.VoicePlayer
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Profile
+import com.dastyar.app.notifications.DailyReminder
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
 import com.dastyar.app.ui.theme.Amber
@@ -39,9 +40,14 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var editQuestionnaire by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var darkOverride by remember { mutableStateOf<Boolean?>(null) }
-    var notifications by remember { mutableStateOf(true) }
-    var soundOn by remember { mutableStateOf(true) }
-    var voiceStatus by remember { mutableStateOf<String?>(null) }
+    var dailyEnabled by remember { mutableStateOf(DailyReminder.isEnabled(ctx)) }
+    val dailyTime = remember {
+        mutableStateOf("%02d:%02d".format(DailyReminder.hour(ctx), DailyReminder.minute(ctx)))
+    }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var aiStatus by remember { mutableStateOf<String?>(null) }
+    var altKey by remember { mutableStateOf("") }
+    var altStatus by remember { mutableStateOf<String?>(null) }
 
     Column(
         Modifier
@@ -186,52 +192,61 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- notifications & sound ----
+        // ---- daily reminder notification ----
         DastyarCard(accent = MaterialTheme.colorScheme.tertiary) {
-            SectionTitle("اعلان‌ها و صدا", "🔔")
+            SectionTitle("یادآوری روزانه", "🔔")
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "در ساعت انتخابی تو، اگر وضعیت امروز را ثبت نکرده باشی یک اعلان می‌گیری. " +
+                        "بعد از ثبت، اعلان همان روز دیگر نمی‌آید.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = notifications, onCheckedChange = { notifications = it })
+                Switch(checked = dailyEnabled, onCheckedChange = {
+                    dailyEnabled = it
+                    DailyReminder.setEnabled(ctx, it)
+                    if (it) {
+                        com.dastyar.app.notifications.NotificationHelper.createChannels(ctx)
+                        DailyReminder.showTestNow(ctx)
+                    }
+                })
                 Spacer(Modifier.width(10.dp))
-                Text("اعلان یادآوری‌ها", fontSize = 14.sp)
+                Text("یادآوری ثبت وضعیت روزانه", fontSize = 14.sp)
             }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = { showTimePicker = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("ساعت یادآوری: ${Dates.fa(dailyTime.value)}") }
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = soundOn, onCheckedChange = { soundOn = it })
-                Spacer(Modifier.width(10.dp))
-                Text("صدا و پیام خوش‌آمدگویی", fontSize = 14.sp)
-            }
-            Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = {
-                    scope.launch {
-                        voiceStatus = "در حال ساخت صدا…"
-                        val name = profile?.firstName ?: ""
-                        VoicePlayer.ensureWelcome(ctx, name)
-                            .onSuccess {
-                                voiceStatus = "پخش شد 🔊"
-                                if (soundOn) VoicePlayer.play(it)
-                            }
-                            .onFailure { voiceStatus = "خطا: ${it.message}" }
-                    }
+                    DailyReminder.showTestNow(ctx)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp)
-            ) { Text("پخش پیام خوش‌آمدگویی") }
-            voiceStatus?.let {
+            ) { Text("نمایش یک اعلان آزمایشی") }
+            if (dailyEnabled && !com.dastyar.app.notifications.NotificationHelper.canPost(ctx)) {
                 Spacer(Modifier.height(8.dp))
-                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "برای دریافت اعلان، اجازه اعلان را در تنظیمات گوشی فعال کن.",
+                    fontSize = 11.5.sp,
+                    color = Amber
+                )
             }
         }
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- appearance ----
+        // ---- appearance & RTL ----
         DastyarCard(accent = MaterialTheme.colorScheme.primary) {
-            SectionTitle("ظاهر", "🎨")
+            SectionTitle("ظاهر و چیدمان", "🎨")
             Spacer(Modifier.height(8.dp))
             Text(
-                "حالت نمایش از تنظیمات گوشی پیروی می‌کند. " +
+                "چیدمان برنامه راست‌به‌چپ است و حالت نمایش از تنظیمات گوشی پیروی می‌کند. " +
                         "برای تغییر، حالت تاریک یا روشن گوشی را عوض کن.",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -271,11 +286,80 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "چت، مشاوره و ساخت تصویر با OpenRouter انجام می‌شود. " +
-                        "صدای فارسی از سرویس صدا ساخته می‌شود.",
+                "چت، مشاوره و ساخت تصویر با OpenRouter انجام می‌شود.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        aiStatus = "در حال بررسی اتصال…"
+                        aiStatus = AiClient.testConnection()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("بررسی اتصال هوش مصنوعی") }
+            aiStatus?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // ---- alternate API key ----
+        DastyarCard(accent = MaterialTheme.colorScheme.secondary) {
+            SectionTitle("کلید API جایگزین", "🔑")
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "اگر اتصال پیش‌فرض مشکل داشت، کلید OpenRouter خودت را اینجا وارد کن. " +
+                        "کلید فقط روی همین گوشی ذخیره می‌شود و تا وقتی معتبر باشد برنامه از آن استفاده می‌کند.",
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = altKey,
+                onValueChange = { altKey = it },
+                label = { Text("کلید API جایگزین") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            altStatus = "در حال آزمایش کلید…"
+                            val r = AiClient.testKey(altKey.trim())
+                            altStatus = r
+                            if (r.startsWith("✅")) {
+                                ApiKeys.saveUserKey(ctx, altKey.trim())
+                                altStatus = "$r — ذخیره شد"
+                                altKey = ""
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("آزمایش و ذخیره") }
+                OutlinedButton(
+                    onClick = {
+                        ApiKeys.clearUserKey(ctx)
+                        altKey = ""
+                        altStatus = "کلید جایگزین حذف شد"
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("حذف کلید") }
+            }
+            altStatus?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -317,6 +401,18 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         }
     }
 
+    if (showTimePicker) {
+        TimePickerDialog(
+            initial = dailyTime.value,
+            onDismiss = { showTimePicker = false },
+            onPick = { hh, mm ->
+                dailyTime.value = "%02d:%02d".format(hh, mm)
+                DailyReminder.setTime(ctx, hh, mm)
+                showTimePicker = false
+            }
+        )
+    }
+
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -333,6 +429,83 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             }
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onPick: (Int, Int) -> Unit
+) {
+    val parts = initial.split(":")
+    var hour by remember { mutableIntStateOf(parts.getOrNull(0)?.toIntOrNull() ?: 20) }
+    var minute by remember { mutableIntStateOf(parts.getOrNull(1)?.toIntOrNull() ?: 0) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ساعت یادآوری روزانه") },
+        text = {
+            Column {
+                Text(
+                    "ساعتی را انتخاب کن که معمولاً بیداری.",
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("ساعت", fontSize = 12.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                onClick = { hour = (hour + 23) % 24 },
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("−") }
+                            Text(
+                                Dates.fa("%02d".format(hour)),
+                                modifier = Modifier.weight(1f),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                            OutlinedButton(
+                                onClick = { hour = (hour + 1) % 24 },
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("+") }
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("دقیقه", fontSize = 12.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                onClick = { minute = (minute + 55) % 60 },
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("−") }
+                            Text(
+                                Dates.fa("%02d".format(minute)),
+                                modifier = Modifier.weight(1f),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                            OutlinedButton(
+                                onClick = { minute = (minute + 5) % 60 },
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("+") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onPick(hour, minute) }) { Text("ذخیره") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("انصراف") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

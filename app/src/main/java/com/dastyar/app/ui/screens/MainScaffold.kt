@@ -20,6 +20,12 @@ fun MainScaffold(vm: MainViewModel) {
     var tab by remember { mutableStateOf("home") }
     val todayCheckIn by vm.todayCheckIn.collectAsState()
 
+    // A notification tap deep-links straight into the check-in screen.
+    val openCheckIn by vm.openCheckIn.collectAsState()
+    LaunchedEffect(openCheckIn) {
+        if (openCheckIn > 0) tab = "checkin"
+    }
+
     // The daily check-in is only offered once the user finished onboarding and
     // only when today's row does not exist yet. On the onboarding day the
     // questionnaire already became the day-one record, so it is never asked twice.

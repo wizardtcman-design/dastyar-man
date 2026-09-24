@@ -58,7 +58,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
 
+    // ---- dynamic card about the user's declared medical conditions ----
+    private val _conditionInfo = MutableStateFlow<String?>(null)
+    val conditionInfo: StateFlow<String?> = _conditionInfo.asStateFlow()
+
+    private val _loadingCondition = MutableStateFlow(false)
+    val loadingCondition: StateFlow<Boolean> = _loadingCondition.asStateFlow()
+
+    private var conditionLoadedFor: String? = null
+
+    /**
+     * Produces a short, educational explanation of the conditions the user
+     * declared in their profile. Cached per condition text so it is not
+     * regenerated on every visit. Silently does nothing when AI is unavailable.
+     */
+    fun loadConditionInfo(force: Boolean = false) = viewModelScope.launch {
+        val p = profile.value ?: return@launch
+        val conditions = p.medicalConditions.trim()
+        if (conditions.isBlank()) {
+            _conditionInfo.value = null
+            return@launch
+        }
+        if (!force && conditionLoadedFor == conditions && _conditionInfo.value != null) return@launch
+        if (!AiClient.chatConfigured) return@launch
+
+        _loadingCondition.value = true
+        val res = AiClient.chat(
+            system = Prompts.base(),
+            history = emptyList(),
+            userMessage = Prompts.conditionPrompt(conditions, p.medications.trim(), p)
+        )
+        _loadingCondition.value = false
+        res.onSuccess { text ->
+            val cleaned = text.lines()
+                .map { it.trim() }
+                .filter { it.contains("|") }
+                .joinToString("\n")
+            if (cleaned.isNotBlank()) {
+                _conditionInfo.value = cleaned
+                conditionLoadedFor = conditions
+            }
+        }
+    }
+
     fun clearToast() { _toast.value = null }
+
+    // ---- deep-link: a notification tap asks the UI to open the check-in tab ----
+    private val _openCheckIn = MutableStateFlow(0)
+    val openCheckIn: StateFlow<Int> = _openCheckIn.asStateFlow()
+
+    /** Requests that the UI jump to the daily check-in screen. */
+    fun requestOpenCheckIn() { _openCheckIn.value = _openCheckIn.value + 1 }
 
     init {
         viewModelScope.launch {

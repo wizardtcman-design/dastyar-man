@@ -46,9 +46,48 @@ object AiClient {
     /** Replies are short Persian text; this is plenty and keeps cost tiny. */
     private const val CHAT_MAX_TOKENS = 900
 
-    val chatConfigured: Boolean get() = BuildConfig.OPENROUTER_API_KEY.isNotBlank()
+    /** The key actually used: a user-supplied alternate key wins when present. */
+    private fun effectiveKey(): String =
+        ApiKeys.userKey()?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.OPENROUTER_API_KEY
+
+    val chatConfigured: Boolean get() = effectiveKey().isNotBlank()
 
     private val base get() = BuildConfig.OPENROUTER_BASE_URL.trimEnd('/')
+
+    // ---------------------------------------------------------------- tests
+
+    /** Verifies the active key with a tiny real request. Returns a Persian result line. */
+    suspend fun testConnection(): String = testKey(effectiveKey())
+
+    /**
+     * Verifies a specific key by sending a one-token chat request. Returns a
+     * Persian sentence starting with ✅ on success or ⚠️ on failure.
+     */
+    suspend fun testKey(key: String): String = withContext(Dispatchers.IO) {
+        if (key.isBlank()) return@withContext "⚠️ کلید خالی است."
+        try {
+            val body = buildJsonObject {
+                put("model", TEXT_MODEL)
+                put("max_tokens", 8)
+                put("messages", buildJsonArray {
+                    add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+                })
+            }.toString()
+            val req = Request.Builder()
+                .url("$base/chat/completions")
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            http.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) "✅ اتصال برقرار است"
+                else "⚠️ ${describeError(resp.code, resp.body?.string().orEmpty())}"
+            }
+        } catch (e: Exception) {
+            "⚠️ اتصال برقرار نشد: اینترنت را بررسی کن."
+        }
+    }
 
     // ---------------------------------------------------------------- chat
 
@@ -113,7 +152,7 @@ object AiClient {
 
             val req = Request.Builder()
                 .url("$base/chat/completions")
-                .addHeader("Authorization", "Bearer ${BuildConfig.OPENROUTER_API_KEY}")
+                .addHeader("Authorization", "Bearer ${effectiveKey()}")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -173,7 +212,7 @@ object AiClient {
 
                 val req = Request.Builder()
                     .url("$base/chat/completions")
-                    .addHeader("Authorization", "Bearer ${BuildConfig.OPENROUTER_API_KEY}")
+                    .addHeader("Authorization", "Bearer ${effectiveKey()}")
                     .addHeader("Content-Type", "application/json")
                     .post(body.toRequestBody("application/json".toMediaType()))
                     .build()
