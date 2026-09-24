@@ -78,6 +78,7 @@ fun QuestionCard(
 /**
  * Selectable chip. Works for both single and multi choice questions.
  * Selected chips fill with the accent colour and lift slightly.
+ * [compact] shrinks it for dense grids such as the month picker.
  */
 @Composable
 fun SelectChip(
@@ -85,6 +86,7 @@ fun SelectChip(
     selected: Boolean,
     accent: Color = Purple,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val bg by animateColorAsState(
@@ -94,26 +96,33 @@ fun SelectChip(
     val scale by animateFloatAsState(if (selected) 1.04f else 1f, label = "chipScale")
 
     Surface(
-        shape = RoundedCornerShape(15.dp),
+        shape = RoundedCornerShape(if (compact) 12.dp else 15.dp),
         color = bg,
         modifier = modifier
             .scale(scale)
             .clickable { onClick() }
     ) {
         Row(
-            Modifier.padding(horizontal = 15.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically
+            Modifier.padding(
+                horizontal = if (compact) 6.dp else 15.dp,
+                vertical = if (compact) 9.dp else 11.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            if (selected) {
+            if (selected && !compact) {
                 Text("✓", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(6.dp))
             }
             Text(
                 label,
-                fontSize = 14.sp,
+                fontSize = if (compact) 11.5.sp else 14.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                 color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                // Persian words must never break apart letter by letter
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -140,6 +149,35 @@ fun MultiChoiceChips(
                     if (isOn) selected - option else selected + option
                 )
             }
+        }
+    }
+}
+
+/**
+ * Single-choice chips. Tapping the selected chip again keeps it selected, so a
+ * value can never be accidentally cleared.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SingleChoiceChips(
+    options: List<String>,
+    selected: String,
+    accent: Color = Purple,
+    compact: Boolean = false,
+    onChange: (String) -> Unit
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        options.forEach { option ->
+            SelectChip(
+                label = option,
+                selected = option == selected,
+                accent = accent,
+                compact = compact
+            ) { onChange(option) }
         }
     }
 }

@@ -56,6 +56,13 @@ fun OnboardingFlow(vm: MainViewModel) {
     val total = STEP_LABELS.size
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+
+    // Whenever the step changes, jump back to the top so the user always starts
+    // the new page at the beginning instead of mid-scroll.
+    LaunchedEffect(step) {
+        scrollState.scrollTo(0)
+    }
 
     Box(
         Modifier
@@ -74,7 +81,7 @@ fun OnboardingFlow(vm: MainViewModel) {
                 Column(
                     Modifier
                         .weight(1f)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scrollState)
                         .padding(horizontal = 18.dp)
                 ) {
                     Spacer(Modifier.height(16.dp))
@@ -275,11 +282,11 @@ fun PeriodSection(p: Profile, onChange: (Profile) -> Unit) {
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("😣", "شدت معمول دردت چقدره؟", "۰ یعنی بدون درد، ۱۰ یعنی خیلی شدید", Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = (0..10).map { it.toString() },
-            selected = listOf(p.periodPainLevel.toString()),
+            selected = p.periodPainLevel.toString(),
             accent = Pink
-        ) { onChange(p.copy(periodPainLevel = it.firstOrNull()?.toIntOrNull() ?: 0)) }
+        ) { onChange(p.copy(periodPainLevel = it.toIntOrNull() ?: 0)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -293,65 +300,65 @@ fun PeriodSection(p: Profile, onChange: (Profile) -> Unit) {
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🩸", "شدت خونریزیت چطوره؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("کم", "متوسط", "زیاد", "خیلی زیاد"),
-            selected = splitMulti(p.bleedingLevel),
+            selected = p.bleedingLevel,
             accent = Pink
-        ) { onChange(p.copy(bleedingLevel = joinMulti(it))) }
+        ) { onChange(p.copy(bleedingLevel = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🔴", "لخته داری؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "کم", "زیاد"),
-            selected = splitMulti(p.hasClots),
+            selected = p.hasClots,
             accent = Pink
-        ) { onChange(p.copy(hasClots = joinMulti(it))) }
+        ) { onChange(p.copy(hasClots = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🤢", "تهوع داری؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "خفیف", "شدید"),
-            selected = splitMulti(p.hasNausea),
+            selected = p.hasNausea,
             accent = Pink
-        ) { onChange(p.copy(hasNausea = joinMulti(it))) }
+        ) { onChange(p.copy(hasNausea = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("💫", "سرگیجه داری؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "خفیف", "شدید"),
-            selected = splitMulti(p.hasDizziness),
+            selected = p.hasDizziness,
             accent = Pink
-        ) { onChange(p.copy(hasDizziness = joinMulti(it))) }
+        ) { onChange(p.copy(hasDizziness = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🤕", "سردرد داری؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "خفیف", "شدید"),
-            selected = splitMulti(p.hasHeadache),
+            selected = p.hasHeadache,
             accent = Pink
-        ) { onChange(p.copy(hasHeadache = joinMulti(it))) }
+        ) { onChange(p.copy(hasHeadache = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🦴", "کمردرد یا درد لگن داری؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "خفیف", "متوسط", "شدید"),
-            selected = splitMulti(p.hasBackPain),
+            selected = p.hasBackPain,
             accent = Pink
-        ) { onChange(p.copy(hasBackPain = joinMulti(it))) }
+        ) { onChange(p.copy(hasBackPain = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🚶", "درد چقدر روی فعالیت روزانه‌ات اثر می‌ذاره؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("بدون تأثیر", "کم", "متوسط", "زیاد", "خیلی زیاد"),
-            selected = splitMulti(p.painImpact),
+            selected = p.painImpact,
             accent = Pink
-        ) { onChange(p.copy(painImpact = joinMulti(it))) }
+        ) { onChange(p.copy(painImpact = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -378,11 +385,11 @@ fun SkinSection(p: Profile, onChange: (Profile) -> Unit) {
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🔴", "میزان جوشت چقدره؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "کم", "متوسط", "زیاد"),
-            selected = splitMulti(p.acneLevel),
+            selected = p.acneLevel,
             accent = Amber
-        ) { onChange(p.copy(acneLevel = joinMulti(it))) }
+        ) { onChange(p.copy(acneLevel = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -396,56 +403,56 @@ fun SkinSection(p: Profile, onChange: (Profile) -> Unit) {
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🫧", "جوش زیرپوستی داری؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("دارم", "ندارم"),
-            selected = splitMulti(p.hasUnderSkinAcne),
+            selected = p.hasUnderSkinAcne,
             accent = Amber
-        ) { onChange(p.copy(hasUnderSkinAcne = joinMulti(it))) }
+        ) { onChange(p.copy(hasUnderSkinAcne = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("⚪", "جوش سرسفید داری؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("دارم", "ندارم"),
-            selected = splitMulti(p.hasWhiteheads),
+            selected = p.hasWhiteheads,
             accent = Amber
-        ) { onChange(p.copy(hasWhiteheads = joinMulti(it))) }
+        ) { onChange(p.copy(hasWhiteheads = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("⚫", "جوش سرسیاه داری؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("دارم", "ندارم"),
-            selected = splitMulti(p.hasBlackheads),
+            selected = p.hasBlackheads,
             accent = Amber
-        ) { onChange(p.copy(hasBlackheads = joinMulti(it))) }
+        ) { onChange(p.copy(hasBlackheads = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🌡", "قرمزی و التهاب داری؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "کم", "متوسط", "زیاد"),
-            selected = splitMulti(p.hasRedness),
+            selected = p.hasRedness,
             accent = Amber
-        ) { onChange(p.copy(hasRedness = joinMulti(it))) }
+        ) { onChange(p.copy(hasRedness = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("💧", "پوستت خشک‌تره یا چرب؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("خشکی", "چربی", "هیچ‌کدام", "هر دو"),
-            selected = splitMulti(p.dryOrOily),
+            selected = p.dryOrOily,
             accent = Amber
-        ) { onChange(p.copy(dryOrOily = joinMulti(it))) }
+        ) { onChange(p.copy(dryOrOily = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🌶", "حساسیت یا سوزش داری؟", accent = Amber) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "کم", "زیاد"),
-            selected = splitMulti(p.hasSensitivity),
+            selected = p.hasSensitivity,
             accent = Amber
-        ) { onChange(p.copy(hasSensitivity = joinMulti(it))) }
+        ) { onChange(p.copy(hasSensitivity = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -478,29 +485,29 @@ fun SkinSection(p: Profile, onChange: (Profile) -> Unit) {
 @Composable
 fun FatigueSection(p: Profile, onChange: (Profile) -> Unit) {
     QuestionCard("⚡", "شدت بی‌رمقی‌ات چقدره؟", accent = Rose) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("خیلی کم", "کم", "متوسط", "زیاد", "خیلی زیاد"),
-            selected = splitMulti(p.fatigueLevel),
+            selected = p.fatigueLevel,
             accent = Rose
-        ) { onChange(p.copy(fatigueLevel = joinMulti(it))) }
+        ) { onChange(p.copy(fatigueLevel = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("⏳", "چند وقته این حالت رو داری؟", accent = Rose) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("چند روز", "یک هفته", "چند هفته", "یک ماه", "بیشتر"),
-            selected = splitMulti(p.fatigueDuration),
+            selected = p.fatigueDuration,
             accent = Rose
-        ) { onChange(p.copy(fatigueDuration = joinMulti(it))) }
+        ) { onChange(p.copy(fatigueDuration = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("😴", "کیفیت خوابت چطوره؟", accent = Cyan) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("عالی", "خوب", "متوسط", "ضعیف"),
-            selected = splitMulti(p.sleepQuality),
+            selected = p.sleepQuality,
             accent = Cyan
-        ) { onChange(p.copy(sleepQuality = joinMulti(it))) }
+        ) { onChange(p.copy(sleepQuality = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -519,47 +526,47 @@ fun FatigueSection(p: Profile, onChange: (Profile) -> Unit) {
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("💫", "سرگیجه داری؟", accent = Rose) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "گاهی", "زیاد"),
-            selected = splitMulti(p.fatigueDizziness),
+            selected = p.fatigueDizziness,
             accent = Rose
-        ) { onChange(p.copy(fatigueDizziness = joinMulti(it))) }
+        ) { onChange(p.copy(fatigueDizziness = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("❤️", "تپش قلب داری؟", accent = Rose) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "گاهی", "زیاد"),
-            selected = splitMulti(p.hasPalpitations),
+            selected = p.hasPalpitations,
             accent = Rose
-        ) { onChange(p.copy(hasPalpitations = joinMulti(it))) }
+        ) { onChange(p.copy(hasPalpitations = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🫁", "تنگی نفس داری؟", accent = Rose) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "گاهی", "زیاد"),
-            selected = splitMulti(p.hasShortBreath),
+            selected = p.hasShortBreath,
             accent = Rose
-        ) { onChange(p.copy(hasShortBreath = joinMulti(it))) }
+        ) { onChange(p.copy(hasShortBreath = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🤕", "سردرد داری؟", accent = Rose) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "گاهی", "زیاد"),
-            selected = splitMulti(p.fatigueHeadache),
+            selected = p.fatigueHeadache,
             accent = Rose
-        ) { onChange(p.copy(fatigueHeadache = joinMulti(it))) }
+        ) { onChange(p.copy(fatigueHeadache = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🍽", "اشتهایت چطوره؟", accent = Green) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("خوب", "متوسط", "کم", "خیلی کم", "زیاد"),
-            selected = splitMulti(p.appetite),
+            selected = p.appetite,
             accent = Green
-        ) { onChange(p.copy(appetite = joinMulti(it))) }
+        ) { onChange(p.copy(appetite = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -569,29 +576,29 @@ fun FatigueSection(p: Profile, onChange: (Profile) -> Unit) {
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🏃", "فعالیت بدنی‌ات چقدره؟", accent = Green) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("ندارم", "کم", "متوسط", "زیاد"),
-            selected = splitMulti(p.physicalActivity),
+            selected = p.physicalActivity,
             accent = Green
-        ) { onChange(p.copy(physicalActivity = joinMulti(it))) }
+        ) { onChange(p.copy(physicalActivity = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🧘", "سطح استرست چقدره؟", accent = Green) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("کم", "متوسط", "زیاد", "خیلی زیاد"),
-            selected = splitMulti(p.stressLevel),
+            selected = p.stressLevel,
             accent = Green
-        ) { onChange(p.copy(stressLevel = joinMulti(it))) }
+        ) { onChange(p.copy(stressLevel = it)) }
     }
     Spacer(Modifier.height(14.dp))
 
     QuestionCard("🩷", "فکر می‌کنی بی‌رمقی‌ات با پریود مرتبطه؟", accent = Pink) {
-        MultiChoiceChips(
+        SingleChoiceChips(
             options = listOf("دارد", "ندارد", "نمی‌دانم"),
-            selected = splitMulti(p.fatiguePeriodLink),
+            selected = p.fatiguePeriodLink,
             accent = Pink
-        ) { onChange(p.copy(fatiguePeriodLink = joinMulti(it))) }
+        ) { onChange(p.copy(fatiguePeriodLink = it)) }
     }
 }
 

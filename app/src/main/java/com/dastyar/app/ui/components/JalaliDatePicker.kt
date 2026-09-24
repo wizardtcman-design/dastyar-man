@@ -97,11 +97,12 @@ fun JalaliDatePicker(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(years) { y ->
-                        SelectChip(
-                            label = Dates.fa(y.toString()),
-                            selected = y == year,
-                            accent = Purple
-                        ) { year = y }
+                SelectChip(
+                    label = Dates.fa(y.toString()),
+                    selected = y == year,
+                    accent = Purple,
+                    compact = true
+                ) { year = y }
                     }
                 }
 
@@ -110,29 +111,25 @@ fun JalaliDatePicker(
                 // --- month ---
                 PickerLabel("ماه")
                 Spacer(Modifier.height(7.dp))
-                // two rows of six months keeps everything visible without scrolling
-                Jalali.months().chunked(6).forEach { row ->
+                // three rows of four keeps every name wide enough to stay on one line
+                Jalali.months().chunked(4).forEach { row ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        row.forEachIndexed { idx, name ->
+                        row.forEach { name ->
                             val m = Jalali.months().indexOf(name) + 1
-                            Box(Modifier.weight(1f)) {
-                                SelectChip(
-                                    label = name,
-                                    selected = m == month,
-                                    accent = Purple,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { month = m }
-                            }
+                            SelectChip(
+                                label = name,
+                                selected = m == month,
+                                accent = Purple,
+                                compact = true,
+                                modifier = Modifier.weight(1f)
+                            ) { month = m }
                         }
-                        // pad the last row so buttons keep equal widths
-                        repeat(6 - row.size) {
-                            Spacer(Modifier.weight(1f))
-                        }
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
 
@@ -203,7 +200,9 @@ private fun FlowDayGrid(days: List<Int>, selected: Int, onSelect: (Int) -> Unit)
                     fontSize = 13.sp,
                     fontWeight = if (d == selected) FontWeight.Bold else FontWeight.Normal,
                     color = if (d == selected) Color.White
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
