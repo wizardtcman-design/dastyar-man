@@ -10,7 +10,7 @@ import com.dastyar.app.data.Profile
  */
 object Prompts {
 
-    private const val SAFETY = """
+    private val SAFETY = """
 قواعد ایمنی که همیشه باید رعایت کنی:
 - هرگز تشخیص قطعی پزشکی نده و بیماری را قطعی اعلام نکن.
 - هرگز دارو تجویز نکن و دوز پیشنهاد نده.

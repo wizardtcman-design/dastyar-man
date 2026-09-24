@@ -240,9 +240,11 @@ private fun MessageBubble(m: ChatMessage) {
             Modifier
                 .widthIn(max = 300.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(
-                    if (isUser) MaterialTheme.colorScheme.surfaceVariant
-                    else Brush.linearGradient(listOf(Purple.copy(alpha = .85f), Pink.copy(alpha = .75f)))
+                .then(
+                    if (isUser) Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    else Modifier.background(
+                        Brush.linearGradient(listOf(Purple.copy(alpha = .85f), Pink.copy(alpha = .75f)))
+                    )
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {

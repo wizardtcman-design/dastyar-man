@@ -108,8 +108,8 @@ fun GradientButton(
 fun ChoiceChips(
     options: List<String>,
     selected: String,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSelect: (String) -> Unit
 ) {
     androidx.compose.foundation.layout.FlowRow(
         modifier = modifier.fillMaxWidth(),
