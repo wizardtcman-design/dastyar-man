@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
                 val vm: MainViewModel = viewModel()
                 val profile by vm.profile.collectAsState()
 
-                androidx.compose.runtime.                androidx.compose.runtime.LaunchedEffect(openCheckIn) {
+                androidx.compose.runtime.                LaunchedEffect(openCheckIn) {
                     if (openCheckIn && profile?.onboardingDone == true) vm.requestOpenCheckIn()
                 }
 
