@@ -44,10 +44,15 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             .padding(18.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            ScreenHeader(
+                emoji = "⚙️",
+                title = "تنظیمات",
+                subtitle = "اطلاعات، اعلان‌ها و وضعیت سرویس",
+                modifier = Modifier.weight(1f)
+            )
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.ArrowForward, contentDescription = "بازگشت")
             }
-            Text("تنظیمات ⚙️", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -169,10 +174,13 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             Text(
                 if (AiClient.chatConfigured) "✅ متصل به سرویس هوش مصنوعی"
                 else "⚠️ کلید هوش مصنوعی تنظیم نشده",
-                fontSize = 13.sp
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
             )
+            Spacer(Modifier.height(4.dp))
             Text(
-                "ساخت تصویر و صدای فارسی از سرویس‌های عمومی استفاده می‌کنند.",
+                "چت، مشاوره و ساخت تصویر با OpenRouter انجام می‌شود. " +
+                        "صدای فارسی از سرویس صدا ساخته می‌شود.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -184,7 +192,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         DastyarCard {
             SectionTitle("اطلاعات نسخه", "ℹ️")
             Spacer(Modifier.height(8.dp))
-            Text("دستیار من — نسخه ۱.۰.۰", fontSize = 13.sp)
+            Text("دستیار من — نسخه ${com.dastyar.app.BuildConfig.VERSION_NAME}", fontSize = 13.sp)
             Text(
                 "دستیار من تشخیص پزشکی نمی‌دهد و جایگزین پزشک نیست.",
                 fontSize = 11.sp,

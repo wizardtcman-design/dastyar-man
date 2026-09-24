@@ -34,7 +34,11 @@ fun CookingScreen(vm: MainViewModel) {
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        GradientHeader("آشپزی هوشمند 🍳", "بگو خونه چی داری، دستیار چند غذا پیشنهاد می‌ده.")
+        ScreenHeader(
+            emoji = "🍳",
+            title = "آشپزی هوشمند",
+            subtitle = "بگو خونه چی داری، دستیار چند غذا پیشنهاد می‌ده."
+        )
 
         Spacer(Modifier.height(18.dp))
         OutlinedTextField(
@@ -47,14 +51,9 @@ fun CookingScreen(vm: MainViewModel) {
             minLines = 3
         )
 
-        Spacer(Modifier.height(14.dp))
-        Text(
-            "دسته‌بندی",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(16.dp))
+        SectionTitle("دسته‌بندی", "🍽")
+        Spacer(Modifier.height(10.dp))
         ChoiceChips(mealTypes, meal) { meal = it }
 
         Spacer(Modifier.height(16.dp))

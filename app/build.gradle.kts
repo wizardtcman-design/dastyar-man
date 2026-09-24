@@ -10,11 +10,11 @@ plugins {
 // ---------------------------------------------------------------- secrets
 // Injected as env vars by the GitHub Actions workflow, so no key ever lives
 // in the source. Local builds may set the same values in keystore.properties.
-val aiKey: String = System.getenv("ATRIA_API_KEY")
-    ?: (project.findProperty("ATRIA_API_KEY") as String?)
+val aiKey: String = System.getenv("OPENROUTER_API_KEY")
+    ?: (project.findProperty("OPENROUTER_API_KEY") as String?)
     ?: ""
-val chatUrl: String = System.getenv("ATRIA_BASE_URL")
-    ?: "https://api.atria-asi.ai"
+val chatUrl: String = System.getenv("OPENROUTER_BASE_URL")
+    ?: "https://openrouter.ai/api/v1"
 
 val ksStoreB64: String = System.getenv("KEYSTORE_BASE64") ?: ""
 val ksStorePass: String = System.getenv("KEYSTORE_PASSWORD")
@@ -39,8 +39,15 @@ android {
         applicationId = "com.dastyar.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI sets APP_VERSION (1.0.<run_number>); local builds fall back.
+        val appVer = System.getenv("APP_VERSION") ?: "1.0.0"
+        versionCode = appVer.split(".").let { v ->
+            val maj = v.getOrNull(0)?.toIntOrNull() ?: 1
+            val min = v.getOrNull(1)?.toIntOrNull() ?: 0
+            val pat = v.getOrNull(2)?.toIntOrNull() ?: 0
+            maj * 10000 + min * 100 + pat
+        }
+        versionName = appVer
         resourceConfigurations += listOf("fa", "en")
     }
 
@@ -60,16 +67,16 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            buildConfigField("String", "ATRIA_API_KEY", "\"$aiKey\"")
-            buildConfigField("String", "ATRIA_BASE_URL", "\"$chatUrl\"")
+            buildConfigField("String", "OPENROUTER_API_KEY", "\"$aiKey\"")
+            buildConfigField("String", "OPENROUTER_BASE_URL", "\"$chatUrl\"")
             if (hasSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
         debug {
             isMinifyEnabled = false
-            buildConfigField("String", "ATRIA_API_KEY", "\"$aiKey\"")
-            buildConfigField("String", "ATRIA_BASE_URL", "\"$chatUrl\"")
+            buildConfigField("String", "OPENROUTER_API_KEY", "\"$aiKey\"")
+            buildConfigField("String", "OPENROUTER_BASE_URL", "\"$chatUrl\"")
         }
     }
 

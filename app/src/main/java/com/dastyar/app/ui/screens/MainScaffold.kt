@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,15 +47,30 @@ fun MainScaffold(vm: MainViewModel) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            NavigationBar(tonalElevation = 8.dp) {
+            NavigationBar(
+                tonalElevation = 0.dp,
+                containerColor = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.height(68.dp)
+            ) {
                 tabs.forEach { t ->
                     NavigationBarItem(
                         selected = tab == t.route,
                         onClick = { tab = t.route },
                         icon = { Icon(t.icon, contentDescription = t.label) },
                         label = {
-                            Text(t.label, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
+                            Text(
+                                t.label,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primary
+                        )
                     )
                 }
             }

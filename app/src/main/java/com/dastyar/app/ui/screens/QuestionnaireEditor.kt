@@ -27,25 +27,19 @@ fun QuestionnaireEditor(profile: Profile, onDismiss: () -> Unit, onSave: (Profil
             Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
             Text("ویرایش پرسشنامه", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             TextButton(onClick = onDismiss) { Text("بستن") }
         }
 
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            steps.forEachIndexed { i, s ->
-                FilterChip(
-                    selected = step == i,
-                    onClick = { step = i },
-                    label = { Text(s, fontSize = 12.sp) }
-                )
-            }
+        Box(Modifier.padding(horizontal = 12.dp)) {
+            SingleChoiceChips(
+                options = steps,
+                selected = steps[step],
+                accent = com.dastyar.app.ui.theme.Purple
+            ) { picked -> step = steps.indexOf(picked).coerceAtLeast(0) }
         }
 
         Column(

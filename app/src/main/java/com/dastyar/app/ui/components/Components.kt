@@ -4,20 +4,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.data.Dates
 
-/** Soft brand-tinted card used across the app. */
+/**
+ * Soft brand-tinted card used across the app. When [accent] is set it keeps the
+ * short coloured bar the questionnaire uses, so every card reads as one family.
+ */
 @Composable
 fun DastyarCard(
     modifier: Modifier = Modifier,
@@ -25,54 +27,49 @@ fun DastyarCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val base = MaterialTheme.colorScheme.surface
-    val mod = modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(22.dp))
-        .background(base)
-        .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-        .padding(18.dp)
-    Column(mod) {
-        if (accent != null) {
-            Box(
-                Modifier
-                    .width(42.dp)
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(accent)
-            )
-            Spacer(Modifier.height(12.dp))
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clip(Shape.card)
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(20.dp)
+    ) {
+        Column {
+            if (accent != null) {
+                Box(
+                    Modifier
+                        .width(42.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(accent)
+                )
+                Spacer(Modifier.height(14.dp))
+            }
+            content()
         }
-        content()
     }
 }
 
+/**
+ * Header used by screens that need a title block without the gradient banner
+ * (chat and settings keep a compact back bar).
+ */
 @Composable
 fun GradientHeader(
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier.fillMaxWidth()) {
-        Text(
-            title,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            subtitle,
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
+    val emoji = title.takeWhile { it.code > 0x2000 }.trim()
+    val text = title.removePrefix(emoji).trim()
+    ScreenHeader(emoji.ifBlank { "🌱" }, text.ifBlank { title }, subtitle, modifier)
 }
 
 @Composable
 fun SectionTitle(text: String, emoji: String = "") {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("$emoji $text".trim(), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text("$emoji $text".trim(), fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 }
 
@@ -84,55 +81,21 @@ fun GradientButton(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    val brush = Brush.horizontalGradient(
-        listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
-    )
     Box(
         modifier
             .fillMaxWidth()
             .height(54.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (enabled) brush else Brush.horizontalGradient(
-                listOf(Color.Gray.copy(alpha = .4f), Color.Gray.copy(alpha = .4f))
-            ))
+            .clip(Shape.inner)
+            .background(
+                if (enabled) BrandBrush
+                else androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(Color.Gray.copy(alpha = .4f), Color.Gray.copy(alpha = .4f))
+                )
+            )
             .clickable(enabled = enabled) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(text, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-    }
-}
-
-/** Single-choice chip row used by the questionnaire and check-in. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-fun ChoiceChips(
-    options: List<String>,
-    selected: String,
-    modifier: Modifier = Modifier,
-    onSelect: (String) -> Unit
-) {
-    androidx.compose.foundation.layout.FlowRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        options.forEach { option ->
-            val isSelected = option == selected
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.clickable { onSelect(option) }
-            ) {
-                Text(
-                    option,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center,
-                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
     }
 }
 
@@ -164,6 +127,10 @@ fun StepProgress(step: Int, total: Int) {
     )
 }
 
+/**
+ * Dashboard stat tile. A coloured emoji badge, a label, a big value and a sub
+ * line — the same card language as the questionnaire.
+ */
 @Composable
 fun StatTile(
     emoji: String,
@@ -173,17 +140,42 @@ fun StatTile(
     accent: Color,
     modifier: Modifier = Modifier
 ) {
-    DastyarCard(modifier = modifier, accent = accent) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(emoji, fontSize = 24.sp)
-            Spacer(Modifier.width(8.dp))
-            Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        if (sub.isNotBlank()) {
-            Spacer(Modifier.height(3.dp))
-            Text(sub, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Box(
+        modifier
+            .clip(Shape.card)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp)
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(Shape.badge)
+                        .background(accent.copy(alpha = .16f)),
+                    contentAlignment = Alignment.Center
+                ) { Text(emoji, fontSize = 18.sp) }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    label,
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            if (sub.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    sub,
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2
+                )
+            }
         }
     }
 }

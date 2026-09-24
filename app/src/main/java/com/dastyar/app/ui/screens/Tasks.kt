@@ -45,7 +45,11 @@ fun TasksScreen(vm: MainViewModel) {
                 .padding(pad)
                 .padding(18.dp)
         ) {
-            GradientHeader("کارها و یادآوری‌ها ✅", "کارهایت را بنویس و یادآوری واقعی بگیر.")
+            ScreenHeader(
+                emoji = "✅",
+                title = "کارها و یادآوری‌ها",
+                subtitle = "کارهایت را بنویس و یادآوری واقعی بگیر."
+            )
             Spacer(Modifier.height(16.dp))
 
             if (tasks.isEmpty()) {

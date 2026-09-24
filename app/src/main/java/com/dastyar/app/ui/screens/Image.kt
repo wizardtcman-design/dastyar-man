@@ -28,6 +28,7 @@ import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.Prompts
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
+import com.dastyar.app.ui.theme.Purple
 import kotlinx.coroutines.launch
 
 private data class PromptCat(val title: String, val emoji: String, val prompts: List<String>)
@@ -93,23 +94,20 @@ fun ImageScreen(vm: MainViewModel) {
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        GradientHeader("تصویر AI 🎨", "با هوش مصنوعی تصویر بساز یا تصویر موجود را ویرایش کن.")
+        ScreenHeader(
+            emoji = "🎨",
+            title = "تصویر AI",
+            subtitle = "با هوش مصنوعی تصویر بساز یا تصویر موجود را ویرایش کن."
+        )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // mode toggle
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = !isEditing,
-                onClick = { isEditing = false },
-                label = { Text("ساخت تصویر", fontSize = 13.sp) }
-            )
-            FilterChip(
-                selected = isEditing,
-                onClick = { isEditing = true },
-                label = { Text("ویرایش تصویر", fontSize = 13.sp) }
-            )
-        }
+        // mode toggle — same chips as the rest of the app
+        SingleChoiceChips(
+            options = listOf("ساخت تصویر", "ویرایش تصویر"),
+            selected = if (isEditing) "ویرایش تصویر" else "ساخت تصویر",
+            accent = Purple
+        ) { isEditing = (it == "ویرایش تصویر") }
 
         Spacer(Modifier.height(16.dp))
 
@@ -119,14 +117,15 @@ fun ImageScreen(vm: MainViewModel) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(categories) { cat ->
                     val idx = categories.indexOf(cat)
-                    FilterChip(
-                        selected = selectedCat == idx,
-                        onClick = {
-                            selectedCat = idx
-                            prompt = cat.prompts[0]
-                        },
-                        label = { Text("${cat.emoji} ${cat.title}", fontSize = 12.sp) }
-                    )
+                    val on = selectedCat == idx
+                    SelectChip(
+                        label = "${cat.emoji} ${cat.title}",
+                        selected = on,
+                        accent = Purple
+                    ) {
+                        selectedCat = idx
+                        prompt = cat.prompts[0]
+                    }
                 }
             }
             Spacer(Modifier.height(10.dp))

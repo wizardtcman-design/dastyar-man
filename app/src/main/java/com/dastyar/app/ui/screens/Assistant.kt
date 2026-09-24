@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
+import com.dastyar.app.ui.theme.Amber
 import com.dastyar.app.ui.theme.Cyan
 import com.dastyar.app.ui.theme.Green
 import com.dastyar.app.ui.theme.Pink
@@ -54,20 +57,31 @@ private fun AssistantHome(onOpen: (String) -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        GradientHeader("دستیار 🤖", "هر موضوعی می‌خواهی بپرس، یا از بخش‌های تخصصی استفاده کن.")
-        Spacer(Modifier.height(20.dp))
+        ScreenHeader(
+            emoji = "🤖",
+            title = "دستیار من",
+            subtitle = "هر موضوعی می‌خواهی بپرس، یا از بخش‌های تخصصی استفاده کن."
+        )
+        Spacer(Modifier.height(16.dp))
 
         DastyarCard(onClick = { onOpen("general") }, accent = Purple) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("💬", fontSize = 26.sp)
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(Purple.copy(alpha = .16f)),
+                    contentAlignment = Alignment.Center
+                ) { Text("💬", fontSize = 23.sp) }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("گفت‌وگوی آزاد با دستیار", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("گفت‌وگوی آزاد با دستیار", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Text(
                         "هر سؤالی داری بپرس — درباره وضعیت خودت هم می‌داند.",
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -75,21 +89,27 @@ private fun AssistantHome(onOpen: (String) -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
         SectionTitle("بخش‌های تخصصی", "🌟")
         Spacer(Modifier.height(12.dp))
 
         cards.forEach { (key, emoji, title) ->
             val accent = when (key) {
                 "period" -> Pink
-                "skin" -> androidx.compose.ui.graphics.Color(0xFFFBBF24)
+                "skin" -> Amber
                 else -> Rose
             }
             DastyarCard(onClick = { onOpen(key) }, accent = accent) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(emoji, fontSize = 24.sp)
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(accent.copy(alpha = .16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Text(emoji, fontSize = 21.sp) }
                     Spacer(Modifier.width(12.dp))
-                    Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.weight(1f))
                     Text("←", color = MaterialTheme.colorScheme.primary)
                 }
@@ -97,7 +117,7 @@ private fun AssistantHome(onOpen: (String) -> Unit) {
             Spacer(Modifier.height(12.dp))
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         DastyarCard {
             Text(
                 "دستیار من تشخیص پزشکی نمی‌دهد و جایگزین پزشک نیست. " +

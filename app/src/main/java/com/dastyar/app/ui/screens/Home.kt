@@ -65,21 +65,14 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         item {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "خوش اومدی $name جان 🌱",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "من دستیار تو هستم.",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                ScreenHeader(
+                    emoji = "🌱",
+                    title = "خوش اومدی $name جان",
+                    subtitle = "امروز حالت چطوره؟ من کنارتم.",
+                    modifier = Modifier.weight(1f)
+                )
                 IconButton(onClick = { showSettings = true }) {
                     Icon(Icons.Filled.Settings, contentDescription = "تنظیمات")
                 }
@@ -90,17 +83,23 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             item {
                 DastyarCard(onClick = onOpenCheckIn, accent = Amber) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("📝", fontSize = 24.sp)
-                        Spacer(Modifier.width(10.dp))
+                        Box(
+                            Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(15.dp))
+                                .background(Amber.copy(alpha = .16f)),
+                            contentAlignment = Alignment.Center
+                        ) { Text("📝", fontSize = 21.sp) }
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("وضعیت امروزت ثبت نشده", fontWeight = FontWeight.Bold)
+                            Text("وضعیت امروزت ثبت نشده", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             Text(
                                 "چند سؤال کوتاه — کمتر از یک دقیقه",
-                                fontSize = 12.sp,
+                                fontSize = 11.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Text("ثبت ←", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+                        Tag("ثبت کن", Amber)
                     }
                 }
             }
@@ -116,31 +115,46 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         item {
             DastyarCard(accent = Cyan) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("💧", fontSize = 24.sp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("آب امروز", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.weight(1f))
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(Cyan.copy(alpha = .16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("💧", fontSize = 21.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("آب امروز", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(
+                            "هدف: ${Dates.fa(goal)} لیوان",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
-                        "${Dates.fa(water)} / ${Dates.fa(goal)} لیوان",
+                        "${Dates.fa(water)} / ${Dates.fa(goal)}",
                         fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
                         color = MaterialTheme.colorScheme.tertiary
                     )
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 LinearProgressIndicator(
                     progress = { if (goal == 0) 0f else (water.toFloat() / goal).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                    modifier = Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(5.dp)),
                     color = MaterialTheme.colorScheme.tertiary
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     FilledTonalButton(
                         onClick = { vm.updateWater(1) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp)
                     ) { Text("+ یک لیوان") }
                     OutlinedButton(
                         onClick = { vm.updateWater(-1) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp)
                     ) { Text("−") }
                 }
             }
@@ -170,14 +184,25 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         item {
             DastyarCard(accent = Rose) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("⚡", fontSize = 20.sp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("بی‌رمقی", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.weight(1f))
-                    Text(
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(Rose.copy(alpha = .16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("⚡", fontSize = 21.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("بی‌رمقی امروز", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(
+                            "شدت خستگی ثبت‌شده",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Tag(
                         today?.fatigueSeverity?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp
+                        Rose
                     )
                 }
             }
@@ -187,7 +212,15 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         item {
             DastyarCard(accent = Green) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionTitle("پیشنهاد امروز برای تو", "🌱")
+                    Box(
+                        Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Green.copy(alpha = .16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("🌱", fontSize = 19.sp) }
+                    Spacer(Modifier.width(10.dp))
+                    Text("پیشنهاد امروز برای تو", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.weight(1f))
                     if (loading) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -197,18 +230,17 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 if (suggestion.isNullOrBlank()) {
                     Text(
                         "برای دریافت پیشنهادهای شخصی امروز، روی دکمه زیر بزن.",
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = { vm.generateSuggestion(false) },
-                        enabled = !loading
-                    ) { Text("دریافت پیشنهاد امروز") }
+                    GradientButton("دریافت پیشنهاد امروز", enabled = !loading) {
+                        vm.generateSuggestion(false)
+                    }
                 } else {
                     SuggestionLines(suggestion!!)
                 }
@@ -218,29 +250,33 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         // ---- chart ----
         item {
             DastyarCard(accent = Purple) {
-                SectionTitle("نمودار وضعیت", "📊")
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Range.entries.forEach { r ->
-                        FilterChip(
-                            selected = range == r,
-                            onClick = { range = r },
-                            label = { Text(r.label, fontSize = 12.sp) }
-                        )
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Purple.copy(alpha = .16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("📊", fontSize = 19.sp) }
+                    Spacer(Modifier.width(10.dp))
+                    Text("نمودار وضعیت", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+                Spacer(Modifier.height(14.dp))
+                SingleChoiceChips(
+                    options = Range.entries.map { it.label },
+                    selected = range.label,
+                    accent = Purple
+                ) { picked ->
+                    Range.entries.firstOrNull { it.label == picked }?.let { range = it }
                 }
                 Spacer(Modifier.height(10.dp))
                 val metrics = listOf("انرژی", "خواب", "آب", "پوست", "بی‌رمقی")
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    metrics.forEach { m ->
-                        FilterChip(
-                            selected = metric == m,
-                            onClick = { metric = m },
-                            label = { Text(m, fontSize = 12.sp) }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
+                SingleChoiceChips(
+                    options = metrics,
+                    selected = metric,
+                    accent = Purple
+                ) { metric = it }
+                Spacer(Modifier.height(18.dp))
 
                 val days = Dates.lastDays(range.days)
                 val byDate = checkIns.associateBy { it.date }

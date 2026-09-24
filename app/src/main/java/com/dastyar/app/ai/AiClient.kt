@@ -4,8 +4,6 @@ import com.dastyar.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -17,14 +15,16 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 /**
  * Real AI client.
  *
- * Text / reasoning  -> Atria ASI  (OpenAI-compatible chat completions)
- * Text -> Image     -> Pollinations (public model endpoint, no key)
- * Persian TTS       -> TTS.ai (public endpoint, no key)
+ * Text / chat   -> OpenRouter  (google/gemini-2.5-flash-lite)
+ * Text -> image -> OpenRouter  (google/gemini-2.5-flash-image)
+ * Image -> text -> OpenRouter  (vision, same lite model)
+ * Persian TTS   -> TTS.ai      (public endpoint, no key)
  *
  * Nothing here is mocked: every function performs a live network call.
  */
@@ -38,9 +38,15 @@ object AiClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private const val MODEL = "Atria-Dawn-Preview"
+    /** Cheap, fast, supports Persian well and also accepts images. */
+    private const val TEXT_MODEL = "google/gemini-2.5-flash-lite"
 
-    val chatConfigured: Boolean get() = BuildConfig.ATRIA_API_KEY.isNotBlank()
+    /** Image generation / editing model. Returns the picture inline (base64). */
+    private const val IMAGE_MODEL = "google/gemini-2.5-flash-image"
+
+    val chatConfigured: Boolean get() = BuildConfig.OPENROUTER_API_KEY.isNotBlank()
+
+    private val base get() = BuildConfig.OPENROUTER_BASE_URL.trimEnd('/')
 
     // ---------------------------------------------------------------- chat
 
@@ -48,6 +54,43 @@ object AiClient {
         system: String,
         history: List<Pair<String, String>>,
         userMessage: String
+    ): Result<String> = complete(
+        system = system,
+        history = history,
+        userContent = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
+        model = TEXT_MODEL
+    )
+
+    /** Chat with one image attached (vision). */
+    suspend fun chatWithImage(
+        system: String,
+        userMessage: String,
+        imageBase64: String,
+        mime: String = "image/jpeg"
+    ): Result<String> = complete(
+        system = system,
+        history = emptyList(),
+        userContent = arrayOf(
+            buildJsonObject { put("type", "text"); put("text", userMessage) },
+            buildJsonObject {
+                put("type", "image_url")
+                put("image_url", buildJsonObject {
+                    put("url", "data:$mime;base64,$imageBase64")
+                })
+            }
+        ),
+        model = TEXT_MODEL
+    )
+
+    /**
+     * Shared chat-completions call. Content is always sent as a typed parts
+     * array so text and image messages use the exact same code path.
+     */
+    private suspend fun complete(
+        system: String,
+        history: List<Pair<String, String>>,
+        userContent: Array<kotlinx.serialization.json.JsonElement>,
+        model: String
     ): Result<String> = withContext(Dispatchers.IO) {
         if (!chatConfigured) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
@@ -66,20 +109,20 @@ object AiClient {
                 }
                 add(buildJsonObject {
                     put("role", "user")
-                    put("content", userMessage)
+                    put("content", buildJsonArray { userContent.forEach { add(it) } })
                 })
             }
 
             val body = buildJsonObject {
-                put("model", MODEL)
+                put("model", model)
                 put("messages", messages)
                 put("stream", false)
                 put("temperature", 0.6)
             }.toString()
 
             val req = Request.Builder()
-                .url("${BuildConfig.ATRIA_BASE_URL}/v1/chat/completions")
-                .addHeader("Authorization", "Bearer ${BuildConfig.ATRIA_API_KEY}")
+                .url("$base/chat/completions")
+                .addHeader("Authorization", "Bearer ${BuildConfig.OPENROUTER_API_KEY}")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -88,7 +131,7 @@ object AiClient {
                 val text = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     return@withContext Result.failure(
-                        AiException("خطای API (${resp.code}): ${text.take(200)}")
+                        AiException(friendlyError(resp.code, text))
                     )
                 }
                 val content = json.parseToJsonElement(text)
@@ -108,12 +151,19 @@ object AiClient {
         }
     }
 
+    /** Turns an API error into a short Persian sentence with a usable hint. */
+    private fun friendlyError(code: Int, raw: String): String = when (code) {
+        401 -> "کلید هوش مصنوعی معتبر نیست."
+        402 -> "اعتبار سرویس هوش مصنوعی کافی نیست."
+        429 -> "درخواست‌ها زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
+        else -> "خطای API ($code): ${raw.take(180)}"
+    }
+
     // --------------------------------------------------------------- image
 
     /**
-     * Text -> image through Pollinations. The endpoint queues requests, so a
-     * 503 "queue full" is retried with backoff instead of being reported as a
-     * failure.
+     * Text -> image through OpenRouter's image model. The picture comes back as
+     * a base64 data URL, which we decode to raw bytes.
      */
     suspend fun generateImage(
         prompt: String,
@@ -122,39 +172,72 @@ object AiClient {
         seed: Int = (1..999_999).random()
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
         if (prompt.isBlank()) return@withContext Result.failure(AiException("پرامپت خالی است."))
-        val encoded = java.net.URLEncoder.encode(prompt, "UTF-8")
-        val url = "https://image.pollinations.ai/prompt/$encoded" +
-                "?width=$width&height=$height&nologo=true&seed=$seed&safe=false"
+        if (!chatConfigured) return@withContext Result.failure(
+            AiException("کلید هوش مصنوعی تنظیم نشده است.")
+        )
 
-        var lastErr: String = ""
-        repeat(4) { attempt ->
+        var lastErr = ""
+        repeat(3) { attempt ->
             try {
-                val req = Request.Builder().url(url)
-                    .addHeader("User-Agent", "DastyarMan/1.0")
-                    .get().build()
+                val body = buildJsonObject {
+                    put("model", IMAGE_MODEL)
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject {
+                            put("role", "user")
+                            put("content", prompt)
+                        })
+                    })
+                    put("modalities", buildJsonArray {
+                        add(kotlinx.serialization.json.JsonPrimitive("image"))
+                        add(kotlinx.serialization.json.JsonPrimitive("text"))
+                    })
+                }.toString()
+
+                val req = Request.Builder()
+                    .url("$base/chat/completions")
+                    .addHeader("Authorization", "Bearer ${BuildConfig.OPENROUTER_API_KEY}")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+
                 http.newCall(req).execute().use { resp ->
-                    val bytes = resp.body?.bytes()
-                    if (resp.isSuccessful && bytes != null && bytes.size > 1000) {
-                        return@withContext Result.success(bytes)
-                    }
-                    lastErr = "کد ${resp.code}"
-                    if (resp.code !in listOf(500, 502, 503, 504)) {
-                        return@withContext Result.failure(
-                            AiException("ساخت تصویر ناموفق بود ($lastErr)")
-                        )
+                    val text = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) {
+                        lastErr = friendlyError(resp.code, text)
+                        if (resp.code !in listOf(429, 500, 502, 503, 504)) {
+                            return@withContext Result.failure(AiException(lastErr))
+                        }
+                    } else {
+                        val url = json.parseToJsonElement(text)
+                            .jsonObject["choices"]?.jsonArray
+                            ?.firstOrNull()?.jsonObject
+                            ?.get("message")?.jsonObject
+                            ?.get("images")?.jsonArray
+                            ?.firstOrNull()?.jsonObject
+                            ?.get("image_url")?.jsonObject
+                            ?.get("url")?.jsonPrimitive?.contentOrNull
+
+                        if (!url.isNullOrBlank()) {
+                            val b64 = url.substringAfter("base64,", url)
+                            val bytes = Base64.getDecoder().decode(b64)
+                            if (bytes.size > 500) return@withContext Result.success(bytes)
+                            lastErr = "تصویر خالی برگشت."
+                        } else {
+                            lastErr = "سرور تصویری برنگرداند."
+                        }
                     }
                 }
             } catch (e: Exception) {
                 lastErr = e.message ?: "خطای شبکه"
             }
-            withContext(Dispatchers.IO) { Thread.sleep(4000L * (attempt + 1)) }
+            if (attempt < 2) Thread.sleep(3000L * (attempt + 1))
         }
-        Result.failure(AiException("سرور ساخت تصویر شلوغ است ($lastErr). دوباره تلاش کنید."))
+        Result.failure(AiException("ساخت تصویر ناموفق بود: $lastErr"))
     }
 
     // ----------------------------------------------------------------- tts
 
-    /** Persian text -> speech via TTS.ai. Returns raw audio bytes (WAV). */
+    /** Persian text -> speech via TTS.ai. Returns raw audio bytes. */
     suspend fun textToSpeech(text: String): Result<ByteArray> = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext Result.failure(AiException("متن خالی است."))
         try {

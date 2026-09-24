@@ -16,6 +16,11 @@ import com.dastyar.app.data.CheckIn
 import com.dastyar.app.data.Dates
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
+import com.dastyar.app.ui.theme.Amber
+import com.dastyar.app.ui.theme.Cyan
+import com.dastyar.app.ui.theme.Pink
+import com.dastyar.app.ui.theme.Purple
+import com.dastyar.app.ui.theme.Rose
 
 /**
  * Daily check-in. The first day after onboarding asks a fuller set; later days
@@ -60,69 +65,66 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        Text(
-            if (isFirstEver) "وضعیت امروزت چطوره؟" else "چک‌این امروز",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold
+        ScreenHeader(
+            emoji = "🌤",
+            title = if (isFirstEver) "وضعیت امروزت چطوره؟" else "چک‌این امروز",
+            subtitle = Dates.pretty(todayStr) +
+                    if (cycleDay > 0) " • روز ${Dates.fa(cycleDay)} چرخه" else ""
         )
-        Text(
-            Dates.pretty(todayStr) + if (cycleDay > 0) " • روز ${Dates.fa(cycleDay)} چرخه" else "",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(6.dp))
         if (!isFirstEver) {
+            Spacer(Modifier.height(8.dp))
             Text(
                 "چند سؤال کوتاه؛ فقط چیزی که امروز مهمه.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
 
         // ---------- always asked ----------
-        LabeledText("میزان انرژی امروز")
-        ChoiceChips(
-            listOf("خیلی خوب", "خوب", "متوسط", "کم", "خیلی کم"),
-            c.energyLevel
-        ) { draft = c.copy(energyLevel = it) }
+        SectionCard("💪", "حال کلی امروز", "انرژی، خواب، آب و استرس", Purple) {
+            LabeledText("میزان انرژی امروز")
+            ChoiceChips(
+                listOf("خیلی خوب", "خوب", "متوسط", "کم", "خیلی کم"),
+                c.energyLevel,
+                accent = Purple
+            ) { draft = c.copy(energyLevel = it) }
 
-        Spacer(Modifier.height(16.dp))
-        LabeledText("میزان خواب دیشب (ساعت)")
-        OutlinedTextField(
-            value = if (c.sleepHours == 0f) "" else c.sleepHours.toString(),
-            onValueChange = { draft = c.copy(sleepHours = it.toFloatOrNull() ?: 0f) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            placeholder = { Text("مثلاً 7.5") }
-        )
+            Spacer(Modifier.height(18.dp))
+            LabeledText("میزان خواب دیشب (ساعت)")
+            OutlinedTextField(
+                value = if (c.sleepHours == 0f) "" else c.sleepHours.toString(),
+                onValueChange = { draft = c.copy(sleepHours = it.toFloatOrNull() ?: 0f) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                placeholder = { Text("مثلاً 7.5") }
+            )
 
-        Spacer(Modifier.height(16.dp))
-        LabeledText("کیفیت خواب")
-        ChoiceChips(listOf("عالی", "خوب", "متوسط", "ضعیف"), c.sleepQuality) {
-            draft = c.copy(sleepQuality = it)
+            Spacer(Modifier.height(18.dp))
+            LabeledText("کیفیت خواب")
+            ChoiceChips(listOf("عالی", "خوب", "متوسط", "ضعیف"), c.sleepQuality, accent = Cyan) {
+                draft = c.copy(sleepQuality = it)
+            }
+
+            Spacer(Modifier.height(18.dp))
+            LabeledText("آب مصرفی تا الان (لیوان)")
+            ChoiceChips((0..12).map { it.toString() }, c.waterGlasses.toString(), accent = Cyan) {
+                draft = c.copy(waterGlasses = it.toIntOrNull() ?: 0)
+            }
+
+            Spacer(Modifier.height(18.dp))
+            LabeledText("سطح استرس امروز")
+            ChoiceChips(listOf("کم", "متوسط", "زیاد", "خیلی زیاد"), c.stressLevel, accent = Amber) {
+                draft = c.copy(stressLevel = it)
+            }
         }
 
-        Spacer(Modifier.height(16.dp))
-        LabeledText("آب مصرفی تا الان (لیوان)")
-        ChoiceChips((0..12).map { it.toString() }, c.waterGlasses.toString()) {
-            draft = c.copy(waterGlasses = it.toIntOrNull() ?: 0)
-        }
-
-        Spacer(Modifier.height(16.dp))
-        LabeledText("سطح استرس امروز")
-        ChoiceChips(listOf("کم", "متوسط", "زیاد", "خیلی زیاد"), c.stressLevel) {
-            draft = c.copy(stressLevel = it)
-        }
-
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(14.dp))
         // ---------- skin summary + optional detail ----------
-        DastyarCard(accent = androidx.compose.ui.graphics.Color(0xFFFBBF24)) {
-            SectionTitle("پوست امروز", "✨")
-            Spacer(Modifier.height(12.dp))
+        SectionCard("✨", "پوست امروز", "وضعیت کلی و جزئیات", Amber) {
             LabeledText("وضعیت پوست نسبت به قبل")
-            ChoiceChips(listOf("بهتر شده", "مثل قبل", "بدتر شده"), c.skinStatus) {
+            ChoiceChips(listOf("بهتر شده", "مثل قبل", "بدتر شده"), c.skinStatus, accent = Amber) {
                 draft = c.copy(skinStatus = it)
                 if (it == "بدتر شده") showSkinDetail = true
             }
@@ -133,39 +135,37 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
             if (showSkinDetail) {
                 Spacer(Modifier.height(6.dp))
                 LabeledText("تعداد جوش‌ها")
-                ChoiceChips(listOf("کمتر شده", "مثل قبل", "بیشتر شده"), c.acneCount) {
+                ChoiceChips(listOf("کمتر شده", "مثل قبل", "بیشتر شده"), c.acneCount, accent = Amber) {
                     draft = c.copy(acneCount = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("التهاب یا قرمزی")
-                ChoiceChips(listOf("ندارم", "کم", "متوسط", "زیاد"), c.skinInflammation) {
+                ChoiceChips(listOf("ندارم", "کم", "متوسط", "زیاد"), c.skinInflammation, accent = Amber) {
                     draft = c.copy(skinInflammation = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("خشکی یا چربی")
-                ChoiceChips(listOf("خشکی", "چربی", "هیچ‌کدام", "هر دو"), c.skinDryOily) {
+                ChoiceChips(listOf("خشکی", "چربی", "هیچ‌کدام", "هر دو"), c.skinDryOily, accent = Amber) {
                     draft = c.copy(skinDryOily = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("سوزش یا حساسیت")
-                ChoiceChips(listOf("ندارم", "کم", "زیاد"), c.skinSensitivity) {
+                ChoiceChips(listOf("ندارم", "کم", "زیاد"), c.skinSensitivity, accent = Amber) {
                     draft = c.copy(skinSensitivity = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("محصول جدید استفاده کردی؟")
-                ChoiceChips(listOf("نه", "بله"), c.skinNewProduct) {
+                ChoiceChips(listOf("نه", "بله"), c.skinNewProduct, accent = Amber) {
                     draft = c.copy(skinNewProduct = it)
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
         // ---------- fatigue ----------
-        DastyarCard(accent = androidx.compose.ui.graphics.Color(0xFFFB7185)) {
-            SectionTitle("بی‌رمقی و انرژی", "⚡")
-            Spacer(Modifier.height(12.dp))
+        SectionCard("⚡", "بی‌رمقی و انرژی", "خستگی و علائم همراه", Rose) {
             LabeledText("شدت خستگی امروز")
-            ChoiceChips(listOf("خیلی کم", "کم", "متوسط", "زیاد", "خیلی زیاد"), c.fatigueSeverity) {
+            ChoiceChips(listOf("خیلی کم", "کم", "متوسط", "زیاد", "خیلی زیاد"), c.fatigueSeverity, accent = Rose) {
                 draft = c.copy(fatigueSeverity = it)
                 if (it == "زیاد" || it == "خیلی زیاد") showFatigueDetail = true
             }
@@ -176,40 +176,38 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
             if (showFatigueDetail) {
                 Spacer(Modifier.height(6.dp))
                 LabeledText("سرگیجه")
-                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.dizziness) { draft = c.copy(dizziness = it) }
-                Spacer(Modifier.height(14.dp))
+                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.dizziness, accent = Rose) { draft = c.copy(dizziness = it) }
+                Spacer(Modifier.height(16.dp))
                 LabeledText("تپش قلب")
-                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.palpitations) {
+                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.palpitations, accent = Rose) {
                     draft = c.copy(palpitations = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("تنگی نفس")
-                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.shortBreath) {
+                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.shortBreath, accent = Rose) {
                     draft = c.copy(shortBreath = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("سردرد")
-                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.headache) { draft = c.copy(headache = it) }
-                Spacer(Modifier.height(14.dp))
+                ChoiceChips(listOf("ندارم", "گاهی", "زیاد"), c.headache, accent = Rose) { draft = c.copy(headache = it) }
+                Spacer(Modifier.height(16.dp))
                 LabeledText("اشتها")
-                ChoiceChips(listOf("خوب", "متوسط", "کم", "خیلی کم", "زیاد"), c.appetite) {
+                ChoiceChips(listOf("خوب", "متوسط", "کم", "خیلی کم", "زیاد"), c.appetite, accent = Rose) {
                     draft = c.copy(appetite = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("فعالیت بدنی")
-                ChoiceChips(listOf("ندارم", "کم", "متوسط", "زیاد"), c.physicalActivity) {
+                ChoiceChips(listOf("ندارم", "کم", "متوسط", "زیاد"), c.physicalActivity, accent = Rose) {
                     draft = c.copy(physicalActivity = it)
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
         // ---------- period ----------
-        DastyarCard(accent = androidx.compose.ui.graphics.Color(0xFFEC4899)) {
-            SectionTitle("پریود", "🩷")
-            Spacer(Modifier.height(12.dp))
+        SectionCard("🩷", "پریود", "درد، خونریزی و علائم", Pink) {
             LabeledText("امروز روز پریود هستی؟")
-            ChoiceChips(listOf("بله", "نه"), if (c.isPeriodDay) "بله" else "نه") {
+            ChoiceChips(listOf("بله", "نه"), if (c.isPeriodDay) "بله" else "نه", accent = Pink) {
                 val yes = it == "بله"
                 draft = c.copy(isPeriodDay = yes)
                 if (yes) showPeriodDetail = true
@@ -221,56 +219,61 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
             if (showPeriodDetail) {
                 Spacer(Modifier.height(6.dp))
                 LabeledText("امروز درد داری؟")
-                ChoiceChips(listOf("ندارم", "دارم"), c.periodPain) { draft = c.copy(periodPain = it) }
-                Spacer(Modifier.height(14.dp))
+                ChoiceChips(listOf("ندارم", "دارم"), c.periodPain, accent = Pink) { draft = c.copy(periodPain = it) }
+                Spacer(Modifier.height(16.dp))
                 LabeledText("شدت درد")
                 ChoiceChips(
                     listOf("بدون درد", "خفیف", "متوسط", "شدید", "خیلی شدید"),
-                    c.periodPainLevel
+                    c.periodPainLevel,
+                    accent = Pink
                 ) { draft = c.copy(periodPainLevel = it) }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("محل درد")
-                ChoiceChips(listOf("شکم", "کمر", "لگن", "پا", "سر", "چند جا"), c.periodPainLocation) {
+                ChoiceChips(listOf("شکم", "کمر", "لگن", "پا", "سر", "چند جا"), c.periodPainLocation, accent = Pink) {
                     draft = c.copy(periodPainLocation = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("خونریزی نسبت به معمول")
-                ChoiceChips(listOf("کمتر", "مثل همیشه", "بیشتر", "خیلی بیشتر"), c.periodBleeding) {
+                ChoiceChips(listOf("کمتر", "مثل همیشه", "بیشتر", "خیلی بیشتر"), c.periodBleeding, accent = Pink) {
                     draft = c.copy(periodBleeding = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("لخته")
-                ChoiceChips(listOf("ندارم", "کم", "زیاد"), c.periodClots) { draft = c.copy(periodClots = it) }
-                Spacer(Modifier.height(14.dp))
+                ChoiceChips(listOf("ندارم", "کم", "زیاد"), c.periodClots, accent = Pink) { draft = c.copy(periodClots = it) }
+                Spacer(Modifier.height(16.dp))
                 LabeledText("تهوع")
-                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodNausea) { draft = c.copy(periodNausea = it) }
-                Spacer(Modifier.height(14.dp))
+                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodNausea, accent = Pink) { draft = c.copy(periodNausea = it) }
+                Spacer(Modifier.height(16.dp))
                 LabeledText("سرگیجه")
-                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodDizziness) {
+                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodDizziness, accent = Pink) {
                     draft = c.copy(periodDizziness = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("سردرد")
-                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodHeadache) {
+                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodHeadache, accent = Pink) {
                     draft = c.copy(periodHeadache = it)
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 LabeledText("مصرف مسکن")
-                ChoiceChips(listOf("نه", "بله"), c.periodMedication) { draft = c.copy(periodMedication = it) }
+                ChoiceChips(listOf("نه", "بله"), c.periodMedication, accent = Pink) { draft = c.copy(periodMedication = it) }
             }
         }
 
-        Spacer(Modifier.height(18.dp))
-        OutlinedTextField(
-            value = c.notes,
-            onValueChange = { draft = c.copy(notes = it) },
-            label = { Text("توضیح بیشتر (اختیاری)") },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            minLines = 2
-        )
+        Spacer(Modifier.height(16.dp))
+        DastyarCard(accent = Purple) {
+            SectionTitle("توضیح بیشتر", "📝")
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = c.notes,
+                onValueChange = { draft = c.copy(notes = it) },
+                placeholder = { Text("اختیاری — هر چیزی که دوست داری بنویس") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                minLines = 2
+            )
+        }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(20.dp))
         GradientButton("ذخیره وضعیت امروز ✅") {
             vm.saveCheckIn(c.copy(cycleDay = cycleDay))
             vm.generateSuggestion(true)
@@ -284,9 +287,9 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
 private fun LabeledText(text: String) {
     Text(
         text,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Medium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+        fontSize = 13.5.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
     )
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(10.dp))
 }
