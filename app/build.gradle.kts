@@ -5,6 +5,32 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// ---------------------------------------------------------------- secrets
+// Injected as env vars by the GitHub Actions workflow, so no key ever lives
+// in the source. Local builds may set the same values in keystore.properties.
+val aiKey: String = System.getenv("ATRIA_API_KEY")
+    ?: (project.findProperty("ATRIA_API_KEY") as String?)
+    ?: ""
+val chatUrl: String = System.getenv("ATRIA_BASE_URL")
+    ?: "https://api.atria-asi.ai"
+
+val ksStoreB64: String = System.getenv("KEYSTORE_BASE64") ?: ""
+val ksStorePass: String = System.getenv("KEYSTORE_PASSWORD")
+    ?: (project.findProperty("KEYSTORE_PASSWORD") as String?) ?: ""
+val ksKeyAlias: String = System.getenv("KEY_ALIAS")
+    ?: (project.findProperty("KEY_ALIAS") as String?) ?: ""
+val ksKeyPass: String = System.getenv("KEY_PASSWORD")
+    ?: (project.findProperty("KEY_PASSWORD") as String?) ?: ""
+
+val hasSigning = ksStoreB64.isNotBlank() && ksKeyAlias.isNotBlank()
+val releaseKeystore = layout.buildDirectory.file("release.keystore").get().asFile
+if (hasSigning) {
+    releaseKeystore.parentFile.mkdirs()
+    releaseKeystore.writeBytes(
+        java.util.Base64.getMimeDecoder().decode(ksStoreB64)
+    )
+}
+
 android {
     namespace = "com.dastyar.app"
     compileSdk = 34
@@ -18,36 +44,8 @@ android {
         resourceConfigurations += listOf("fa", "en")
     }
 
-    // AI keys: read from GitHub Secrets (injected as env vars by the workflow)
-    // or from a local keystore.properties. NEVER committed.
-    val aiKey: String = System.getenv("ATRIA_API_KEY")
-        ?: (project.findProperty("ATRIA_API_KEY") as String?)
-        ?: ""
-    val chatUrl: String = System.getenv("ATRIA_BASE_URL")
-        ?: "https://api.atria-asi.ai"
-
-    // Release signing: the keystore is decoded from a GitHub Secret at build
-    // time. Locally it can come from keystore.properties (never committed).
-    val ksProps = java.util.Properties().apply {
-        val f = rootProject.file("keystore.properties")
-        if (f.exists()) f.inputStream().use { load(it) }
-    }
-    val ksStoreB64: String = System.getenv("KEYSTORE_BASE64") ?: ""
-    val ksStorePass: String = System.getenv("KEYSTORE_PASSWORD")
-        ?: (project.findProperty("KEYSTORE_PASSWORD") as String?) ?: ""
-    val ksKeyAlias: String = System.getenv("KEY_ALIAS")
-        ?: (project.findProperty("KEY_ALIAS") as String?) ?: ""
-    val ksKeyPass: String = System.getenv("KEY_PASSWORD")
-        ?: (project.findProperty("KEY_PASSWORD") as String?) ?: ""
-
-    val releaseKeystore = layout.buildDirectory.file("release.keystore").get().asFile
-    if (ksStoreB64.isNotBlank()) {
-        releaseKeystore.parentFile.mkdirs()
-        releaseKeystore.writeBytes(java.util.Base64.getMimeDecoder().decode(ksStoreB64))
-    }
-
     signingConfigs {
-        if (ksStoreB64.isNotBlank() && ksKeyAlias.isNotBlank()) {
+        if (hasSigning) {
             create("release") {
                 storeFile = releaseKeystore
                 storePassword = ksStorePass
@@ -64,7 +62,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "ATRIA_API_KEY", "\"$aiKey\"")
             buildConfigField("String", "ATRIA_BASE_URL", "\"$chatUrl\"")
-            if (ksStoreB64.isNotBlank() && ksKeyAlias.isNotBlank()) {
+            if (hasSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
