@@ -218,6 +218,82 @@ fun PersonalSection(p: Profile, onChange: (Profile) -> Unit) {
             singleLine = true
         )
     }
+    Spacer(Modifier.height(14.dp))
+
+    // ---- body measurements: used for BMI and personalised water/sleep advice
+    QuestionCard("📏", "قد و وزنت چنده؟", "برای محاسبه شاخص توده بدنی و پیشنهاد آب و خواب", Green) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(
+                value = if (p.heightCm == 0) "" else p.heightCm.toString(),
+                onValueChange = {
+                    onChange(p.copy(heightCm = it.filter { c -> c.isDigit() }.take(3).toIntOrNull() ?: 0))
+                },
+                label = { Text("قد (سانتی‌متر)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = if (p.weightKg == 0f) "" else p.weightKg.toString(),
+                onValueChange = { v ->
+                    val t = v.filter { c -> c.isDigit() || c == '.' }.take(5)
+                    onChange(p.copy(weightKg = t.toFloatOrNull() ?: 0f))
+                },
+                label = { Text("وزن (کیلوگرم)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        OutlinedTextField(
+            value = if (p.targetWeightKg == 0f) "" else p.targetWeightKg.toString(),
+            onValueChange = { v ->
+                val t = v.filter { c -> c.isDigit() || c == '.' }.take(5)
+                onChange(p.copy(targetWeightKg = t.toFloatOrNull() ?: 0f))
+            },
+            label = { Text("وزن هدف (اختیاری)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            singleLine = true
+        )
+    }
+    Spacer(Modifier.height(14.dp))
+
+    // ---- self-declared medical info; optional by design
+    QuestionCard(
+        "🩺", "شرایط پزشکی یا دارویی داری؟",
+        "اختیاری — فقط اگر دوست داری بنویس. برای ایمن‌تر شدن پیشنهادها استفاده می‌شود.", Amber
+    ) {
+        OutlinedTextField(
+            value = p.medicalConditions,
+            onValueChange = { onChange(p.copy(medicalConditions = it)) },
+            label = { Text("بیماری یا شرایط شناخته‌شده") },
+            placeholder = { Text("مثلاً: کم‌خونی، تیروئید") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            minLines = 2
+        )
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = p.medications,
+            onValueChange = { onChange(p.copy(medications = it)) },
+            label = { Text("داروهای مهم یا مداوم (اختیاری)") },
+            placeholder = { Text("مثلاً: قرص آهن") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            minLines = 2
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "این اپ تشخیص پزشکی نمی‌دهد و این اطلاعات فقط برای شخصی‌سازی ایمن‌تر پیشنهادهاست.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 // -------------------------------------------------------------- step 2: period

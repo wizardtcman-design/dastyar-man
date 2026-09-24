@@ -26,7 +26,9 @@ import java.util.concurrent.TimeUnit
  * Image -> text -> OpenRouter  (vision, same lite model)
  * Persian TTS   -> TTS.ai      (public endpoint, no key)
  *
- * Nothing here is mocked: every function performs a live network call.
+ * Every request sets max_tokens explicitly. Without it OpenRouter assumes the
+ * model's full 65k context and rejects the call with a 402 that reads like an
+ * out-of-credit error even when the key has plenty of balance.
  */
 object AiClient {
 
@@ -34,15 +36,15 @@ object AiClient {
 
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(150, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    /** Cheap, fast, supports Persian well and also accepts images. */
     private const val TEXT_MODEL = "google/gemini-2.5-flash-lite"
-
-    /** Image generation / editing model. Returns the picture inline (base64). */
     private const val IMAGE_MODEL = "google/gemini-2.5-flash-image"
+
+    /** Replies are short Persian text; this is plenty and keeps cost tiny. */
+    private const val CHAT_MAX_TOKENS = 900
 
     val chatConfigured: Boolean get() = BuildConfig.OPENROUTER_API_KEY.isNotBlank()
 
@@ -57,7 +59,7 @@ object AiClient {
     ): Result<String> = complete(
         system = system,
         history = history,
-        userContent = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
+        userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
         model = TEXT_MODEL
     )
 
@@ -70,26 +72,20 @@ object AiClient {
     ): Result<String> = complete(
         system = system,
         history = emptyList(),
-        userContent = arrayOf(
+        userParts = arrayOf(
             buildJsonObject { put("type", "text"); put("text", userMessage) },
             buildJsonObject {
                 put("type", "image_url")
-                put("image_url", buildJsonObject {
-                    put("url", "data:$mime;base64,$imageBase64")
-                })
+                put("image_url", buildJsonObject { put("url", "data:$mime;base64,$imageBase64") })
             }
         ),
         model = TEXT_MODEL
     )
 
-    /**
-     * Shared chat-completions call. Content is always sent as a typed parts
-     * array so text and image messages use the exact same code path.
-     */
     private suspend fun complete(
         system: String,
         history: List<Pair<String, String>>,
-        userContent: Array<kotlinx.serialization.json.JsonElement>,
+        userParts: Array<kotlinx.serialization.json.JsonElement>,
         model: String
     ): Result<String> = withContext(Dispatchers.IO) {
         if (!chatConfigured) return@withContext Result.failure(
@@ -97,19 +93,13 @@ object AiClient {
         )
         try {
             val messages = buildJsonArray {
-                add(buildJsonObject {
-                    put("role", "system")
-                    put("content", system)
-                })
+                add(buildJsonObject { put("role", "system"); put("content", system) })
                 history.forEach { (role, content) ->
-                    add(buildJsonObject {
-                        put("role", role)
-                        put("content", content)
-                    })
+                    add(buildJsonObject { put("role", role); put("content", content) })
                 }
                 add(buildJsonObject {
                     put("role", "user")
-                    put("content", buildJsonArray { userContent.forEach { add(it) } })
+                    put("content", buildJsonArray { userParts.forEach { add(it) } })
                 })
             }
 
@@ -118,6 +108,7 @@ object AiClient {
                 put("messages", messages)
                 put("stream", false)
                 put("temperature", 0.6)
+                put("max_tokens", CHAT_MAX_TOKENS)
             }.toString()
 
             val req = Request.Builder()
@@ -130,9 +121,7 @@ object AiClient {
             http.newCall(req).execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    return@withContext Result.failure(
-                        AiException(friendlyError(resp.code, text))
-                    )
+                    return@withContext Result.failure(AiException(describeError(resp.code, text)))
                 }
                 val content = json.parseToJsonElement(text)
                     .jsonObject["choices"]?.jsonArray
@@ -147,23 +136,15 @@ object AiClient {
                 }
             }
         } catch (e: Exception) {
-            Result.failure(AiException("اتصال به هوش مصنوعی ناموفق بود: ${e.message}"))
+            Result.failure(AiException("اتصال به هوش مصنوعی ناموفق بود."))
         }
-    }
-
-    /** Turns an API error into a short Persian sentence with a usable hint. */
-    private fun friendlyError(code: Int, raw: String): String = when (code) {
-        401 -> "کلید هوش مصنوعی معتبر نیست."
-        402 -> "اعتبار سرویس هوش مصنوعی کافی نیست."
-        429 -> "درخواست‌ها زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
-        else -> "خطای API ($code): ${raw.take(180)}"
     }
 
     // --------------------------------------------------------------- image
 
     /**
-     * Text -> image through OpenRouter's image model. The picture comes back as
-     * a base64 data URL, which we decode to raw bytes.
+     * Text -> image. Uses its own budget so image credit is reported separately
+     * from chat credit.
      */
     suspend fun generateImage(
         prompt: String,
@@ -171,7 +152,7 @@ object AiClient {
         height: Int = 1024,
         seed: Int = (1..999_999).random()
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
-        if (prompt.isBlank()) return@withContext Result.failure(AiException("پرامپت خالی است."))
+        if (prompt.isBlank()) return@withContext Result.failure(AiException("توصیف تصویر خالی است."))
         if (!chatConfigured) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
         )
@@ -182,10 +163,7 @@ object AiClient {
                 val body = buildJsonObject {
                     put("model", IMAGE_MODEL)
                     put("messages", buildJsonArray {
-                        add(buildJsonObject {
-                            put("role", "user")
-                            put("content", prompt)
-                        })
+                        add(buildJsonObject { put("role", "user"); put("content", prompt) })
                     })
                     put("modalities", buildJsonArray {
                         add(kotlinx.serialization.json.JsonPrimitive("image"))
@@ -203,7 +181,7 @@ object AiClient {
                 http.newCall(req).execute().use { resp ->
                     val text = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) {
-                        lastErr = friendlyError(resp.code, text)
+                        lastErr = describeError(resp.code, text, image = true)
                         if (resp.code !in listOf(429, 500, 502, 503, 504)) {
                             return@withContext Result.failure(AiException(lastErr))
                         }
@@ -228,11 +206,39 @@ object AiClient {
                     }
                 }
             } catch (e: Exception) {
-                lastErr = e.message ?: "خطای شبکه"
+                lastErr = "خطای شبکه در ساخت تصویر."
             }
             if (attempt < 2) Thread.sleep(3000L * (attempt + 1))
         }
         Result.failure(AiException("ساخت تصویر ناموفق بود: $lastErr"))
+    }
+
+    /**
+     * Turns an OpenRouter error into an accurate Persian sentence. The 402 case
+     * is checked carefully: OpenRouter uses 402 both for a genuinely empty
+     * balance and for a request whose max_tokens exceeds the balance, so the
+     * message must not claim the credit has run out unless it really has.
+     */
+    private fun describeError(code: Int, raw: String, image: Boolean = false): String {
+        val low = raw.lowercase()
+        return when (code) {
+            401 -> "کلید هوش مصنوعی معتبر نیست یا لغو شده است."
+            402 -> when {
+                low.contains("max_tokens") ->
+                    "تنظیمات درخواست با موجودی سرویس هم‌خوان نبود. دوباره تلاش کن."
+                low.contains("fewer max_tokens") ->
+                    "طول پاسخ بیش از حد بود؛ درخواست کوتاه‌تر ارسال شد."
+                else ->
+                    "موجودی سرویس هوش مصنوعی کافی نیست. " +
+                            if (image) "برای ساخت تصویر به شارژ حساب نیاز است."
+                            else "برای ادامه گفتگو به شارژ حساب نیاز است."
+            }
+            403 -> "دسترسی این مدل برای کلید فعلی باز نیست."
+            404 -> "مدل درخواستی در دسترس نیست."
+            429 -> "تعداد درخواست‌ها زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
+            in 500..599 -> "سرور هوش مصنوعی موقتاً پاسخ نمی‌دهد؛ دوباره تلاش کن."
+            else -> "خطای سرویس هوش مصنوعی (کد $code)."
+        }
     }
 
     // ----------------------------------------------------------------- tts

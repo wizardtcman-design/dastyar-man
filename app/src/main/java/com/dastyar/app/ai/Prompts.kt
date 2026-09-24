@@ -2,11 +2,16 @@ package com.dastyar.app.ai
 
 import com.dastyar.app.data.CheckIn
 import com.dastyar.app.data.Dates
+import com.dastyar.app.data.Health
 import com.dastyar.app.data.Profile
+import com.dastyar.app.data.SmartFact
 
 /**
- * Builds the system prompt from the user's real stored data, so every AI
- * answer is grounded in their profile and today's check-in.
+ * Builds system prompts from the user's real stored data, so every AI answer is
+ * grounded in their profile, check-in history and smart profile.
+ *
+ * Two rules run through all of it: never invent a fact the user did not record,
+ * and never give medical advice that could conflict with a declared condition.
  */
 object Prompts {
 
@@ -20,22 +25,34 @@ object Prompts {
   اورژانس راهنمایی کن.
 - برای پوست، فقط مراقبت‌های ساده و بی‌خطر پیشنهاد بده. از توصیه‌های خانگی تحریک‌کننده
   مثل لیمو، جوش‌شیرین، خمیردندان، سیر یا سوزاندن روی پوست پرهیز کن.
+- اگر کاربر بیماری یا دارویی اعلام کرده، پیشنهادت نباید با آن در تناقض باشد. در
+  تناقض، پیشنهاد ایمن‌تر بده و کاربر را به پزشک ارجاع بده.
+- هیچ اطلاعاتی از خودت نساز. فقط از داده‌های ثبت‌شده کاربر استفاده کن.
 - همیشه فارسی، کوتاه، گرم و کاربردی جواب بده.
 """.trimIndent()
 
     fun base(): String = SAFETY
 
-    fun system(channel: String, profile: Profile?, today: CheckIn?): String {
+    /** A compact, factual snapshot of everything known about the user. */
+    private fun snapshot(profile: Profile?, today: CheckIn?, facts: List<SmartFact>): String {
         val sb = StringBuilder()
-        sb.appendLine("تو «دستیار من» هستی؛ یک دستیار شخصی روزانه فارسی‌زبان، مهربان و جمع‌وجور.")
-        sb.appendLine("همیشه فارسی و راست‌به‌چپ جواب بده. جواب‌ها کوتاه و کاربردی باشند.")
-        sb.appendLine()
 
         if (profile != null) {
             sb.appendLine("— اطلاعات کاربر —")
             if (profile.firstName.isNotBlank()) sb.appendLine("نام: ${profile.firstName}")
             if (profile.age > 0) sb.appendLine("سن: ${profile.age}")
-            sb.appendLine("در چت با نام کوچک کاربر او را خطاب کن.")
+
+            if (profile.heightCm > 0) sb.appendLine("قد: ${profile.heightCm} سانتی‌متر")
+            if (profile.weightKg > 0f) sb.appendLine("وزن: ${profile.weightKg} کیلوگرم")
+            if (profile.targetWeightKg > 0f) sb.appendLine("وزن هدف: ${profile.targetWeightKg} کیلوگرم")
+            val bmi = Health.bmi(profile)
+            if (bmi != null && Health.bmiAdultBandsApply(profile)) {
+                sb.appendLine("شاخص توده بدنی: ${"%.1f".format(bmi)} (${Health.bmiCategory(profile)} — فقط شاخص آماری، نه تشخیص)")
+            }
+            if (profile.medicalConditions.isNotBlank())
+                sb.appendLine("شرایط پزشکی اعلام‌شده توسط خودِ کاربر: ${profile.medicalConditions}")
+            if (profile.medications.isNotBlank())
+                sb.appendLine("داروهای اعلام‌شده: ${profile.medications}")
             sb.appendLine()
 
             if (profile.lastPeriodDate.isNotBlank()) {
@@ -44,24 +61,31 @@ object Prompts {
                 sb.appendLine("— چرخه پریود —")
                 sb.appendLine("طول چرخه: ${profile.cycleLength} روز، طول پریود: ${profile.periodDays} روز")
                 sb.appendLine("امروز روز $cd چرخه است. $until روز تا پریود بعدی مانده.")
+                Health.cyclePhase(profile)?.let { sb.appendLine("دوران تقریبی: $it") }
                 if (profile.periodPainLevel > 0) sb.appendLine("شدت معمول درد: ${profile.periodPainLevel} از ۱۰")
                 if (profile.painLocation.isNotBlank()) sb.appendLine("محل معمول درد: ${profile.painLocation}")
                 if (profile.painRelief.isNotBlank()) sb.appendLine("روش کنترل درد: ${profile.painRelief}")
                 sb.appendLine()
             }
 
-            sb.appendLine("— پوست —")
-            if (profile.skinType.isNotBlank()) sb.appendLine("نوع پوست: ${profile.skinType}")
-            if (profile.acneLevel.isNotBlank()) sb.appendLine("میزان جوش: ${profile.acneLevel}")
-            if (profile.acneLocation.isNotBlank()) sb.appendLine("محل جوش: ${profile.acneLocation}")
-            if (profile.currentProducts.isNotBlank()) sb.appendLine("محصولات فعلی: ${profile.currentProducts}")
-            sb.appendLine()
+            if (profile.skinType.isNotBlank() || profile.acneLevel.isNotBlank()) {
+                sb.appendLine("— پوست —")
+                if (profile.skinType.isNotBlank()) sb.appendLine("نوع پوست: ${profile.skinType}")
+                if (profile.acneLevel.isNotBlank()) sb.appendLine("میزان جوش: ${profile.acneLevel}")
+                if (profile.acneLocation.isNotBlank()) sb.appendLine("محل جوش: ${profile.acneLocation}")
+                if (profile.currentProducts.isNotBlank()) sb.appendLine("محصولات فعلی: ${profile.currentProducts}")
+                sb.appendLine()
+            }
 
-            sb.appendLine("— بی‌رمقی —")
-            if (profile.fatigueLevel.isNotBlank()) sb.appendLine("شدت بی‌رمقی: ${profile.fatigueLevel}")
-            if (profile.sleepQuality.isNotBlank()) sb.appendLine("کیفیت معمول خواب: ${profile.sleepQuality}")
-            if (profile.stressLevel.isNotBlank()) sb.appendLine("سطح استرس: ${profile.stressLevel}")
-            sb.appendLine()
+            if (profile.fatigueLevel.isNotBlank() || profile.sleepQuality.isNotBlank()) {
+                sb.appendLine("— بی‌رمقی —")
+                if (profile.fatigueLevel.isNotBlank()) sb.appendLine("شدت بی‌رمقی: ${profile.fatigueLevel}")
+                if (profile.sleepQuality.isNotBlank()) sb.appendLine("کیفیت معمول خواب: ${profile.sleepQuality}")
+                if (profile.sleepHours > 0f) sb.appendLine("خواب معمول: ${profile.sleepHours} ساعت")
+                if (profile.stressLevel.isNotBlank()) sb.appendLine("سطح استرس: ${profile.stressLevel}")
+                if (profile.physicalActivity.isNotBlank()) sb.appendLine("فعالیت بدنی: ${profile.physicalActivity}")
+                sb.appendLine()
+            }
         }
 
         if (today != null) {
@@ -75,6 +99,32 @@ object Prompts {
             if (today.isPeriodDay) sb.appendLine("امروز روز پریود است.")
             sb.appendLine()
         }
+
+        if (facts.isNotEmpty()) {
+            sb.appendLine("— الگوهای آموخته‌شده از گفتگوهای قبلی کاربر —")
+            facts.take(12).forEach { sb.appendLine("${it.key}: ${it.value}") }
+            sb.appendLine("این‌ها فقط الگوهای قابل‌مشاهده‌اند؛ از آن‌ها برای حدس درباره شخصیت یا " +
+                    "وضعیت روانی استفاده نکن و نظر قطعی نده.")
+            sb.appendLine()
+        }
+
+        return sb.toString()
+    }
+
+    fun system(
+        channel: String,
+        profile: Profile?,
+        today: CheckIn?,
+        facts: List<SmartFact> = emptyList()
+    ): String {
+        val sb = StringBuilder()
+        sb.appendLine("تو «دستیار من» هستی؛ یک دستیار شخصی روزانه فارسی‌زبان، مهربان و جمع‌وجور.")
+        sb.appendLine("همیشه فارسی و راست‌به‌چپ جواب بده. جواب‌ها کوتاه و کاربردی باشند.")
+        if (profile?.firstName?.isNotBlank() == true) {
+            sb.appendLine("در چت با نام کوچک کاربر او را خطاب کن.")
+        }
+        sb.appendLine()
+        sb.append(snapshot(profile, today, facts))
 
         sb.appendLine(
             when (channel) {
@@ -92,33 +142,78 @@ object Prompts {
         return sb.toString()
     }
 
-    /** Prompt used to generate the personalised daily suggestion card. */
-    fun dailySuggestionPrompt(profile: Profile?, today: CheckIn?, waterGoal: Int): String {
+    /**
+     * Prompt for the daily suggestion. The model is asked for short, practical,
+     * personalised lines. It must not invent numbers the app already computed
+     * locally — the goals are passed in as fixed facts.
+     */
+    fun dailySuggestionPrompt(
+        profile: Profile?,
+        today: CheckIn?,
+        history: List<CheckIn>,
+        facts: List<SmartFact>,
+        waterGoal: Int
+    ): String {
         val name = profile?.firstName?.ifBlank { "دوست من" } ?: "دوست من"
-        val info = buildString {
-            append("نام: $name. ")
-            if (today != null) {
-                append("امروز: انرژی ${today.energyLevel.ifBlank { "ثبت نشده" }}, ")
-                append("خواب ${today.sleepHours} ساعت (${today.sleepQuality.ifBlank { "-" }}), ")
-                append("آب ${today.waterGlasses} از $waterGoal لیوان, ")
-                append("پوست ${today.skinStatus.ifBlank { "ثبت نشده" }}, ")
-                append("استرس ${today.stressLevel.ifBlank { "-" }}. ")
-                if (today.isPeriodDay) append("امروز روز پریود است. ")
-            }
-            if (profile?.lastPeriodDate?.isNotBlank() == true) {
-                append("روز ${Dates.cycleDay(profile.lastPeriodDate, profile.cycleLength)} چرخه. ")
-            }
-            if (profile?.skinType?.isNotBlank() == true) append("نوع پوست ${profile.skinType}. ")
+        val sleepTarget = Health.sleepTargetHours(profile)
+        val info = StringBuilder()
+        info.append("نام: $name. ")
+        if (today != null) {
+            info.append("امروز: انرژی ${today.energyLevel.ifBlank { "ثبت نشده" }}، ")
+            info.append("خواب ${today.sleepHours} ساعت (${today.sleepQuality.ifBlank { "-" }})، ")
+            info.append("آب ${today.waterGlasses} از $waterGoal لیوان، ")
+            info.append("پوست ${today.skinStatus.ifBlank { "ثبت نشده" }}، ")
+            info.append("استرس ${today.stressLevel.ifBlank { "-" }}. ")
+            if (today.isPeriodDay) info.append("امروز روز پریود است. ")
+            if (today.fatigueSeverity.isNotBlank()) info.append("خستگی ${today.fatigueSeverity}. ")
+        } else {
+            info.append("امروز چک‌این ثبت نشده. ")
         }
+        if (history.isNotEmpty()) {
+            val avgSleep = Health.average(history.take(7).map { it.sleepHours })
+            val avgWater = Health.averageInt(history.take(7).map { it.waterGlasses })
+            if (avgSleep != null) info.append("میانگین خواب ۷ روز اخیر: ${"%.1f".format(avgSleep)} ساعت. ")
+            if (avgWater != null) info.append("میانگین آب ۷ روز اخیر: ${"%.1f".format(avgWater)} لیوان. ")
+        }
+        if (profile?.lastPeriodDate?.isNotBlank() == true) {
+            info.append("روز ${Dates.cycleDay(profile.lastPeriodDate, profile.cycleLength)} چرخه. ")
+        }
+        if (profile?.skinType?.isNotBlank() == true) info.append("نوع پوست ${profile.skinType}. ")
+        if (profile?.weightKg?.let { it > 0f } == true) info.append("وزن ${profile.weightKg} کیلوگرم. ")
+
+        val conditions = profile?.medicalConditions?.trim().orEmpty()
+        val meds = profile?.medications?.trim().orEmpty()
+        if (conditions.isNotBlank()) info.append("شرایط پزشکی اعلام‌شده کاربر: $conditions. ")
+        if (meds.isNotBlank()) info.append("داروهای کاربر: $meds. ")
+
+        if (facts.isNotEmpty()) {
+            info.append("الگوهای آموخته‌شده: ")
+            facts.take(8).forEach { info.append("${it.key}=${it.value}؛ ") }
+        }
+
         return """
-بر اساس وضعیت واقعی امروز کاربر، حداکثر ۴ پیشنهاد کوتاه و عملی بده.
+بر اساس وضعیت واقعی امروز کاربر، حداکثر ۵ پیشنهاد کوتاه و عملی و شخصی بده.
 اطلاعات کاربر: $info
-خروجی را دقیقاً با این قالب بده و هر پیشنهاد در یک خط باشد، بدون مقدمه و بدون جمع‌بندی:
-💧 آب | یک جمله کوتاه
-✨ پوست | یک جمله کوتاه
-⚡ بی‌رمقی | یک جمله کوتاه
-🩷 پریود | یک جمله کوتاه
-اگر موضوعی برای کاربر مرتبط نیست، همان خط را با «—» بگذار. هر جمله حداکثر ۱۵ کلمه.
+
+اهداف محاسبه‌شده توسط خودِ برنامه (این اعداد قطعی‌اند و باید همین‌ها را بگویی):
+- هدف آب امروز: $waterGoal لیوان
+- محدوده مناسب خواب: ${"%.0f".format(sleepTarget.start)} تا ${"%.0f".format(sleepTarget.endInclusive)} ساعت
+
+خروجی را دقیقاً با این قالب بده و هر پیشنهاد در یک خط باشد، بدون مقدمه و بدون جمع‌بندی.
+هر خط با «موضوع | متن» نوشته شود، مثل:
+💧 آب | هدف امروز $waterGoal لیوان است؛ تا الان چند لیوان خوردی
+😴 خواب | بین ${"%.0f".format(sleepTarget.start)} تا ${"%.0f".format(sleepTarget.endInclusive)} ساعت بخواب
+🛋 استراحت | یک جمله کوتاه و شخصی
+🚶 فعالیت | یک جمله کوتاه درباره فعالیت سبک
+✨ پوست | یک جمله کوتاه (اگر مرتبط نیست بنویس: ✨ پوست | —)
+🩷 پریود | یک جمله کوتاه (اگر مرتبط نیست بنویس: 🩷 پریود | —)
+
+قواعد:
+- فقط ۵ خط، همان‌هایی که برای کاربر مرتبط است. اگر موضوعی مرتبط نیست، آن خط را کلاً ننویس.
+- هر جمله حداکثر ۱۵ کلمه، محاوره‌ای و بدون تکرار.
+- از داده‌ای که به تو داده نشده حرف نزن و عدد جدید از خودت نساز.
+- اگر شرایط پزشکی اعلام شده، پیشنهادت با آن در تناقض نباشد؛ در تناقض پیشنهاد ایمن‌تر بده.
+- هرگز تشخیص پزشکی نده و ادعا نکن بیماری کاربر علت یک علامت است.
 """.trimIndent()
     }
 
@@ -145,4 +240,39 @@ object Prompts {
 یک پرامپت انگلیسی کامل و دقیق بنویس که تصویر جدید را توصیف کند و تغییر خواسته‌شده را اعمال کند.
 فقط خود پرامپت انگلیسی را برگردان، بدون توضیح اضافه و بدون گیومه.
 """.trimIndent()
+
+    /**
+     * Prompt that extracts a few non-sensitive, observable patterns from the
+     * user's own messages. Deliberately narrow: habits and preferences only,
+     * never personality or mental-state guesses.
+     */
+    fun learnPrompt(recentUserMessages: String, existing: List<SmartFact>): String {
+        val known = if (existing.isEmpty()) "هیچ"
+        else existing.take(12).joinToString("؛ ") { "${it.key}=${it.value}" }
+        return """
+این پیام‌های اخیر کاربر است:
+$recentUserMessages
+
+الگوهای قبلاً ذخیره‌شده: $known
+
+فقط الگوهای قابل‌مشاهده و عادت‌های ساده را استخراج کن، مثل:
+عادت خواب، ساعت پرانرژی بودن، علاقه غذایی، حساسیت غذایی اعلام‌شده، عادت ورزش،
+ترجیح سبک پاسخ (کوتاه یا مفصل)، هدف اعلام‌شده (مثل کاهش وزن)، مشکل تکرارشونده.
+
+قواعد سخت:
+- درباره شخصیت، اختلال روانی، افسردگی، اضطراب یا وضعیت روحی هیچ نتیجه‌ای نگیر.
+- هیچ بیماری تشخیص نده و هیچ دارویی پیشنهاد نکن.
+- فقط چیزی را بنویس که کاربر صریحاً گفته یا در داده‌ها آمده. حدس نزن.
+- اگر چیز جدیدی نیست، فقط بنویس: هیچ
+
+خروجی، هر خط یک مورد، دقیقاً به این شکل بدون شماره و بدون توضیح:
+کلید | مقدار
+مثال:
+عادت خواب | معمولاً دیر می‌خوابد
+ترجیح پاسخ | پاسخ کوتاه دوست دارد
+هدف | کاهش وزن
+
+حداکثر ۳ خط. کلیدها کوتاه و فارسی باشند.
+""".trimIndent()
+    }
 }

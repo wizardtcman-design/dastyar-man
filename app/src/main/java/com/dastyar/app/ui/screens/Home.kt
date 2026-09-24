@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -15,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -23,7 +21,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.data.CheckIn
+import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.Dates
+import com.dastyar.app.data.Health
+import com.dastyar.app.data.Profile
+import com.dastyar.app.data.WeightEntry
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
 import com.dastyar.app.ui.theme.*
@@ -32,6 +34,11 @@ private enum class Range(val label: String, val days: Int) {
     D7("۷ روز", 7), D30("۳۰ روز", 30), D90("۳ ماه", 90)
 }
 
+/**
+ * The dashboard. Ordered by how much it matters day to day:
+ * greeting, today's practical plan, today's status, body/cycle, then trends.
+ * Everything shown comes from data the user actually recorded.
+ */
 @Composable
 fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boolean) {
     val profile by vm.profile.collectAsState()
@@ -39,7 +46,9 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     val today by vm.todayCheckIn.collectAsState()
     val suggestion by vm.suggestion.collectAsState()
     val loading by vm.loadingSuggestion.collectAsState()
+    val weights by vm.weights.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
+    var showWeightDialog by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(Range.D7) }
     var metric by remember { mutableStateOf("انرژی") }
 
@@ -49,28 +58,25 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     }
 
     val name = profile?.firstName?.ifBlank { "دوست من" } ?: "دوست من"
-    val goal = vm.waterGoal(profile, today)
+    val waterGoal = Health.waterTarget(profile, today)
     val water = today?.waterGlasses ?: 0
     val energyPct = energyPercent(today)
-    val cycleDay = profile?.let {
-        if (it.lastPeriodDate.isBlank()) 0
-        else Dates.cycleDay(it.lastPeriodDate, it.cycleLength)
-    } ?: 0
+    val cycleDay = Health.cycleDay(profile)
+    val localPlan = remember(profile, today, checkIns) { vm.localPlan() }
 
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // ---------------------------------------------------------- greeting
         item {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 ScreenHeader(
                     emoji = "🌱",
                     title = "خوش اومدی $name جان",
-                    subtitle = "امروز حالت چطوره؟ من کنارتم.",
+                    subtitle = Dates.pretty(vm.today) +
+                            if (cycleDay > 0) " • روز ${Dates.fa(cycleDay)} چرخه" else "",
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = { showSettings = true }) {
@@ -79,6 +85,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             }
         }
 
+        // ------------------------------------------------- check-in reminder
         if (needsCheckIn) {
             item {
                 DastyarCard(onClick = onOpenCheckIn, accent = Amber) {
@@ -105,149 +112,90 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             }
         }
 
+        // -------------------------------------------------- today's plan (AI)
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile("⚡", "انرژی امروز", "${Dates.fa(energyPct)}٪", energyHint(today), Purple, Modifier.weight(1f))
-                StatTile("😴", "خواب", sleepLabel(today), today?.sleepQuality ?: "ثبت نشده", Cyan, Modifier.weight(1f))
-            }
+            PlanCard(
+                suggestion = suggestion,
+                localPlan = localPlan,
+                loading = loading,
+                onRefresh = { vm.generateSuggestion(true) }
+            )
         }
 
+        // ------------------------------------------------------ today status
         item {
-            DastyarCard(accent = Cyan) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(Cyan.copy(alpha = .16f)),
-                        contentAlignment = Alignment.Center
-                    ) { Text("💧", fontSize = 21.sp) }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("آب امروز", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text(
-                            "هدف: ${Dates.fa(goal)} لیوان",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        "${Dates.fa(water)} / ${Dates.fa(goal)}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                LinearProgressIndicator(
-                    progress = { if (goal == 0) 0f else (water.toFloat() / goal).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(5.dp)),
-                    color = MaterialTheme.colorScheme.tertiary
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatTile(
+                    "⚡", "انرژی امروز", "${Dates.fa(energyPct)}٪",
+                    energyHint(today), Purple, Modifier.weight(1f)
                 )
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilledTonalButton(
-                        onClick = { vm.updateWater(1) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(16.dp)
-                    ) { Text("+ یک لیوان") }
-                    OutlinedButton(
-                        onClick = { vm.updateWater(-1) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(16.dp)
-                    ) { Text("−") }
-                }
+                StatTile(
+                    "😴", "خواب دیشب", sleepLabel(today),
+                    today?.sleepQuality?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
+                    Cyan, Modifier.weight(1f)
+                )
             }
         }
 
         item {
+            WaterCard(
+                water = water,
+                goal = waterGoal,
+                onAdd = { vm.updateWater(1) },
+                onRemove = { vm.updateWater(-1) }
+            )
+        }
+
+        // ------------------------------------------------------- body & cycle
+        item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                BmiTile(
+                    profile = profile,
+                    weights = weights,
+                    onUpdate = { showWeightDialog = true },
+                    modifier = Modifier.weight(1f)
+                )
                 StatTile(
                     "🩷", "چرخه پریود",
                     if (cycleDay > 0) "روز ${Dates.fa(cycleDay)}" else "ثبت نشده",
-                    if (today?.isPeriodDay == true) "امروز روز پریوده" else
-                        profile?.let {
-                            if (it.lastPeriodDate.isBlank()) ""
-                            else "${Dates.fa(Dates.daysUntilNextPeriod(it.lastPeriodDate, it.cycleLength))} روز تا پریود بعدی"
-                        } ?: "",
+                    cycleSubtitle(profile, today),
                     Pink, Modifier.weight(1f)
                 )
-                StatTile(
-                    "✨", "وضعیت پوست",
-                    today?.skinStatus?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
-                    today?.acneCount?.take(18) ?: "",
-                    Amber, Modifier.weight(1f)
-                )
             }
         }
 
-        item {
-            DastyarCard(accent = Rose) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(Rose.copy(alpha = .16f)),
-                        contentAlignment = Alignment.Center
-                    ) { Text("⚡", fontSize = 21.sp) }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("بی‌رمقی امروز", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text(
-                            "شدت خستگی ثبت‌شده",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Tag(
-                        today?.fatigueSeverity?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
-                        Rose
-                    )
-                }
-            }
-        }
-
-        // ---- AI daily suggestions ----
-        item {
-            DastyarCard(accent = Green) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Green.copy(alpha = .16f)),
-                        contentAlignment = Alignment.Center
-                    ) { Text("🌱", fontSize = 19.sp) }
-                    Spacer(Modifier.width(10.dp))
-                    Text("پیشنهاد امروز برای تو", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Spacer(Modifier.weight(1f))
-                    if (loading) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        IconButton(onClick = { vm.generateSuggestion(true) }) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "تولید دوباره")
+        if (profile?.medicalConditions?.isNotBlank() == true) {
+            item {
+                DastyarCard(accent = Amber) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Amber.copy(alpha = .16f)),
+                            contentAlignment = Alignment.Center
+                        ) { Text("🩺", fontSize = 18.sp) }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("شرایط ثبت‌شده تو", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(
+                                profile?.medicalConditions.orEmpty(),
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                if (suggestion.isNullOrBlank()) {
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        "برای دریافت پیشنهادهای شخصی امروز، روی دکمه زیر بزن.",
-                        fontSize = 12.5.sp,
+                        "پیشنهادهای این اپ عمومی‌اند و جای نظر پزشکت را نمی‌گیرند.",
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(12.dp))
-                    GradientButton("دریافت پیشنهاد امروز", enabled = !loading) {
-                        vm.generateSuggestion(false)
-                    }
-                } else {
-                    SuggestionLines(suggestion!!)
                 }
             }
         }
 
-        // ---- chart ----
+        // ----------------------------------------------------------- trends
         item {
             DastyarCard(accent = Purple) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -259,7 +207,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         contentAlignment = Alignment.Center
                     ) { Text("📊", fontSize = 19.sp) }
                     Spacer(Modifier.width(10.dp))
-                    Text("نمودار وضعیت", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("روند وضعیت", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
                 Spacer(Modifier.height(14.dp))
                 SingleChoiceChips(
@@ -271,11 +219,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                 }
                 Spacer(Modifier.height(10.dp))
                 val metrics = listOf("انرژی", "خواب", "آب", "پوست", "بی‌رمقی")
-                SingleChoiceChips(
-                    options = metrics,
-                    selected = metric,
-                    accent = Purple
-                ) { metric = it }
+                SingleChoiceChips(options = metrics, selected = metric, accent = Purple) { metric = it }
                 Spacer(Modifier.height(18.dp))
 
                 val days = Dates.lastDays(range.days)
@@ -294,8 +238,9 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 
                 if (points.all { it == 0f }) {
                     Text(
-                        "هنوز داده‌ای ثبت نشده. با ثبت وضعیت روزانه نمودار ساخته می‌شود.",
-                        fontSize = 13.sp,
+                        "برای دیدن نمودار، چند روز وضعیتت را ثبت کن. " +
+                                "فقط داده‌های واقعی تو نمایش داده می‌شود.",
+                        fontSize = 12.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
@@ -310,12 +255,14 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                             else -> Rose
                         }
                     )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "فقط داده‌های واقعی ثبت‌شده توسط تو نمایش داده می‌شود.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    metricAverage(metric, points)?.let { avg ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "میانگین $avg",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -323,8 +270,8 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         item {
             DastyarCard {
                 Text(
-                    "این اعداد شاخص‌هایی هستند که از پاسخ‌های خودت محاسبه می‌شوند و " +
-                            "اندازه‌گیری واقعی بدن نیستند.",
+                    "همه اعداد این صفحه از داده‌های ثبت‌شده خودت ساخته می‌شوند و شاخص آماری‌اند، " +
+                            "نه اندازه‌گیری پزشکی. در صورت وجود علائم هشدار به پزشک مراجعه کن.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -332,29 +279,301 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         }
         item { Spacer(Modifier.height(10.dp)) }
     }
+
+    if (showWeightDialog) {
+        WeightDialog(
+            current = profile?.weightKg ?: 0f,
+            onDismiss = { showWeightDialog = false },
+            onSave = { kg ->
+                vm.recordWeight(kg)
+                showWeightDialog = false
+            }
+        )
+    }
+}
+
+// ------------------------------------------------------------------- cards
+
+/** Today's practical plan, from local logic and optionally refined by AI. */
+@Composable
+private fun PlanCard(
+    suggestion: DailySuggestion?,
+    localPlan: DailySuggestion?,
+    loading: Boolean,
+    onRefresh: () -> Unit
+) {
+    val shown = suggestion ?: localPlan
+    DastyarCard(accent = Green) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Green.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("🌱", fontSize = 19.sp) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("پیشنهاد امروز برای تو", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    "بر اساس داده‌های خودت",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "تولید دوباره")
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        if (shown == null) {
+            Text(
+                "هنوز داده‌ای برای پیشنهاد نداریم. با ثبت وضعیت امروز، پیشنهادهای شخصی ساخته می‌شود.",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            shown.content.lines().filter { it.isNotBlank() }.forEach { line ->
+                val parts = line.split("|", limit = 2)
+                Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
+                    if (parts.size == 2) {
+                        Text(parts[0].trim(), fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            parts[1].trim(),
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        Text(line, fontSize = 13.5.sp)
+                    }
+                }
+            }
+            if (loading) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "در حال شخصی‌سازی بیشتر…",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** Water progress with quick add/remove. */
+@Composable
+private fun WaterCard(water: Int, goal: Int, onAdd: () -> Unit, onRemove: () -> Unit) {
+    DastyarCard(accent = Cyan) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Cyan.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("💧", fontSize = 21.sp) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("آب امروز", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    "هدف هوشمند: ${Dates.fa(goal)} لیوان",
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                "${Dates.fa(water)} / ${Dates.fa(goal)}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                color = MaterialTheme.colorScheme.tertiary
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        LinearProgressIndicator(
+            progress = { if (goal == 0) 0f else (water.toFloat() / goal).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(5.dp)),
+            color = MaterialTheme.colorScheme.tertiary
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalButton(
+                onClick = onAdd,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(16.dp)
+            ) { Text("+ یک لیوان") }
+            OutlinedButton(
+                onClick = onRemove,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(16.dp)
+            ) { Text("−") }
+        }
+    }
+}
+
+/** BMI tile with a trend sparkline from the weight log. */
+@Composable
+private fun BmiTile(
+    profile: Profile?,
+    weights: List<WeightEntry>,
+    onUpdate: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bmi = Health.bmi(profile)
+    val category = Health.bmiCategory(profile)
+    val ageApplies = Health.bmiAdultBandsApply(profile)
+    val latest = weights.lastOrNull()
+
+    Box(
+        modifier
+            .clip(Shape.card)
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable { onUpdate() }
+            .padding(14.dp)
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(Shape.badge)
+                        .background(Green.copy(alpha = .16f)),
+                    contentAlignment = Alignment.Center
+                ) { Text("⚖️", fontSize = 17.sp) }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "قد و وزن",
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(9.dp))
+
+            when {
+                bmi == null -> {
+                    Text("ثبت نشده", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "برای محاسبه BMI بزن",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                else -> {
+                    Text(
+                        "${"%.1f".format(bmi)}",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (ageApplies && category != null) {
+                        Spacer(Modifier.height(3.dp))
+                        Tag(category, if (category == "محدوده معمول") Green else Amber)
+                    } else {
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "دسته‌بندی بزرگسالان برای سن تو مناسب نیست",
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    latest?.let {
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "${"%.1f".format(it.weightKg)} کیلو • ${Dates.pretty(it.date)}",
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (weights.size >= 2) {
+                Spacer(Modifier.height(10.dp))
+                WeightSpark(weights.takeLast(12).map { it.weightKg })
+            }
+        }
+    }
+}
+
+/** Tiny weight trend line, drawn from real entries only. */
+@Composable
+private fun WeightSpark(values: List<Float>) {
+    val min = values.minOrNull() ?: 0f
+    val max = values.maxOrNull() ?: 1f
+    val span = (max - min).coerceAtLeast(0.5f)
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(30.dp)) {
+        val w = size.width
+        val h = size.height
+        val step = if (values.size > 1) w / (values.size - 1) else w
+        val path = Path()
+        values.forEachIndexed { i, v ->
+            val x = step * i
+            val y = h - ((v - min) / span) * h
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, Green, style = Stroke(width = 2.5f))
+        values.forEachIndexed { i, v ->
+            val x = step * i
+            val y = h - ((v - min) / span) * h
+            drawCircle(Green, radius = 3f, center = Offset(x, y))
+        }
+    }
 }
 
 @Composable
-private fun SuggestionLines(text: String) {
-    text.lines().filter { it.isNotBlank() }.forEach { line ->
-        val parts = line.split("|", limit = 2)
-        Row(
-            Modifier.padding(vertical = 5.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            if (parts.size == 2) {
-                Text(parts[0].trim(), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Spacer(Modifier.width(8.dp))
+private fun WeightDialog(current: Float, onDismiss: () -> Unit, onSave: (Float) -> Unit) {
+    var text by remember { mutableStateOf(if (current > 0f) current.toString() else "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ثبت وزن امروز ⚖️") },
+        text = {
+            Column {
                 Text(
-                    parts[1].trim(),
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
+                    "وزن امروزت را وارد کن تا روند تغییرات در داشبورد ساخته شود.",
+                    fontSize = 13.sp
                 )
-            } else {
-                Text(line, fontSize = 14.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { v -> text = v.filter { it.isDigit() || it == '.' }.take(6) },
+                    label = { Text("وزن (کیلوگرم)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp)
+                )
             }
-        }
+        },
+        confirmButton = {
+            TextButton(onClick = { text.toFloatOrNull()?.let(onSave) }) { Text("ذخیره") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف") } }
+    )
+}
+
+// --------------------------------------------------------------- helpers
+
+private fun cycleSubtitle(profile: Profile?, today: CheckIn?): String {
+    if (today?.isPeriodDay == true) return "امروز روز پریوده"
+    val until = Health.daysUntilPeriod(profile) ?: return ""
+    return if (until <= 0) "دوران قاعدگی" else "${Dates.fa(until)} روز تا پریود بعدی"
+}
+
+private fun metricAverage(metric: String, points: List<Float>): String? {
+    val real = points.filter { it > 0f }
+    if (real.isEmpty()) return null
+    val avg = real.average()
+    return when (metric) {
+        "خواب" -> "${"%.1f".format(avg)} ساعت"
+        "آب" -> "${"%.0f".format(avg)} لیوان"
+        "انرژی" -> "${"%.0f".format(avg)}٪"
+        else -> "${"%.0f".format(avg)}"
     }
 }
 
@@ -366,11 +585,7 @@ fun LineChart(values: List<Float>, labels: List<String>, color: Color) {
     val n = values.size.coerceAtLeast(2)
 
     Column {
-        androidx.compose.foundation.Canvas(
-            Modifier
-                .fillMaxWidth()
-                .height(170.dp)
-        ) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(170.dp)) {
             val w = size.width
             val h = size.height
             val pad = 14f
@@ -379,19 +594,14 @@ fun LineChart(values: List<Float>, labels: List<String>, color: Color) {
             fun py(v: Float) =
                 h - pad - (h - 2 * pad) * ((v - minV) / (maxV - minV)).coerceIn(0f, 1f)
 
-            // grid
             repeat(4) { g ->
                 val y = pad + (h - 2 * pad) * (g / 3f)
-                drawLine(
-                    Color.Gray.copy(alpha = .18f),
-                    Offset(pad, y), Offset(w - pad, y), strokeWidth = 1f
-                )
+                drawLine(Color.Gray.copy(alpha = .18f), Offset(pad, y), Offset(w - pad, y), 1f)
             }
 
             val path = Path()
             values.forEachIndexed { i, v ->
-                val x = px(i)
-                val y = py(v)
+                val x = px(i); val y = py(v)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
             drawPath(path, color, style = Stroke(width = 3f))
@@ -401,10 +611,7 @@ fun LineChart(values: List<Float>, labels: List<String>, color: Color) {
                 drawCircle(Color.White, radius = 2f, center = Offset(px(i), py(v)))
             }
         }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val step = (labels.size / 7).coerceAtLeast(1)
             labels.filterIndexed { i, _ -> i % step == 0 }.forEach {
                 Text(it, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -451,7 +658,7 @@ fun sleepLabel(ci: CheckIn?): String {
     val hours = h.toInt()
     val minutes = ((h - hours) * 60).toInt()
     return if (minutes > 0)
-        "${Dates.fa(hours)} ساعت و ${Dates.fa(minutes)} دقیقه"
+        "${Dates.fa(hours)}س ${Dates.fa(minutes)}د"
     else "${Dates.fa(hours)} ساعت"
 }
 
@@ -480,7 +687,7 @@ fun skinScore(ci: CheckIn?): Int {
     return v.coerceIn(0, 100)
 }
 
-/** 0-100: lower fatigue is better, inverted so the chart rises when feeling well. */
+/** 0-100: lower fatigue is better, inverted so the chart rises with wellbeing. */
 fun fatigueScore(ci: CheckIn?): Int {
     if (ci == null) return 0
     val v = when {

@@ -32,11 +32,46 @@ interface DastyarDao {
     @Query("SELECT * FROM checkins ORDER BY date DESC LIMIT :n")
     suspend fun recentCheckIns(n: Int): List<CheckIn>
 
+    @Query("SELECT COUNT(*) FROM checkins")
+    suspend fun checkInCount(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveCheckIn(c: CheckIn)
 
     @Query("DELETE FROM checkins WHERE date = :date")
     suspend fun deleteCheckIn(date: String)
+
+    // ---- Weight log ----
+    @Query("SELECT * FROM weight_log ORDER BY date ASC")
+    fun weightFlow(): Flow<List<WeightEntry>>
+
+    @Query("SELECT * FROM weight_log ORDER BY date DESC LIMIT 1")
+    suspend fun latestWeight(): WeightEntry?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveWeight(w: WeightEntry)
+
+    @Query("DELETE FROM weight_log")
+    suspend fun clearWeights()
+
+    // ---- Smart profile ----
+    @Query("SELECT * FROM smart_profile ORDER BY updatedAt DESC")
+    fun smartFactsFlow(): Flow<List<SmartFact>>
+
+    @Query("SELECT * FROM smart_profile ORDER BY updatedAt DESC")
+    suspend fun smartFacts(): List<SmartFact>
+
+    @Query("SELECT * FROM smart_profile WHERE key = :key LIMIT 1")
+    suspend fun smartFact(key: String): SmartFact?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveFact(f: SmartFact)
+
+    @Query("DELETE FROM smart_profile")
+    suspend fun clearFacts()
+
+    @Query("DELETE FROM smart_profile WHERE id = :id")
+    suspend fun deleteFact(id: Long)
 
     // ---- Tasks ----
     @Query("SELECT * FROM tasks ORDER BY date ASC, time ASC")
@@ -60,6 +95,12 @@ interface DastyarDao {
 
     @Query("SELECT * FROM chat_messages WHERE channel = :channel ORDER BY timestamp DESC LIMIT :n")
     suspend fun recentChat(channel: String, n: Int): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages ORDER BY timestamp DESC LIMIT :n")
+    suspend fun recentChatAll(n: Int): List<ChatMessage>
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE role = 'user'")
+    suspend fun userMessageCount(): Int
 
     @Insert
     suspend fun addMessage(m: ChatMessage)

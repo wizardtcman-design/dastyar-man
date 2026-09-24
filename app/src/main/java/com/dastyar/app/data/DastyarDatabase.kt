@@ -6,8 +6,16 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [Profile::class, CheckIn::class, Task::class, ChatMessage::class, DailySuggestion::class],
-    version = 1,
+    entities = [
+        Profile::class,
+        CheckIn::class,
+        Task::class,
+        ChatMessage::class,
+        DailySuggestion::class,
+        WeightEntry::class,
+        SmartFact::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class DastyarDatabase : RoomDatabase() {

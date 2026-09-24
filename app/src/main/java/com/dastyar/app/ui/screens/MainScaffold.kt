@@ -18,14 +18,12 @@ private data class TabItem(val route: String, val label: String, val icon: Image
 @Composable
 fun MainScaffold(vm: MainViewModel) {
     var tab by remember { mutableStateOf("home") }
-    var checkedIn by remember { mutableStateOf(false) }
     val todayCheckIn by vm.todayCheckIn.collectAsState()
 
-    // Automatic daily check-in: if today has no check-in row yet, ask once.
-    LaunchedEffect(vm.profile.value, todayCheckIn) {
-        checkedIn = true
-    }
-    val needsCheckIn = todayCheckIn == null && vm.profile.value != null
+    // The daily check-in is only offered once the user finished onboarding and
+    // only when today's row does not exist yet. On the onboarding day the
+    // questionnaire already became the day-one record, so it is never asked twice.
+    val needsCheckIn = vm.shouldAskCheckIn(vm.profile.value, todayCheckIn)
 
     val tabs = listOf(
         TabItem("home", "خانه", Icons.Filled.Home),

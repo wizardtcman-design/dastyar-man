@@ -10,6 +10,15 @@ data class Profile(
     val lastName: String = "",
     val age: Int = 0,
 
+    // Body — used for BMI and personalised water/sleep advice
+    val heightCm: Int = 0,
+    val weightKg: Float = 0f,
+    val targetWeightKg: Float = 0f,
+
+    // Self-declared medical info. The user may leave these blank.
+    val medicalConditions: String = "",
+    val medications: String = "",
+
     // Period
     val lastPeriodDate: String = "",        // yyyy-MM-dd
     val cycleLength: Int = 28,
