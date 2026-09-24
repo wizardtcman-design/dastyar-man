@@ -118,7 +118,7 @@ object Jalali {
     /** Pretty Jalali string, e.g. «۱۲ مهر ۱۴۰۵». */
     fun pretty(iso: String): String {
         val j = parse(iso) ?: return iso
-        return "${Dates.fa(j.day)} ${monthName(j.month)} ${Dates.fa(j.year)}"
+        return "${Dates.fa(j.day.toString())} ${monthName(j.month)} ${Dates.fa(j.year.toString())}"
     }
 
     /** Short, e.g. «۱۴۰۵/۰۷/۰۲». */
