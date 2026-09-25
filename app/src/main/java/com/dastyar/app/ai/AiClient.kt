@@ -44,6 +44,14 @@ object AiClient {
     private const val CHAT_MAX_TOKENS = 900
 
     /**
+     * Image generation reserves a large output budget by default, which a
+     * limited-balance key cannot afford and is then rejected as if the account
+     * were empty. A modest explicit cap is enough for one image and makes the
+     * request pass on the same key that chat already works with.
+     */
+    private const val IMAGE_MAX_TOKENS = 2000
+
+    /**
      * The provider actually used: a user-supplied provider wins when present,
      * otherwise the built-in OpenRouter default. Screens never care which one,
      * so a new provider only needs an [AiProviders] entry.
@@ -448,8 +456,13 @@ object AiClient {
     // --------------------------------------------------------------- image
 
     /**
-     * Text -> image. Uses its own budget so image credit is reported separately
-     * from chat credit.
+     * Text -> image.
+     *
+     * First tries the active provider's image model (Gemini via OpenRouter, or
+     * whatever the user configured). Image models need real credit, so when that
+     * is unavailable the request falls back to the free, key-less Pollinations
+     * endpoint. The user therefore still gets a real image without paying, and
+     * automatically gets the provider's quality once credit exists.
      */
     suspend fun generateImage(
         prompt: String,
@@ -458,21 +471,54 @@ object AiClient {
         seed: Int = (1..999_999).random()
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
         if (prompt.isBlank()) return@withContext Result.failure(AiException("توصیف تصویر خالی است."))
-        if (!chatConfigured) return@withContext Result.failure(
-            AiException("کلید هوش مصنوعی تنظیم نشده است.")
-        )
-        if (!activeProvider().supportsImages) return@withContext Result.failure(
-            AiException("سرویس فعلی از ساخت تصویر پشتیبانی نمی‌کند.")
-        )
 
+        // 1) Try the provider's paid image model when one is configured.
+        if (chatConfigured && activeProvider().supportsImages) {
+            paidImage(prompt, seed).getOrNull()?.let { return@withContext Result.success(it) }
+        }
+
+        // 2) Free fallback that needs no key and no credit. The free endpoint
+        // only understands English prompts, so a Persian prompt is translated
+        // first with the chat model (which the same key already powers).
+        val englishPrompt = toEnglishPrompt(prompt)
+        freeImage(englishPrompt, seed)
+    }
+
+    /**
+     * Turns a prompt into English for the free image endpoint. Keeps the text
+     * as-is when it is already English or when translation is unavailable.
+     */
+    private suspend fun toEnglishPrompt(prompt: String): String {
+        val hasPersian = prompt.any { it in '\u0600'..'\u06FF' }
+        if (!hasPersian) return prompt
+        return try {
+            val res = chat(
+                system = "You translate image descriptions to English. " +
+                        "Output only the English description, nothing else.",
+                history = emptyList(),
+                userMessage = prompt
+            )
+            res.getOrNull()?.trim()?.takeIf { it.isNotBlank() && it.length < 400 } ?: prompt
+        } catch (e: Exception) {
+            prompt
+        }
+    }
+
+    /** Provider image model (Gemini image via OpenRouter). Needs real credit. */
+    private suspend fun paidImage(prompt: String, seed: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
         var lastErr = ""
         for (key in candidateKeys(activeProvider())) {
             var stopKey = false
-            repeat(3) { attempt ->
+            repeat(2) { attempt ->
                 if (stopKey) return@repeat
                 try {
                     val body = buildJsonObject {
                         put("model", imageModel())
+                        // Image models also need an explicit max_tokens. Without
+                        // it OpenRouter assumes the full 29k context and rejects
+                        // the call with a 402 that reads like an empty balance,
+                        // even when the key has plenty of credit.
+                        put("max_tokens", IMAGE_MAX_TOKENS)
                         put("messages", buildJsonArray {
                             add(buildJsonObject { put("role", "user"); put("content", prompt) })
                         })
@@ -524,11 +570,47 @@ object AiClient {
                 } catch (e: Exception) {
                     lastErr = "خطای شبکه در ساخت تصویر."
                 }
-                if (!stopKey && attempt < 2) Thread.sleep(3000L * (attempt + 1))
+                if (!stopKey && attempt < 1) Thread.sleep(2500L)
             }
         }
-        Result.failure(AiException("ساخت تصویر ناموفق بود: $lastErr"))
+        Result.failure(AiException(lastErr))
     }
+
+    /**
+     * Free image generation via Pollinations. No API key, no credit; a plain
+     * GET that returns real JPEG bytes. Used automatically when the provider's
+     * paid image model is not available.
+     */
+    private suspend fun freeImage(prompt: String, seed: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
+        val encoded = java.net.URLEncoder.encode(prompt, "UTF-8")
+        val url = "https://image.pollinations.ai/prompt/$encoded" +
+                "?width=768&height=1024&nologo=true&seed=$seed"
+        var lastErr = "ساخت تصویر ناموفق بود."
+        repeat(3) { attempt ->
+            try {
+                val req = Request.Builder()
+                    .url(url)
+                    .addHeader("User-Agent", "Dastyar/1.0")
+                    .get().build()
+                http.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val bytes = resp.body?.bytes()
+                        if (bytes != null && bytes.size > 1000) {
+                            return@withContext Result.success(bytes)
+                        }
+                        lastErr = "تصویر خالی برگشت."
+                    } else {
+                        lastErr = "سرویس تصویر رایگان پاسخ نداد (${resp.code})."
+                    }
+                }
+            } catch (e: Exception) {
+                lastErr = "خطای شبکه در ساخت تصویر."
+            }
+            if (attempt < 2) Thread.sleep(3000L * (attempt + 1))
+        }
+        Result.failure(AiException(lastErr))
+    }
+
 
     /**
      * Turns an OpenRouter error into an accurate Persian sentence. The 402 case
