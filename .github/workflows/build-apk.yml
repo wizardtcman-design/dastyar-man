@@ -83,8 +83,17 @@ jobs:
           body: |
             نسخه اندرویدی «دستیار من» 🌱
             فایل APK را از بخش Assets دانلود و روی گوشی نصب کنید.
+
+            لینک دانلود مستقیم:
+            https://github.com/wizardtcman-design/dastyar-man/releases/latest
           files: |
             out/dastyar-man-debug.apk
             out/dastyar-man-release.apk
           draft: false
           prerelease: false
+          make_latest: true
+
+      - name: Move the "latest" tag to this build
+        run: |
+          git tag -f latest
+          git push -f origin latest
