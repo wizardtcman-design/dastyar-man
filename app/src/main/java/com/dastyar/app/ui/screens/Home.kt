@@ -53,7 +53,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     var showSettings by remember { mutableStateOf(false) }
     var showWeightDialog by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(Range.D7) }
-    var selectedMetrics by remember { mutableStateOf(setOf(Metric.ENERGY, Metric.SLEEP)) }
+    var selectedMetrics by remember { mutableStateOf<Set<Metric>?>(null) }
 
     if (showSettings) {
         SettingsScreen(vm, onClose = { showSettings = false })
@@ -167,18 +167,21 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 
         // ------------------------------------------------------- body & cycle
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.height(IntrinsicSize.Min)
+            ) {
                 BmiTile(
                     profile = profile,
                     weights = weights,
                     onUpdate = { showWeightDialog = true },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                 )
                 CycleTile(
                     cycleDay = cycleDay,
                     phase = cyclePhase,
                     daysUntil = daysUntilPeriod,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
         }
@@ -289,9 +292,10 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
+                    val chosen = selectedMetrics ?: availableMetrics.toSet()
                     MultiChoiceChips(
                         options = availableMetrics.map { it.label },
-                        selected = availableMetrics.filter { it in selectedMetrics }.map { it.label },
+                        selected = availableMetrics.filter { it in chosen }.map { it.label },
                         accent = Purple
                     ) { pickedLabels ->
                         val picked = availableMetrics.filter { it.label in pickedLabels }
@@ -308,20 +312,26 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    val visible = availableMetrics.filter { it in selectedMetrics }
+                    val chosenMetrics = selectedMetrics ?: availableMetrics.toSet()
+                    val visible = availableMetrics.filter { it in chosenMetrics }
                         .ifEmpty { listOf(availableMetrics.first()) }
                     val series = visible.map { m ->
                         val pts = days.map { d -> rawFor(m, d) }
-                        val avg = pts.filterNotNull().average().toFloat()
-                        val scale = when (m) {
-                            // Weight centres on its own average so small changes stay visible.
-                            Metric.WEIGHT -> (avg + 20f).coerceAtLeast(1f)
-                            else -> m.scale
-                        }
+                        val real = pts.filterNotNull()
+                        val lo = real.minOrNull() ?: 0f
+                        val hi = real.maxOrNull() ?: 1f
+                        // Auto-fit each indicator to its own range with a little
+                        // headroom, so a steady line still reads as a real line
+                        // instead of hugging an edge of the chart.
+                        val span = (hi - lo).takeIf { it > 0.01f }
+                            ?: (hi * 0.2f).coerceAtLeast(1f)
+                        val base = (lo - span * 0.15f).coerceAtLeast(0f)
+                        val scale = (base + span * 1.3f).coerceAtLeast(1f)
                         ChartSeries(
                             label = m.label,
                             color = m.color,
                             points = pts,
+                            baseline = base,
                             scale = scale,
                             unit = when (m) {
                                 Metric.SLEEP -> "ساعت"
@@ -588,7 +598,6 @@ private fun CycleTile(
 ) {
     Column(
         modifier
-            .height(BodyTileHeight)
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .padding(14.dp),
@@ -641,9 +650,6 @@ private fun CycleTile(
         }
     }
 }
-
-/** Fixed height shared by the BMI and cycle tiles so they stay the same size. */
-private val BodyTileHeight = 148.dp
 
 /**
  * Full-width smart tip derived from the user's current cycle phase. It always
@@ -854,7 +860,6 @@ private fun BmiTile(
 
     Column(
         modifier
-            .height(BodyTileHeight)
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .clickable { onUpdate() }
@@ -1150,6 +1155,7 @@ data class ChartSeries(
     val label: String,
     val color: Color,
     val points: List<Float?>,
+    val baseline: Float,
     val scale: Float,
     val unit: String
 )
@@ -1185,8 +1191,10 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
             val pad = 14f
 
             fun px(i: Int) = pad + (w - 2 * pad) * (i.toFloat() / (n - 1))
-            fun py(value: Float, scale: Float) =
-                h - pad - (h - 2 * pad) * ((value / scale) * 100f / 100f).coerceIn(0f, 1f)
+            fun py(value: Float, s: ChartSeries) =
+                h - pad - (h - 2 * pad) *
+                        ((value - s.baseline) / (s.scale - s.baseline).coerceAtLeast(0.01f))
+                            .coerceIn(0f, 1f)
 
             repeat(4) { g ->
                 val y = pad + (h - 2 * pad) * (g / 3f)
@@ -1210,7 +1218,7 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
                     if (v == null) {
                         started = false
                     } else {
-                        val x = px(i); val y = py(v, s.scale)
+                        val x = px(i); val y = py(v, s)
                         if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
                     }
                 }
@@ -1219,19 +1227,36 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
                     if (v != null) {
                         val big = i == selected
                         drawCircle(s.color, radius = if (big) 6.5f else 4.5f,
-                            center = Offset(px(i), py(v, s.scale)))
+                            center = Offset(px(i), py(v, s)))
                         drawCircle(Color.White, radius = if (big) 2.6f else 1.8f,
-                            center = Offset(px(i), py(v, s.scale)))
+                            center = Offset(px(i), py(v, s)))
                     }
                 }
             }
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            val step = (values.size / 7).coerceAtLeast(1)
-            values.filterIndexed { i, _ -> i % step == 0 }.forEach {
-                Text(it, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        // Axis labels anchored to the chart's own side padding so the first and
+        // last day always line up with the first and last drawn points.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                values.firstOrNull().orEmpty(),
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val mid = values.getOrNull(values.size / 2).orEmpty()
+            if (values.size >= 5) Text(
+                mid,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                values.lastOrNull().orEmpty(),
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         if (selected in 0 until n) {
