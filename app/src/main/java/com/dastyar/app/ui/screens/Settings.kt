@@ -17,6 +17,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.ai.AiClient
+import com.dastyar.app.ai.AiProviders
 import com.dastyar.app.ai.ApiKeys
 import com.dastyar.app.data.Health
 import com.dastyar.app.data.Dates
@@ -48,6 +49,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var aiStatus by remember { mutableStateOf<String?>(null) }
     var altKey by remember { mutableStateOf("") }
     var altStatus by remember { mutableStateOf<String?>(null) }
+    var selectedProvider by remember { mutableStateOf(AiClient.activeProvider()) }
 
     Column(
         Modifier
@@ -100,7 +102,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             }
             if (bmi != null) {
                 Text(
-                    "شاخص توده بدنی: ${"%.1f".format(bmi)}" +
+                    "شاخص توده بدنی: ${Dates.fa("%.1f".format(bmi))}" +
                             Health.bmiCategory(p)?.let { " ($it)" }.orEmpty(),
                     fontSize = 14.sp
                 )
@@ -278,15 +280,31 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         DastyarCard {
             SectionTitle("وضعیت هوش مصنوعی", "🤖")
             Spacer(Modifier.height(8.dp))
+            val provider = AiClient.activeProvider()
+            val usingUserKey = ApiKeys.userKey()?.isNotBlank() == true
             Text(
-                if (AiClient.chatConfigured) "✅ متصل به سرویس هوش مصنوعی"
-                else "⚠️ کلید هوش مصنوعی تنظیم نشده",
+                when {
+                    !AiClient.chatConfigured -> "⚠️ کلید هوش مصنوعی تنظیم نشده"
+                    usingUserKey -> "✅ متصل به سرویس «${provider.label}» (کلید خودت)"
+                    else -> "✅ متصل به سرویس «${provider.label}»"
+                },
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "چت، مشاوره و ساخت تصویر با OpenRouter انجام می‌شود.",
+                "سرویس فعلی: ${provider.label}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "مدل متن: ${provider.textModel}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                if (provider.supportsImages) "ساخت تصویر: پشتیبانی می‌شود"
+                else "ساخت تصویر: این سرویس پشتیبانی نمی‌کند",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -309,21 +327,31 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- alternate API key ----
+        // ---- alternate API key & provider ----
         DastyarCard(accent = MaterialTheme.colorScheme.secondary) {
-            SectionTitle("کلید API جایگزین", "🔑")
+            SectionTitle("API جایگزین", "🔑")
             Spacer(Modifier.height(8.dp))
             Text(
-                "اگر اتصال پیش‌فرض مشکل داشت، کلید OpenRouter خودت را اینجا وارد کن. " +
-                        "کلید فقط روی همین گوشی ذخیره می‌شود و تا وقتی معتبر باشد برنامه از آن استفاده می‌کند.",
+                "اگر اعتبار سرویس فعلی تمام شد، می‌توانی کلید سرویس دیگری را همین‌جا وارد کنی. " +
+                        "کلید فقط روی همین گوشی ذخیره می‌شود و هیچ‌وقت داخل خود برنامه یا فایل عمومی قرار نمی‌گیرد.",
                 fontSize = 11.5.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(12.dp))
+            Text("سرویس جایگزین:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            SingleChoiceChips(
+                options = AiProviders.all.map { it.label },
+                selected = selectedProvider.label,
+                accent = MaterialTheme.colorScheme.secondary
+            ) { picked ->
+                AiProviders.all.firstOrNull { it.label == picked }?.let { selectedProvider = it }
+            }
+            Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = altKey,
                 onValueChange = { altKey = it },
-                label = { Text("کلید API جایگزین") },
+                label = { Text("کلید API") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true
@@ -333,12 +361,12 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 OutlinedButton(
                     onClick = {
                         scope.launch {
-                            altStatus = "در حال آزمایش کلید…"
-                            val r = AiClient.testKey(altKey.trim())
+                            altStatus = "در حال آزمایش اتصال سرویس…"
+                            val r = AiClient.testProvider(selectedProvider, altKey.trim())
                             altStatus = r
                             if (r.startsWith("✅")) {
-                                ApiKeys.saveUserKey(ctx, altKey.trim())
-                                altStatus = "$r — ذخیره شد"
+                                ApiKeys.saveUserKey(ctx, altKey.trim(), selectedProvider)
+                                altStatus = "$r — ذخیره شد و از این به بعد استفاده می‌شود"
                                 altKey = ""
                             }
                         }
@@ -350,7 +378,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     onClick = {
                         ApiKeys.clearUserKey(ctx)
                         altKey = ""
-                        altStatus = "کلید جایگزین حذف شد"
+                        altStatus = "کلید جایگزین حذف شد؛ سرویس پیش‌فرض برگشت"
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp)
@@ -513,7 +541,7 @@ private fun TimePickerDialog(
 private fun PersonalEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -> Unit) {
     var first by remember { mutableStateOf(p.firstName) }
     var last by remember { mutableStateOf(p.lastName) }
-    var age by remember { mutableStateOf(if (p.age == 0) "" else p.age.toString()) }
+    var age by remember { mutableStateOf(Dates.displayField(if (p.age == 0) "" else p.age.toString())) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(20.dp)) {
@@ -525,13 +553,16 @@ private fun PersonalEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profil
             OutlinedTextField(last, { last = it }, label = { Text("نام خانوادگی") },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(age, { age = it.filter { ch -> ch.isDigit() }.take(3) },
+            OutlinedTextField(
+                age,
+                { v -> age = Dates.displayField(Dates.digitsOnly(v, 3)) },
                 label = { Text("سن") },
+                placeholder = { Text("مثلاً ۲۸") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
             Spacer(Modifier.height(20.dp))
             GradientButton("ذخیره") {
-                onSave(p.copy(firstName = first, lastName = last, age = age.toIntOrNull() ?: 0))
+                onSave(p.copy(firstName = first, lastName = last, age = Dates.parseNum(age)?.toInt() ?: 0))
             }
             Spacer(Modifier.height(20.dp))
         }
@@ -542,10 +573,10 @@ private fun PersonalEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profil
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -> Unit) {
-    var height by remember { mutableStateOf(if (p.heightCm == 0) "" else p.heightCm.toString()) }
-    var weight by remember { mutableStateOf(if (p.weightKg == 0f) "" else p.weightKg.toString()) }
+    var height by remember { mutableStateOf(Dates.displayField(if (p.heightCm == 0) "" else p.heightCm.toString())) }
+    var weight by remember { mutableStateOf(Dates.displayField(if (p.weightKg == 0f) "" else p.weightKg.toString())) }
     var target by remember {
-        mutableStateOf(if (p.targetWeightKg == 0f) "" else p.targetWeightKg.toString())
+        mutableStateOf(Dates.displayField(if (p.targetWeightKg == 0f) "" else p.targetWeightKg.toString()))
     }
     var conditions by remember { mutableStateOf(p.medicalConditions) }
     var meds by remember { mutableStateOf(p.medications) }
@@ -570,8 +601,9 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = height,
-                    onValueChange = { height = it.filter { c -> c.isDigit() }.take(3) },
+                    onValueChange = { v -> height = Dates.displayField(Dates.digitsOnly(v, 3)) },
                     label = { Text("قد (سانتی‌متر)") },
+                    placeholder = { Text("۱۶۵") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
@@ -579,8 +611,9 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
                 )
                 OutlinedTextField(
                     value = weight,
-                    onValueChange = { weight = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
+                    onValueChange = { v -> weight = Dates.displayField(Dates.decimalInput(v, 5)) },
                     label = { Text("وزن (کیلوگرم)") },
+                    placeholder = { Text("۶۲") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
@@ -590,7 +623,7 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = target,
-                onValueChange = { target = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
+                onValueChange = { v -> target = Dates.displayField(Dates.decimalInput(v, 5)) },
                 label = { Text("وزن هدف (اختیاری)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
@@ -619,9 +652,9 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
             GradientButton("ذخیره ✅") {
                 onSave(
                     p.copy(
-                        heightCm = height.toIntOrNull() ?: 0,
-                        weightKg = weight.toFloatOrNull() ?: 0f,
-                        targetWeightKg = target.toFloatOrNull() ?: 0f,
+                        heightCm = Dates.parseNum(height)?.toInt() ?: 0,
+                        weightKg = Dates.parseNum(weight) ?: 0f,
+                        targetWeightKg = Dates.parseNum(target) ?: 0f,
                         medicalConditions = conditions.trim(),
                         medications = meds.trim()
                     )

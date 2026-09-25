@@ -21,10 +21,10 @@ import java.util.concurrent.TimeUnit
 /**
  * Real AI client.
  *
- * Text / chat   -> OpenRouter  (google/gemini-2.5-flash-lite)
- * Text -> image -> OpenRouter  (google/gemini-2.5-flash-image)
- * Image -> text -> OpenRouter  (vision, same lite model)
- * Persian TTS   -> TTS.ai      (public endpoint, no key)
+ * Text / chat, text->image and vision all go through the active [AiProvider],
+ * which defaults to OpenRouter (google/gemini-2.5-flash-lite for text,
+ * google/gemini-2.5-flash-image for images). A user-supplied provider added in
+ * Settings wins, so a different service can be used without touching the code.
  *
  * Every request sets max_tokens explicitly. Without it OpenRouter assumes the
  * model's full 65k context and rejects the call with a 402 that reads like an
@@ -40,20 +40,31 @@ object AiClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private const val TEXT_MODEL = "google/gemini-2.5-flash-lite"
-    private const val IMAGE_MODEL = "google/gemini-2.5-flash-image"
-
     /** Replies are short Persian text; this is plenty and keeps cost tiny. */
     private const val CHAT_MAX_TOKENS = 900
 
-    /** The key actually used: a user-supplied alternate key wins when present. */
+    /**
+     * The provider actually used: a user-supplied provider wins when present,
+     * otherwise the built-in OpenRouter default. Screens never care which one,
+     * so a new provider only needs an [AiProviders] entry.
+     */
+    fun activeProvider(): AiProvider = ApiKeys.userProvider() ?: AiProviders.openRouter
+
+    /** The key for the active provider. */
     private fun effectiveKey(): String =
-        ApiKeys.userKey()?.takeIf { it.isNotBlank() }
-            ?: BuildConfig.OPENROUTER_API_KEY
+        ApiKeys.userKey()?.takeIf { it.isNotBlank() } ?: BuildConfig.OPENROUTER_API_KEY
 
     val chatConfigured: Boolean get() = effectiveKey().isNotBlank()
 
-    private val base get() = BuildConfig.OPENROUTER_BASE_URL.trimEnd('/')
+    /** Whether the active provider can generate images. */
+    val imageConfigured: Boolean get() = chatConfigured && activeProvider().supportsImages
+
+    /** A short, Persian-friendly description of the active service. */
+    fun activeServiceLabel(): String = activeProvider().label
+
+    private fun textModel(): String = activeProvider().textModel
+
+    private fun imageModel(): String = activeProvider().imageModel
 
     // ---------------------------------------------------------------- tests
 
@@ -61,21 +72,48 @@ object AiClient {
     suspend fun testConnection(): String = testKey(effectiveKey())
 
     /**
-     * Verifies a specific key by sending a one-token chat request. Returns a
-     * Persian sentence starting with ✅ on success or ⚠️ on failure.
+     * Verifies a specific key by sending a one-token chat request to the active
+     * provider. Returns a Persian sentence starting with ✅ on success or ⚠️ on
+     * failure.
      */
     suspend fun testKey(key: String): String = withContext(Dispatchers.IO) {
         if (key.isBlank()) return@withContext "⚠️ کلید خالی است."
         try {
             val body = buildJsonObject {
-                put("model", TEXT_MODEL)
+                put("model", textModel())
                 put("max_tokens", 8)
                 put("messages", buildJsonArray {
                     add(buildJsonObject { put("role", "user"); put("content", "سلام") })
                 })
             }.toString()
             val req = Request.Builder()
-                .url("$base/chat/completions")
+                .url(activeProvider().chatUrl())
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            http.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) "✅ اتصال برقرار است"
+                else "⚠️ ${describeError(resp.code, resp.body?.string().orEmpty())}"
+            }
+        } catch (e: Exception) {
+            "⚠️ اتصال برقرار نشد: اینترنت را بررسی کن."
+        }
+    }
+
+    /** Tests a candidate provider + key before it is saved. */
+    suspend fun testProvider(provider: AiProvider, key: String): String = withContext(Dispatchers.IO) {
+        if (key.isBlank()) return@withContext "⚠️ کلید خالی است."
+        try {
+            val body = buildJsonObject {
+                put("model", provider.textModel)
+                put("max_tokens", 8)
+                put("messages", buildJsonArray {
+                    add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+                })
+            }.toString()
+            val req = Request.Builder()
+                .url(provider.chatUrl())
                 .addHeader("Authorization", "Bearer $key")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
@@ -99,7 +137,7 @@ object AiClient {
         system = system,
         history = history,
         userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
-        model = TEXT_MODEL
+        model = textModel()
     )
 
     /** Chat with one image attached (vision). */
@@ -118,7 +156,7 @@ object AiClient {
                 put("image_url", buildJsonObject { put("url", "data:$mime;base64,$imageBase64") })
             }
         ),
-        model = TEXT_MODEL
+        model = textModel()
     )
 
     private suspend fun complete(
@@ -151,7 +189,7 @@ object AiClient {
             }.toString()
 
             val req = Request.Builder()
-                .url("$base/chat/completions")
+                .url(activeProvider().chatUrl())
                 .addHeader("Authorization", "Bearer ${effectiveKey()}")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
@@ -195,23 +233,28 @@ object AiClient {
         if (!chatConfigured) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
         )
+        if (!activeProvider().supportsImages) return@withContext Result.failure(
+            AiException("سرویس فعلی از ساخت تصویر پشتیبانی نمی‌کند.")
+        )
 
         var lastErr = ""
         repeat(3) { attempt ->
             try {
                 val body = buildJsonObject {
-                    put("model", IMAGE_MODEL)
+                    put("model", imageModel())
                     put("messages", buildJsonArray {
                         add(buildJsonObject { put("role", "user"); put("content", prompt) })
                     })
-                    put("modalities", buildJsonArray {
-                        add(kotlinx.serialization.json.JsonPrimitive("image"))
-                        add(kotlinx.serialization.json.JsonPrimitive("text"))
-                    })
+                    if (activeProvider().supportsImageModalities) {
+                        put("modalities", buildJsonArray {
+                            add(kotlinx.serialization.json.JsonPrimitive("image"))
+                            add(kotlinx.serialization.json.JsonPrimitive("text"))
+                        })
+                    }
                 }.toString()
 
                 val req = Request.Builder()
-                    .url("$base/chat/completions")
+                    .url(activeProvider().chatUrl())
                     .addHeader("Authorization", "Bearer ${effectiveKey()}")
                     .addHeader("Content-Type", "application/json")
                     .post(body.toRequestBody("application/json".toMediaType()))

@@ -179,7 +179,18 @@ object Prompts {
             info.append("روز ${Dates.cycleDay(profile.lastPeriodDate, profile.cycleLength)} چرخه. ")
         }
         if (profile?.skinType?.isNotBlank() == true) info.append("نوع پوست ${profile.skinType}. ")
+        if (profile?.acneLevel?.isNotBlank() == true) info.append("میزان جوش ${profile.acneLevel}. ")
         if (profile?.weightKg?.let { it > 0f } == true) info.append("وزن ${profile.weightKg} کیلوگرم. ")
+        if (profile?.targetWeightKg?.let { it > 0f } == true) info.append("وزن هدف ${profile.targetWeightKg} کیلوگرم. ")
+        if (profile?.age?.let { it > 0 } == true) info.append("سن ${profile.age} سال. ") 
+
+        // Today's fuller picture, so the lines can respond to fatigue and stress.
+        if (today != null) {
+            if (today.fatigueSeverity.isNotBlank()) info.append("شدت بی‌رمقی امروز ${today.fatigueSeverity}. ")
+            if (today.sleepQuality.isNotBlank()) info.append("کیفیت خواب ${today.sleepQuality}. ")
+            if (today.stressLevel.isNotBlank()) info.append("استرس امروز ${today.stressLevel}. ")
+            if (today.skinInflammation.isNotBlank()) info.append("التهاب پوست ${today.skinInflammation}. ")
+        }
 
         val conditions = profile?.medicalConditions?.trim().orEmpty()
         val meds = profile?.medications?.trim().orEmpty()
@@ -203,13 +214,16 @@ object Prompts {
 هر خط با «موضوع | متن» نوشته شود، مثل:
 💧 آب | هدف امروز $waterGoal لیوان است؛ تا الان چند لیوان خوردی
 😴 خواب | بین ${"%.0f".format(sleepTarget.start)} تا ${"%.0f".format(sleepTarget.endInclusive)} ساعت بخواب
-🛋 استراحت | یک جمله کوتاه و شخصی
-🚶 فعالیت | یک جمله کوتاه درباره فعالیت سبک
-✨ پوست | یک جمله کوتاه (اگر مرتبط نیست بنویس: ✨ پوست | —)
+🛋 استراحت | یک جمله کوتاه و شخصی بر اساس خستگی امروز
+🚶 فعالیت | یک جمله کوتاه درباره فعالیت سبک مناسب امروز
+🧘 آرامش | یک جمله کوتاه اگر استرس امروز زیاد بود (وگرنه این خط را ننویس)
+✨ پوست | یک جمله کوتاه بر اساس وضعیت پوست امروز
 🩷 پریود | یک جمله کوتاه (اگر مرتبط نیست بنویس: 🩷 پریود | —)
+🩺 شرایط | یک جمله مراقبتی ایمن با توجه به شرایط اعلام‌شده (اگر شرایطی نیست ننویس)
 
 قواعد:
-- فقط ۵ خط، همان‌هایی که برای کاربر مرتبط است. اگر موضوعی مرتبط نیست، آن خط را کلاً ننویس.
+- بین ۴ تا ۶ خط، فقط همان‌هایی که برای کاربر مرتبط است. اگر موضوعی مرتبط نیست، آن خط را کلاً ننویس.
+- متن هر روز باید بر اساس داده‌های همان روز متفاوت باشد؛ جمله‌های کلی و تکراری ننویس.
 - هر جمله حداکثر ۱۵ کلمه، محاوره‌ای و بدون تکرار.
 - از داده‌ای که به تو داده نشده حرف نزن و عدد جدید از خودت نساز.
 - اگر شرایط پزشکی اعلام شده، پیشنهادت با آن در تناقض نباشد؛ در تناقض پیشنهاد ایمن‌تر بده.
@@ -278,10 +292,17 @@ $recentUserMessages
 
     /**
      * Prompt for the dashboard card that explains the user's declared condition.
-     * It explains a condition the user already told us about; it never diagnoses
-     * and never replaces the doctor.
+     * A rotating topic is passed in so the card shows something new and useful on
+     * each visit instead of a fixed repeated paragraph. It explains a condition
+     * the user already told us about; it never diagnoses and never replaces the
+     * doctor.
      */
-    fun conditionPrompt(conditions: String, medications: String, profile: Profile?): String {
+    fun conditionPrompt(
+        conditions: String,
+        medications: String,
+        profile: Profile?,
+        topic: String = "اطلاعات عمومی"
+    ): String {
         val who = StringBuilder()
         if (profile?.age?.let { it > 0 } == true) who.append("سن کاربر: ${profile.age}. ")
         if (profile?.weightKg?.let { it > 0f } == true) who.append("وزن: ${profile.weightKg} کیلوگرم. ")
@@ -291,17 +312,31 @@ $recentUserMessages
 داروهای اعلام‌شده: ${medications.ifBlank { "هیچ" }}
 $who
 
-یک توضیح کوتاه و آرام درباره این شرایط بده. خروجی را دقیقاً در این سه بخش بنویس:
+امروز فقط روی این موضوع تمرکز کن: «$topic»
 
-📌 چیستی | یک جمله ساده: این شرایط معمولاً چیست
-🩺 نکته مراقبتی | یک یا دو نکته ساده و بی‌خطر برای زندگی روزمره با این شرایط
-👩⚕️ پیگیری | یک جمله: چه زمانی بهتر است با پزشک در میان بگذارد
+خروجی را دقیقاً در دو بخش بنویس:
+
+💡 $topic | دو تا سه جمله کوتاه، دقیق و مفید مخصوصاً درباره همین موضوع
+👩‍⚕️ نکته مهم | یک جمله درباره اینکه چه زمانی یا چرا باید با پزشک در میان بگذارد
 
 قواعد:
+- درباره همین موضوع بنویس و آن را تکرار موضوعات قبلی نکن.
 - این توضیح آموزشی است، نه تشخیص. هیچ‌جا نگو کاربر قطعاً این بیماری را دارد.
 - هیچ دارو یا دوزی تجویز نکن.
 - ادعا نکن این شرایط علت یک علامت خاص کاربر است.
-- فارسی، ساده، گرم و بدون ترس‌آفرینی بنویس.
+- فارسی، ساده، گرم و بدون ترس‌آفرینی بنویس. حداکثر ۴ خط.
 """.trimIndent()
     }
+
+    /** The rotating topics the condition card cycles through. */
+    val conditionTopics = listOf(
+        "اطلاعات عمومی",
+        "مراقبت روزانه",
+        "سبک زندگی و تغذیه",
+        "علائم مهم",
+        "زمان مراجعه به پزشک",
+        "فعالیت و ورزش",
+        "خواب و استراحت",
+        "روش‌های درمانی شناخته‌شده"
+    )
 }

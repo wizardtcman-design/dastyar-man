@@ -125,7 +125,7 @@ private fun TaskCard(t: Task, vm: MainViewModel, onEdit: () -> Unit) {
                 }
                 val meta = buildString {
                     if (t.date.isNotBlank()) append(Dates.pretty(t.date))
-                    if (t.time.isNotBlank()) append(" • ${t.time}")
+                    if (t.time.isNotBlank()) append(" • ${Dates.faTime(t.time)}")
                     if (t.repeat != "none" && t.repeat.isNotBlank()) {
                         append(" • ${repeatLabel(t.repeat)}")
                     }
@@ -203,9 +203,10 @@ private fun TaskSheet(
                     shape = RoundedCornerShape(14.dp)
                 )
                 OutlinedTextField(
-                    value = time,
-                    onValueChange = { time = it },
-                    label = { Text("ساعت") },
+                    value = Dates.faTime(time),
+                    onValueChange = { v -> time = Dates.timeInput(v) },
+                    label = { Text("ساعت (مثلاً ۰۹:۰۰)") },
+                    placeholder = { Text("۰۹:۰۰") },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp)
                 )

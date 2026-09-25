@@ -93,12 +93,12 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
             Spacer(Modifier.height(18.dp))
             LabeledText("میزان خواب دیشب (ساعت)")
             OutlinedTextField(
-                value = if (c.sleepHours == 0f) "" else c.sleepHours.toString(),
-                onValueChange = { draft = c.copy(sleepHours = it.toFloatOrNull() ?: 0f) },
+                value = Dates.displayField(if (c.sleepHours == 0f) "" else c.sleepHours.toString()),
+                onValueChange = { draft = c.copy(sleepHours = Dates.decimalInput(it, 4).toFloatOrNull() ?: 0f) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
-                placeholder = { Text("مثلاً 7.5") }
+                placeholder = { Text("مثلاً ۷.۵") }
             )
 
             Spacer(Modifier.height(18.dp))
@@ -109,8 +109,8 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
 
             Spacer(Modifier.height(18.dp))
             LabeledText("آب مصرفی تا الان (لیوان)")
-            ChoiceChips((0..12).map { it.toString() }, c.waterGlasses.toString(), accent = Cyan) {
-                draft = c.copy(waterGlasses = it.toIntOrNull() ?: 0)
+            ChoiceChips((0..12).map { Dates.fa(it) }, Dates.fa(c.waterGlasses), accent = Cyan) {
+                draft = c.copy(waterGlasses = Dates.parseNum(it)?.toInt() ?: 0)
             }
 
             Spacer(Modifier.height(18.dp))

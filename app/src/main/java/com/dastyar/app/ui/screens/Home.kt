@@ -77,18 +77,13 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     ) {
         // ---------------------------------------------------------- greeting
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                ScreenHeader(
-                    emoji = greetingEmoji(),
-                    title = greetingFor(name),
-                    subtitle = Dates.pretty(vm.today) +
-                            if (cycleDay > 0) " • روز ${Dates.fa(cycleDay)} چرخه" else "",
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = { showSettings = true }) {
-                    Icon(Icons.Filled.Settings, contentDescription = "تنظیمات")
-                }
-            }
+            GreetingCard(
+                name = name,
+                emoji = greetingEmoji(),
+                subtitle = Dates.pretty(vm.today) +
+                        if (cycleDay > 0) " • روز ${Dates.fa(cycleDay)} چرخه" else " • امروز",
+                onSettings = { showSettings = true }
+            )
         }
 
         // ------------------------------------------------- check-in reminder
@@ -155,6 +150,24 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                     cycleDay = cycleDay,
                     subtitle = cycleSubtitle(profile, today),
                     modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // ------------------------------------------------ skin & fatigue status
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatTile(
+                    "✨", "وضعیت پوست",
+                    today?.skinStatus?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
+                    skinHint(today),
+                    Amber, Modifier.weight(1f)
+                )
+                StatTile(
+                    "🥱", "وضعیت بی‌رمقی",
+                    today?.fatigueSeverity?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
+                    fatigueHint(today),
+                    Rose, Modifier.weight(1f)
                 )
             }
         }
@@ -279,6 +292,71 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 }
 
 // ------------------------------------------------------------------- cards
+
+/**
+ * The full-width welcome card at the very top of the dashboard. It always uses
+ * the name the user gave in onboarding and carries the settings shortcut, so
+ * the first thing on screen is complete, ordered and self-explanatory.
+ */
+@Composable
+private fun GreetingCard(
+    name: String,
+    emoji: String,
+    subtitle: String,
+    onSettings: () -> Unit
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(Shape.card)
+            .background(BrandBrush)
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 30.dp, y = (-34).dp)
+                .size(132.dp)
+                .clip(RoundedCornerShape(66.dp))
+                .background(Color.White.copy(alpha = .10f))
+        )
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 17.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .clip(Shape.badge)
+                        .background(Color.White.copy(alpha = .22f)),
+                    contentAlignment = Alignment.Center
+                ) { Text(emoji, fontSize = 23.sp) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        greetingFor(name),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 19.sp,
+                        maxLines = 1
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        subtitle,
+                        color = Color.White.copy(alpha = .92f),
+                        fontSize = 12.5.sp,
+                        maxLines = 1
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(42.dp)
+                        .clip(Shape.badge)
+                        .background(Color.White.copy(alpha = .22f))
+                        .clickable { onSettings() },
+                    contentAlignment = Alignment.Center
+                ) { Text("⚙️", fontSize = 20.sp) }
+            }
+        }
+    }
+}
 
 /**
  * Dashboard card for the condition the user declared. The explanation is
@@ -571,7 +649,7 @@ private fun BmiTile(
                 }
                 else -> {
                     Text(
-                        "${"%.1f".format(bmi)}",
+                        "${Dates.fa("%.1f".format(bmi))}",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -589,7 +667,7 @@ private fun BmiTile(
                     latest?.let {
                         Spacer(Modifier.height(3.dp))
                         Text(
-                            "${"%.1f".format(it.weightKg)} کیلو • ${Dates.pretty(it.date)}",
+                            "${Dates.fa("%.1f".format(it.weightKg))} کیلو • ${Dates.pretty(it.date)}",
                             fontSize = 10.5.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -632,7 +710,9 @@ private fun WeightSpark(values: List<Float>) {
 
 @Composable
 private fun WeightDialog(current: Float, onDismiss: () -> Unit, onSave: (Float) -> Unit) {
-    var text by remember { mutableStateOf(if (current > 0f) current.toString() else "") }
+    var text by remember {
+        mutableStateOf(Dates.displayField(if (current > 0f) current.toString() else ""))
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("ثبت وزن امروز ⚖️") },
@@ -645,15 +725,16 @@ private fun WeightDialog(current: Float, onDismiss: () -> Unit, onSave: (Float) 
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = text,
-                    onValueChange = { v -> text = v.filter { it.isDigit() || it == '.' }.take(6) },
+                    onValueChange = { v -> text = Dates.displayField(Dates.decimalInput(v, 6)) },
                     label = { Text("وزن (کیلوگرم)") },
+                    placeholder = { Text("مثلاً ۶۲") },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp)
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { text.toFloatOrNull()?.let(onSave) }) { Text("ذخیره") }
+            TextButton(onClick = { Dates.parseNum(text)?.let(onSave) }) { Text("ذخیره") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف") } }
     )
@@ -680,6 +761,21 @@ private fun greetingEmoji(): String = when (java.time.LocalTime.now().hour) {
     else -> "🌙"
 }
 
+private fun skinHint(ci: CheckIn?): String = when {
+    ci == null || ci.skinStatus.isBlank() -> "برای دیدن راهنمای پوست، امروز ثبت کن"
+    ci.skinStatus.contains("بهتر") -> "روتین فعلی‌ات دارد جواب می‌دهد"
+    ci.skinStatus.contains("بدتر") -> "روتین را ساده‌تر کن و مرطوب‌کننده بزن"
+    else -> "روتین ساده و ضدآفتاب را ادامه بده"
+}
+
+private fun fatigueHint(ci: CheckIn?): String = when {
+    ci == null || ci.fatigueSeverity.isBlank() -> "برای پیگیری انرژی، امروز ثبت کن"
+    ci.fatigueSeverity.contains("خیلی زیاد") || ci.fatigueSeverity.contains("زیاد") ->
+        "امروز بار خودت را کم کن و بیشتر استراحت کن"
+    ci.fatigueSeverity.contains("متوسط") -> "یک استراحت کوتاه در میانه روز کمک می‌کند"
+    else -> "انرژی‌ات خوب است؛ همین ریتم را نگه دار"
+}
+
 private fun cycleSubtitle(profile: Profile?, today: CheckIn?): String {
     if (today?.isPeriodDay == true) return "امروز روز پریوده"
     val until = Health.daysUntilPeriod(profile) ?: return ""
@@ -691,10 +787,10 @@ private fun metricAverage(metric: String, points: List<Float>): String? {
     if (real.isEmpty()) return null
     val avg = real.average()
     return when (metric) {
-        "خواب" -> "${"%.1f".format(avg)} ساعت"
-        "آب" -> "${"%.0f".format(avg)} لیوان"
-        "انرژی" -> "${"%.0f".format(avg)}٪"
-        else -> "${"%.0f".format(avg)}"
+        "خواب" -> "${Dates.fa("%.1f".format(avg))} ساعت"
+        "آب" -> "${Dates.fa("%.0f".format(avg))} لیوان"
+        "انرژی" -> "${Dates.fa("%.0f".format(avg))}٪"
+        else -> Dates.fa("%.0f".format(avg))
     }
 }
 

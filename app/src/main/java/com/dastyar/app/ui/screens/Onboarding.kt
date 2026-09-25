@@ -195,11 +195,12 @@ fun PersonalSection(p: Profile, onChange: (Profile) -> Unit) {
 
     QuestionCard("🎂", "چند سالته؟", accent = Purple) {
         OutlinedTextField(
-            value = if (p.age == 0) "" else p.age.toString(),
+            value = Dates.displayField(if (p.age == 0) "" else p.age.toString()),
             onValueChange = {
-                onChange(p.copy(age = it.filter { c -> c.isDigit() }.take(3).toIntOrNull() ?: 0))
+                onChange(p.copy(age = Dates.digitsOnly(it, 3).toIntOrNull() ?: 0))
             },
             label = { Text("سن") },
+            placeholder = { Text("مثلاً ۲۸") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.width(160.dp),
             shape = RoundedCornerShape(14.dp),
@@ -212,23 +213,24 @@ fun PersonalSection(p: Profile, onChange: (Profile) -> Unit) {
     QuestionCard("📏", "قد و وزنت چنده؟", "برای محاسبه شاخص توده بدنی و پیشنهاد آب و خواب", Green) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
-                value = if (p.heightCm == 0) "" else p.heightCm.toString(),
+                value = Dates.displayField(if (p.heightCm == 0) "" else p.heightCm.toString()),
                 onValueChange = {
-                    onChange(p.copy(heightCm = it.filter { c -> c.isDigit() }.take(3).toIntOrNull() ?: 0))
+                    onChange(p.copy(heightCm = Dates.digitsOnly(it, 3).toIntOrNull() ?: 0))
                 },
                 label = { Text("قد (سانتی‌متر)") },
+                placeholder = { Text("۱۶۵") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true
             )
             OutlinedTextField(
-                value = if (p.weightKg == 0f) "" else p.weightKg.toString(),
+                value = Dates.displayField(if (p.weightKg == 0f) "" else p.weightKg.toString()),
                 onValueChange = { v ->
-                    val t = v.filter { c -> c.isDigit() || c == '.' }.take(5)
-                    onChange(p.copy(weightKg = t.toFloatOrNull() ?: 0f))
+                    onChange(p.copy(weightKg = Dates.decimalInput(v, 5).toFloatOrNull() ?: 0f))
                 },
                 label = { Text("وزن (کیلوگرم)") },
+                placeholder = { Text("۶۲") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(14.dp),
@@ -237,12 +239,12 @@ fun PersonalSection(p: Profile, onChange: (Profile) -> Unit) {
         }
         Spacer(Modifier.height(14.dp))
         OutlinedTextField(
-            value = if (p.targetWeightKg == 0f) "" else p.targetWeightKg.toString(),
+            value = Dates.displayField(if (p.targetWeightKg == 0f) "" else p.targetWeightKg.toString()),
             onValueChange = { v ->
-                val t = v.filter { c -> c.isDigit() || c == '.' }.take(5)
-                onChange(p.copy(targetWeightKg = t.toFloatOrNull() ?: 0f))
+                onChange(p.copy(targetWeightKg = Dates.decimalInput(v, 5).toFloatOrNull() ?: 0f))
             },
             label = { Text("وزن هدف (اختیاری)") },
+            placeholder = { Text("۵۸") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -347,10 +349,10 @@ fun PeriodSection(p: Profile, onChange: (Profile) -> Unit) {
 
     QuestionCard("😣", "شدت معمول دردت چقدره؟", "۰ یعنی بدون درد، ۱۰ یعنی خیلی شدید", Pink) {
         SingleChoiceChips(
-            options = (0..10).map { it.toString() },
-            selected = p.periodPainLevel.toString(),
+            options = (0..10).map { Dates.fa(it) },
+            selected = Dates.fa(p.periodPainLevel),
             accent = Pink
-        ) { onChange(p.copy(periodPainLevel = it.toIntOrNull() ?: 0)) }
+        ) { onChange(p.copy(periodPainLevel = Dates.parseNum(it)?.toInt() ?: 0)) }
     }
     Spacer(Modifier.height(14.dp))
 
@@ -577,8 +579,8 @@ fun FatigueSection(p: Profile, onChange: (Profile) -> Unit) {
 
     QuestionCard("🛏", "معمولاً چند ساعت می‌خوابی؟", accent = Cyan) {
         OutlinedTextField(
-            value = if (p.sleepHours == 0f) "" else p.sleepHours.toString(),
-            onValueChange = { onChange(p.copy(sleepHours = it.toFloatOrNull() ?: 0f)) },
+            value = Dates.displayField(if (p.sleepHours == 0f) "" else p.sleepHours.toString()),
+            onValueChange = { onChange(p.copy(sleepHours = Dates.decimalInput(it, 4).toFloatOrNull() ?: 0f)) },
             label = { Text("ساعت") },
             placeholder = { Text("مثلاً ۷.۵") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),

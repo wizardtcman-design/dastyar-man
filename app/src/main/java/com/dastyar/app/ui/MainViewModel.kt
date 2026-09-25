@@ -66,11 +66,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val loadingCondition: StateFlow<Boolean> = _loadingCondition.asStateFlow()
 
     private var conditionLoadedFor: String? = null
+    private var conditionTopicIndex = 0
 
     /**
      * Produces a short, educational explanation of the conditions the user
-     * declared in their profile. Cached per condition text so it is not
-     * regenerated on every visit. Silently does nothing when AI is unavailable.
+     * declared in their profile. Each forced load advances to a new topic, so
+     * the card shows fresh, relevant content over time instead of a fixed
+     * paragraph. Silently does nothing when AI is unavailable.
      */
     fun loadConditionInfo(force: Boolean = false) = viewModelScope.launch {
         val p = profile.value ?: return@launch
@@ -81,12 +83,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (!force && conditionLoadedFor == conditions && _conditionInfo.value != null) return@launch
         if (!AiClient.chatConfigured) return@launch
+        if (force || conditionLoadedFor != conditions) {
+            conditionTopicIndex = (conditionTopicIndex + 1) % Prompts.conditionTopics.size
+        }
+        val topic = Prompts.conditionTopics[conditionTopicIndex]
 
         _loadingCondition.value = true
         val res = AiClient.chat(
             system = Prompts.base(),
             history = emptyList(),
-            userMessage = Prompts.conditionPrompt(conditions, p.medications.trim(), p)
+            userMessage = Prompts.conditionPrompt(conditions, p.medications.trim(), p, topic)
         )
         _loadingCondition.value = false
         res.onSuccess { text ->
@@ -249,7 +255,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Builds the suggestion lines from recorded data only. Used as the instant
-     * result and as the fallback when the AI is unavailable.
+     * result and as the fallback when the AI is unavailable. Every line is
+     * derived from something the user actually recorded, so the plan changes as
+     * their data changes instead of repeating a fixed text.
      */
     private fun buildLocalLines(
         p: Profile?,
@@ -260,32 +268,68 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val out = mutableListOf<String>()
         val glasses = ci?.waterGlasses ?: 0
         val remaining = (waterGoal - glasses).coerceAtLeast(0)
-        out += if (remaining > 0) "💧 آب | هدف امروز $waterGoal لیوان است؛ $remaining لیوان دیگر بنوش"
+        out += if (remaining > 0) "💧 آب | هدف امروز ${Dates.fa(waterGoal)} لیوان است؛ ${Dates.fa(remaining)} لیوان دیگر بنوش"
         else "💧 آب | هدف آب امروز کامل شد، عالی بود"
 
         val sleepRange = Health.sleepTargetHours(p)
         val target = "${Dates.fa(sleepRange.start.toInt())} تا ${Dates.fa(sleepRange.endInclusive.toInt())}"
         out += "😴 خواب | امشب بین $target ساعت بخواب"
 
-        Health.restAdvice(ci)?.let { out += "🛋 استراحت | $it" }
+        // Fatigue-aware rest line, only when the user reported fatigue today.
+        when {
+            ci?.fatigueSeverity?.contains("خیلی زیاد") == true ->
+                out += "🛋 استراحت | خستگی‌ات زیاد است؛ امروز کارهای سنگین را به فردا بسپار"
+            ci?.fatigueSeverity?.contains("زیاد") == true ->
+                out += "🛋 استراحت | یک استراحت ۱۵ دقیقه‌ای بین کارها بگذار"
+            else -> Health.restAdvice(ci)?.let { out += "🛋 استراحت | $it" }
+        }
+
         Health.activityMinutes(ci)?.let {
             out += "🚶 فعالیت | حدود ${Dates.fa(it)} دقیقه فعالیت سبک مناسب امروزه"
         }
         Health.sleepAdvice(p, ci)?.let { out += "😴 خواب | $it" }
 
-        // Period line only when there is real cycle data.
+        // Stress-aware line, only when stress was actually reported.
+        when (ci?.stressLevel) {
+            "خیلی زیاد", "زیاد" ->
+                out += "🧘 آرامش | چند دقیقه نفس عمیق یا پیاده‌روی آرام، استرست را کم می‌کند"
+            "متوسط" ->
+                out += "🧘 آرامش | یک وقفهٔ کوتاه بدون گوشی در برنامه امروزت بگذار"
+        }
+
+        // Period care line only when there is real cycle data.
         if (p?.lastPeriodDate?.isNotBlank() == true) {
             val until = Dates.daysUntilNextPeriod(p.lastPeriodDate, p.cycleLength)
             if (ci?.isPeriodDay == true) {
-                out += "🩷 پریود | امروز روز پریوده؛ آب و استراحت را بیشتر کن"
+                out += "🩷 پریود | امروز روز پریوده؛ آب، آهن و استراحت را بیشتر کن"
             } else if (until in 0..3) {
-                out += "🩷 پریود | حدود ${Dates.fa(until)} روز تا پریود بعدی مانده"
+                out += "🩷 پریود | حدود ${Dates.fa(until)} روز تا پریود بعدی مانده؛ آهن و آب را جدی بگیر"
             }
         }
 
         // Skin line only when the user reported something today.
         ci?.skinStatus?.takeIf { it.isNotBlank() }?.let {
-            out += "✨ پوست | وضعیت امروز «$it» ثبت شد؛ روتین ساده و ضدآفتاب را ادامه بده"
+            out += when {
+                it.contains("بدتر") -> "✨ پوست | امروز روتینت را ساده کن؛ فقط شست‌وشوی ملایم و مرطوب‌کننده"
+                it.contains("بهتر") -> "✨ پوست | روتین فعلی‌ات جواب داده؛ ضدآفتاب را قطع نکن"
+                else -> "✨ پوست | روتین ساده و ضدآفتاب را ادامه بده"
+            }
+        }
+
+        // Weight-goal line only when a target and current weight both exist.
+        val bmi = Health.bmi(p)
+        if (p != null && p.targetWeightKg > 0f && p.weightKg > 0f && bmi != null) {
+            val diff = p.weightKg - p.targetWeightKg
+            if (diff > 0.5f) {
+                out += "⚖️ وزن | ${Dates.fa(diff, 1)} کیلو تا وزن هدفت مانده؛ کم‌کم و پیوسته پیش برو"
+            } else if (diff < -0.5f) {
+                out += "⚖️ وزن | به وزن هدفت رسیدی؛ برای حفظش همین ریتم را نگه دار"
+            }
+        }
+
+        // Condition-aware line only when the user declared one.
+        p?.medicalConditions?.takeIf { it.isNotBlank() }?.let {
+            out += "🩺 شرایط | با توجه به «$it» که ثبت کردی، پیشنهادهای امروز ایمن‌تر انتخاب شده‌اند"
         }
 
         Health.highlights(history)?.forEach { out += "📊 روند | $it" }

@@ -59,8 +59,70 @@ object Dates {
         return normalized.toFloatOrNull()
     }
 
+    /**
+     * A clean HH:mm value while typing. Accepts Persian or Latin digits and a
+     * single colon; stored internally with Latin digits.
+     */
+    fun timeInput(input: String, max: Int = 5): String {
+        val out = StringBuilder()
+        var colon = false
+        for (c in input) {
+            val idx = "۰۱۲۳۴۵۶۷۸۹".indexOf(c)
+            when {
+                idx >= 0 && out.count { it.isDigit() } < 4 -> out.append(('0' + idx))
+                c.isDigit() && out.count { it.isDigit() } < 4 -> out.append(c)
+                (c == ':' || c == '٫') && !colon && out.isNotEmpty() -> { out.append(':'); colon = true }
+            }
+            if (out.length >= max) break
+        }
+        return out.toString()
+    }
+
     /** Time like "09:00" rendered with Persian digits. */
     fun faTime(hhmm: String): String = fa(hhmm)
+
+    /**
+     * Converts a number field's displayed text to Persian digits, keeping the
+     * user's decimal point. Empty stays empty so no stray zero appears.
+     */
+    fun displayField(raw: String): String {
+        if (raw.isBlank()) return ""
+        return fa(raw)
+    }
+
+    /** Digits typed (Persian or Latin) stripped of everything else. */
+    fun digitsOnly(input: String, max: Int = 4): String {
+        val faDigits = "۰۱۲۳۴۵۶۷۸۹"
+        val sb = StringBuilder()
+        input.forEach { c ->
+            val idx = faDigits.indexOf(c)
+            when {
+                idx >= 0 -> sb.append(('0' + idx))
+                c.isDigit() -> sb.append(c)
+            }
+        }
+        return sb.toString().take(max)
+    }
+
+    /**
+     * A clean decimal field value: digits (Persian or Latin accepted) plus at
+     * most one dot, capped in length. Used while the user types so the field
+     * never shows a stray leading zero and accepts both keyboards.
+     */
+    fun decimalInput(input: String, max: Int = 6): String {
+        val digits = StringBuilder()
+        var dotSeen = false
+        for (c in input) {
+            val idx = "۰۱۲۳۴۵۶۷۸۹".indexOf(c)
+            when {
+                idx >= 0 -> digits.append(('0' + idx))
+                c.isDigit() -> digits.append(c)
+                (c == '.' || c == '٫') && !dotSeen -> { digits.append('.'); dotSeen = true }
+            }
+            if (digits.length >= max) break
+        }
+        return digits.toString()
+    }
 
     /** Cycle day, wrapped into the cycle length. 0 when unknown. */
     fun cycleDay(lastPeriodIso: String, cycleLength: Int): Int {
