@@ -176,13 +176,27 @@ object Prompts {
             if (avgWater != null) info.append("میانگین آب ۷ روز اخیر: ${"%.1f".format(avgWater)} لیوان. ")
         }
         if (profile?.lastPeriodDate?.isNotBlank() == true) {
-            info.append("روز ${Dates.cycleDay(profile.lastPeriodDate, profile.cycleLength)} چرخه. ")
+            val day = Dates.cycleDay(profile.lastPeriodDate, profile.cycleLength)
+            info.append("روز ${day} چرخه. ")
+            Health.phase(profile)?.let { info.append("مرحله چرخه: ${it.title}. ") }
+            Health.daysUntilPeriod(profile)?.let { info.append("$it روز تا پریود بعدی. ") }
         }
+        // Yesterday's real record, so the plan can react to the direction of
+        // change instead of repeating the same advice.
+        val previous = history.filter { it.date != (today?.date ?: Dates.today()) }.maxByOrNull { it.date }
+        if (previous != null) {
+            info.append("روز قبل: انرژی ${previous.energyLevel.ifBlank { "-" }}، ")
+            info.append("خواب ${previous.sleepHours} ساعت، آب ${previous.waterGlasses} لیوان. ")
+        }
+        val conditions = profile?.medicalConditions?.trim().orEmpty()
+        if (conditions.isNotBlank()) info.append("شرایط پزشکی ثبت‌شده: $conditions. ")
+        val meds = profile?.medications?.trim().orEmpty()
+        if (meds.isNotBlank()) info.append("داروهای ثبت‌شده: $meds. ")
         if (profile?.skinType?.isNotBlank() == true) info.append("نوع پوست ${profile.skinType}. ")
         if (profile?.acneLevel?.isNotBlank() == true) info.append("میزان جوش ${profile.acneLevel}. ")
         if (profile?.weightKg?.let { it > 0f } == true) info.append("وزن ${profile.weightKg} کیلوگرم. ")
         if (profile?.targetWeightKg?.let { it > 0f } == true) info.append("وزن هدف ${profile.targetWeightKg} کیلوگرم. ")
-        if (profile?.age?.let { it > 0 } == true) info.append("سن ${profile.age} سال. ") 
+        if (profile?.age?.let { it > 0 } == true) info.append("سن ${profile.age} سال. ")
 
         // Today's fuller picture, so the lines can respond to fatigue and stress.
         if (today != null) {
@@ -191,11 +205,6 @@ object Prompts {
             if (today.stressLevel.isNotBlank()) info.append("استرس امروز ${today.stressLevel}. ")
             if (today.skinInflammation.isNotBlank()) info.append("التهاب پوست ${today.skinInflammation}. ")
         }
-
-        val conditions = profile?.medicalConditions?.trim().orEmpty()
-        val meds = profile?.medications?.trim().orEmpty()
-        if (conditions.isNotBlank()) info.append("شرایط پزشکی اعلام‌شده کاربر: $conditions. ")
-        if (meds.isNotBlank()) info.append("داروهای کاربر: $meds. ")
 
         if (facts.isNotEmpty()) {
             info.append("الگوهای آموخته‌شده: ")
@@ -218,16 +227,20 @@ object Prompts {
 🚶 فعالیت | یک جمله کوتاه درباره فعالیت سبک مناسب امروز
 🧘 آرامش | یک جمله کوتاه اگر استرس امروز زیاد بود (وگرنه این خط را ننویس)
 ✨ پوست | یک جمله کوتاه بر اساس وضعیت پوست امروز
-🩷 پریود | یک جمله کوتاه (اگر مرتبط نیست بنویس: 🩷 پریود | —)
+📈 روند | یک جمله کوتاه از مقایسه امروز با روز قبل (بهتر یا بدتر)، فقط اگر واقعاً تفاوت هست
+🌸 چرخه | یک جمله متناسب با مرحله فعلی چرخه (اگر داده چرخه نیست ننویس)
 🩺 شرایط | یک جمله مراقبتی ایمن با توجه به شرایط اعلام‌شده (اگر شرایطی نیست ننویس)
 
 قواعد:
 - بین ۴ تا ۶ خط، فقط همان‌هایی که برای کاربر مرتبط است. اگر موضوعی مرتبط نیست، آن خط را کلاً ننویس.
 - متن هر روز باید بر اساس داده‌های همان روز متفاوت باشد؛ جمله‌های کلی و تکراری ننویس.
+- اگر وضعیت امروز بهتر از روز قبل است، لحن تشویقی و اگر بدتر است، لحن محتاطانه و حمایتی بده.
+- شرایط پزشکی را فقط وقتی در نظر بگیر که ارتباط منطقی با خط مربوطه وجود دارد؛ بی‌دلیل به آن اشاره نکن.
 - هر جمله حداکثر ۱۵ کلمه، محاوره‌ای و بدون تکرار.
 - از داده‌ای که به تو داده نشده حرف نزن و عدد جدید از خودت نساز.
 - اگر شرایط پزشکی اعلام شده، پیشنهادت با آن در تناقض نباشد؛ در تناقض پیشنهاد ایمن‌تر بده.
-- هرگز تشخیص پزشکی نده و ادعا نکن بیماری کاربر علت یک علامت است.
+- هرگز تشخیص پزشکی نده، علت قطعی علائم را اعلام نکن، دارو تجویز نکن و درمان شخصی قطعی پیشنهاد نده.
+- در صورت وجود علامت هشدار، کاربر را به پزشک ارجاع بده.
 """.trimIndent()
     }
 
@@ -301,29 +314,51 @@ $recentUserMessages
         conditions: String,
         medications: String,
         profile: Profile?,
-        topic: String = "اطلاعات عمومی"
+        topic: String = "اطلاعات عمومی",
+        today: CheckIn? = null
     ): String {
         val who = StringBuilder()
         if (profile?.age?.let { it > 0 } == true) who.append("سن کاربر: ${profile.age}. ")
         if (profile?.weightKg?.let { it > 0f } == true) who.append("وزن: ${profile.weightKg} کیلوگرم. ")
+
+        // Today's own recorded state, so the note can connect to daily life only
+        // when there is a real, logical link.
+        val link = StringBuilder()
+        today?.let { ci ->
+            if (ci.sleepHours > 0f) link.append("خواب دیشب: ${ci.sleepHours} ساعت. ")
+            if (ci.waterGlasses > 0) link.append("آب امروز: ${ci.waterGlasses} لیوان. ")
+            if (ci.energyLevel.isNotBlank()) link.append("انرژی امروز: ${ci.energyLevel}. ")
+            if (ci.fatigueSeverity.isNotBlank()) link.append("بی‌رمقی امروز: ${ci.fatigueSeverity}. ")
+            if (ci.stressLevel.isNotBlank()) link.append("استرس امروز: ${ci.stressLevel}. ")
+            if (ci.skinStatus.isNotBlank()) link.append("وضعیت پوست امروز: ${ci.skinStatus}. ")
+            if (ci.physicalActivity.isNotBlank()) link.append("فعالیت امروز: ${ci.physicalActivity}. ")
+        }
+        if (profile?.lastPeriodDate?.isNotBlank() == true) {
+            Health.phase(profile)?.let { link.append("مرحله چرخه: ${it.title}. ") }
+        }
+
         return """
 کاربر در پروفایل خود این شرایط را اعلام کرده است:
 «$conditions»
 داروهای اعلام‌شده: ${medications.ifBlank { "هیچ" }}
 $who
+وضعیت امروز کاربر: ${link.toString().ifBlank { "ثبت نشده" }}
 
 امروز فقط روی این موضوع تمرکز کن: «$topic»
 
 خروجی را دقیقاً در دو بخش بنویس:
 
 💡 $topic | دو تا سه جمله کوتاه، دقیق و مفید مخصوصاً درباره همین موضوع
-👩‍⚕️ نکته مهم | یک جمله درباره اینکه چه زمانی یا چرا باید با پزشک در میان بگذارد
+👩‍⚕️ نکته مهم | یک جمله درباره علامت هشدار یا زمان مراجعه به پزشک
 
 قواعد:
-- درباره همین موضوع بنویس و آن را تکرار موضوعات قبلی نکن.
+- درباره همین موضوع بنویس و آن را تکرار موضوعات قبلی نکن؛ اطلاعات تازه و مفید بده.
+- اگر و فقط اگر ارتباط منطقی با وضعیت امروز کاربر وجود دارد، یک اشاره کوتاه به آن بکن.
+  بی‌دلیل به خواب، آب، تغذیه، انرژی، بی‌رمقی، پوست، چرخه یا فعالیت اشاره نکن.
 - این توضیح آموزشی است، نه تشخیص. هیچ‌جا نگو کاربر قطعاً این بیماری را دارد.
-- هیچ دارو یا دوزی تجویز نکن.
-- ادعا نکن این شرایط علت یک علامت خاص کاربر است.
+- علت قطعی علائم را اعلام نکن و ادعا نکن این شرایط علت یک علامت خاص است.
+- هیچ دارو یا دوزی تجویز نکن و درمان شخصی قطعی پیشنهاد نده.
+- اطلاعات درمانی فقط در سطح عمومی و شناخته‌شده بمان؛ جزئیات درمان را به پزشک واگذار کن.
 - فارسی، ساده، گرم و بدون ترس‌آفرینی بنویس. حداکثر ۴ خط.
 """.trimIndent()
     }

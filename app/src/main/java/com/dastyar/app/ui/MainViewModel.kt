@@ -55,6 +55,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _loadingSuggestion = MutableStateFlow(false)
     val loadingSuggestion: StateFlow<Boolean> = _loadingSuggestion.asStateFlow()
 
+    // A short note when personalising with AI failed. The plan itself is always
+    // still there, so this never replaces content, only annotates it.
+    private val _suggestionError = MutableStateFlow<String?>(null)
+    val suggestionError: StateFlow<String?> = _suggestionError.asStateFlow()
+
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
 
@@ -65,8 +70,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _loadingCondition = MutableStateFlow(false)
     val loadingCondition: StateFlow<Boolean> = _loadingCondition.asStateFlow()
 
+    // A real, human-readable message when the AI could not be reached, so the
+    // card shows an honest error instead of a silent empty state.
+    private val _conditionError = MutableStateFlow<String?>(null)
+    val conditionError: StateFlow<String?> = _conditionError.asStateFlow()
+
     private var conditionLoadedFor: String? = null
     private var conditionTopicIndex = 0
+
+    private companion object {
+        /** Persisted key for the last successfully generated condition card. */
+        const val FACT_CONDITION_CARD = "کارت شرایط پزشکی"
+        const val FACT_SUGGESTION_AI = "پیشنهاد هوشمند امروز"
+    }
 
     // ---- smart tip for the current cycle day ----
     private val _cycleTip = MutableStateFlow<String?>(null)
@@ -75,17 +91,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _loadingCycleTip = MutableStateFlow(false)
     val loadingCycleTip: StateFlow<Boolean> = _loadingCycleTip.asStateFlow()
 
+    private val _cycleTipError = MutableStateFlow<String?>(null)
+    val cycleTipError: StateFlow<String?> = _cycleTipError.asStateFlow()
+
     private var cycleTipLoadedFor: String? = null
 
     /**
      * Personalises today's cycle tip with AI when it is available, using the
      * real cycle day, phase, length and today's check-in. The local phase tip is
-     * already shown by the UI, so any failure simply keeps that text.
+     * already shown by the UI, so any failure simply keeps that text and only
+     * adds a short note.
      */
     fun loadCycleTip(force: Boolean = false) = viewModelScope.launch {
         val p = profile.value ?: return@launch
         val phase = Health.phase(p) ?: run {
             _cycleTip.value = null
+            _cycleTipError.value = null
             return@launch
         }
         val day = Health.cycleDay(p)
@@ -94,6 +115,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!AiClient.chatConfigured) return@launch
 
         _loadingCycleTip.value = true
+        _cycleTipError.value = null
         val res = AiClient.chat(
             system = Prompts.base(),
             history = emptyList(),
@@ -111,8 +133,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val cleaned = text.trim()
             if (cleaned.isNotBlank()) {
                 _cycleTip.value = cleaned
+                _cycleTipError.value = null
                 cycleTipLoadedFor = key
             }
+        }.onFailure {
+            // The local tip is already on screen; just note that personalising failed.
+            _cycleTipError.value = "شخصی‌سازی با هوش مصنوعی انجام نشد؛ پیشنهاد عمومی همین روز نمایش داده می‌شود."
         }
     }
 
@@ -120,27 +146,50 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Produces a short, educational explanation of the conditions the user
      * declared in their profile. Each forced load advances to a new topic, so
      * the card shows fresh, relevant content over time instead of a fixed
-     * paragraph. Silently does nothing when AI is unavailable.
+     * paragraph.
+     *
+     * Behaviour on failure: the last successfully generated text is kept
+     * visible and a clear Persian error is surfaced — the dashboard never
+     * empties out and the app never crashes.
      */
     fun loadConditionInfo(force: Boolean = false) = viewModelScope.launch {
         val p = profile.value ?: return@launch
         val conditions = p.medicalConditions.trim()
         if (conditions.isBlank()) {
             _conditionInfo.value = null
+            _conditionError.value = null
             return@launch
         }
-        if (!force && conditionLoadedFor == conditions && _conditionInfo.value != null) return@launch
-        if (!AiClient.chatConfigured) return@launch
-        if (force || conditionLoadedFor != conditions) {
-            conditionTopicIndex = (conditionTopicIndex + 1) % Prompts.conditionTopics.size
+
+        // Restore the last good card from storage the first time we open the
+        // dashboard, or when the declared condition changed.
+        if (_conditionInfo.value == null) {
+            val stored = withContext(Dispatchers.IO) { dao.smartFact(FACT_CONDITION_CARD)?.value }
+            if (stored != null && conditionLoadedFor == conditions) _conditionInfo.value = stored
         }
+
+        if (!force && conditionLoadedFor == conditions && _conditionInfo.value != null) return@launch
+
+        if (!AiClient.chatConfigured) {
+            // No key at all: keep any stored content, explain how to fix it.
+            _conditionError.value = "برای تولید توضیح، کلید هوش مصنوعی در تنظیمات ثبت نشده است. " +
+                    "اطلاعات ثبت‌شده خودت پایین همین کارت باقی می‌ماند."
+            return@launch
+        }
+
+        conditionTopicIndex = if (force || conditionLoadedFor != conditions) {
+            (conditionTopicIndex + 1) % Prompts.conditionTopics.size
+        } else conditionTopicIndex
         val topic = Prompts.conditionTopics[conditionTopicIndex]
 
         _loadingCondition.value = true
+        _conditionError.value = null
         val res = AiClient.chat(
             system = Prompts.base(),
             history = emptyList(),
-            userMessage = Prompts.conditionPrompt(conditions, p.medications.trim(), p, topic)
+            userMessage = Prompts.conditionPrompt(
+                conditions, p.medications.trim(), p, topic, today = _todayCheckIn.value
+            )
         )
         _loadingCondition.value = false
         res.onSuccess { text ->
@@ -150,8 +199,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .joinToString("\n")
             if (cleaned.isNotBlank()) {
                 _conditionInfo.value = cleaned
+                _conditionError.value = null
                 conditionLoadedFor = conditions
+                withContext(Dispatchers.IO) {
+                    dao.saveFact(SmartFact(key = FACT_CONDITION_CARD, value = cleaned, source = "condition"))
+                }
+            } else {
+                _conditionError.value = "پاسخ مناسبی از سرویس هوش مصنوعی دریافت نشد. دوباره تلاش کن."
             }
+        }.onFailure {
+            // Keep whatever we already have; explain the problem plainly.
+            _conditionError.value = it.message ?: "اتصال به هوش مصنوعی ناموفق بود. دوباره تلاش کن."
         }
     }
 
@@ -357,6 +415,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         Health.sleepAdvice(p, ci)?.let { out += "😴 خواب | $it" }
 
+        // Direction-of-change line: compare today's energy/water with yesterday's
+        // real record, so the plan acknowledges improvement or a rough day.
+        val previous = history.filter { it.date != (ci?.date ?: Dates.today()) }.maxByOrNull { it.date }
+        if (ci != null && previous != null) {
+            val todayEnergy = energyScore(ci)
+            val prevEnergy = energyScore(previous)
+            if (todayEnergy != null && prevEnergy != null) {
+                when {
+                    todayEnergy - prevEnergy >= 15 ->
+                        out += "📈 روند | انرژی‌ات نسبت به روز قبل بهتر شده؛ همین روند را با خواب منظم حفظ کن"
+                    prevEnergy - todayEnergy >= 15 ->
+                        out += "📉 روند | امروز انرژی‌ات کمتر از روز قبل است؛ بار کارت را کم کن و بیشتر استراحت کن"
+                }
+            }
+            if (ci.waterGlasses < previous.waterGlasses - 2) {
+                out += "💧 روند | آبت نسبت به روز قبل کمتر شده؛ امروز جبران کن"
+            }
+        }
+
         // Stress-aware line, only when stress was actually reported.
         when (ci?.stressLevel) {
             "خیلی زیاد", "زیاد" ->
@@ -368,10 +445,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Period care line only when there is real cycle data.
         if (p?.lastPeriodDate?.isNotBlank() == true) {
             val until = Dates.daysUntilNextPeriod(p.lastPeriodDate, p.cycleLength)
+            val phase = Health.phase(p)
             if (ci?.isPeriodDay == true) {
                 out += "🩷 پریود | امروز روز پریوده؛ آب، آهن و استراحت را بیشتر کن"
+            } else if (phase == Health.CyclePhase.OVULATION) {
+                out += "🌸 چرخه | در بازه تخمک‌گذاری هستی؛ احتمال باروری بیشتر است و این روش پیشگیری قطعی نیست"
             } else if (until in 0..3) {
                 out += "🩷 پریود | حدود ${Dates.fa(until)} روز تا پریود بعدی مانده؛ آهن و آب را جدی بگیر"
+            } else if (phase == Health.CyclePhase.LUTEAL) {
+                out += "🌙 چرخه | در مرحله لوتئالی؛ خواب منظم و کافئین کمتر به نوسان انرژی و خلق کمک می‌کند"
             }
         }
 
@@ -427,11 +509,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (local != null) _suggestion.value = local
 
         if (!AiClient.chatConfigured) {
-            if (local == null) _toast.value = "کلید هوش مصنوعی تنظیم نشده است."
+            if (local == null) {
+                _toast.value = "کلید هوش مصنوعی تنظیم نشده است."
+            } else {
+                _suggestionError.value = "شخصی‌سازی با هوش مصنوعی غیرفعال است؛ " +
+                        "این پیشنهادها از داده‌های خودت ساخته شده‌اند."
+            }
             return@launch
         }
 
         _loadingSuggestion.value = true
+        _suggestionError.value = null
         val p = profile.value
         val ci = _todayCheckIn.value
         val goal = Health.waterTarget(p, ci)
@@ -456,13 +544,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (cleaned.isNotBlank()) {
                 val merged = local?.copy(content = cleaned) ?: DailySuggestion(t, cleaned, goal)
                 _suggestion.value = merged
+                _suggestionError.value = null
                 dao.saveSuggestion(merged)
-            } else if (local != null) {
-                dao.saveSuggestion(local)
+            } else {
+                if (local != null) dao.saveSuggestion(local)
+                _suggestionError.value = "پاسخ مناسبی از سرویس هوش مصنوعی نرسید؛ " +
+                        "پیشنهادهای محلی نمایش داده می‌شوند."
             }
         }.onFailure {
-            // Keep the local plan; only surface a genuine problem.
-            if (local != null) dao.saveSuggestion(local) else _toast.value = it.message
+            // Keep the local plan; surface an honest, non-alarming message.
+            if (local != null) {
+                dao.saveSuggestion(local)
+                _suggestionError.value = "اتصال به هوش مصنوعی برقرار نشد؛ " +
+                        "پیشنهادهای محلی نمایش داده می‌شوند."
+            } else {
+                _toast.value = it.message
+            }
         }
     }
 
@@ -531,6 +628,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteFact(f: SmartFact) = viewModelScope.launch(Dispatchers.IO) { dao.deleteFact(f.id) }
+
+    /** Rough 0-100 energy estimate from a check-in, or null when not recorded. */
+    private fun energyScore(ci: CheckIn): Int? = when {
+        ci.energyLevel.contains("خیلی خوب") -> 95
+        ci.energyLevel.contains("خوب") -> 80
+        ci.energyLevel.contains("متوسط") -> 60
+        ci.energyLevel.contains("خیلی کم") -> 20
+        ci.energyLevel.contains("کم") -> 38
+        else -> null
+    }
 
     // ---- learning consent (stored as a plain preference fact) ----
 
