@@ -50,7 +50,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     var showSettings by remember { mutableStateOf(false) }
     var showWeightDialog by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(Range.D7) }
-    var metric by remember { mutableStateOf("انرژی") }
+    var selectedMetrics by remember { mutableStateOf(setOf(Metric.ENERGY, Metric.SLEEP)) }
 
     if (showSettings) {
         SettingsScreen(vm, onClose = { showSettings = false })
@@ -62,12 +62,21 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     val water = today?.waterGlasses ?: 0
     val energyPct = energyPercent(today)
     val cycleDay = Health.cycleDay(profile)
+    val cyclePhase = Health.phaseLabel(profile)
+    val daysUntilPeriod = Health.daysUntilPeriod(profile)
+    val cycleTipLocal = remember(profile, today) { Health.cycleTip(profile, today) }
+    val cycleTip by vm.cycleTip.collectAsState()
+    val loadingCycleTip by vm.loadingCycleTip.collectAsState()
     val localPlan = remember(profile, today, checkIns) { vm.localPlan() }
     val conditionInfo by vm.conditionInfo.collectAsState()
     val loadingCondition by vm.loadingCondition.collectAsState()
 
     LaunchedEffect(profile?.medicalConditions) {
         vm.loadConditionInfo()
+    }
+
+    LaunchedEffect(cycleDay, cyclePhase) {
+        vm.loadCycleTip()
     }
 
     LazyColumn(
@@ -148,10 +157,22 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                 )
                 CycleTile(
                     cycleDay = cycleDay,
-                    subtitle = cycleSubtitle(profile, today),
+                    phase = cyclePhase,
+                    daysUntil = daysUntilPeriod,
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+
+        // ------------------------------------ smart tip for today's cycle day
+        item {
+            CycleTipCard(
+                localTip = cycleTipLocal,
+                aiTip = cycleTip,
+                loading = loadingCycleTip,
+                hasData = cycleTipLocal != null,
+                onRefresh = { vm.loadCycleTip(force = true) }
+            )
         }
 
         // ------------------------------------------------ skin & fatigue status
@@ -217,25 +238,27 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                     Range.entries.firstOrNull { it.label == picked }?.let { range = it }
                 }
                 Spacer(Modifier.height(10.dp))
-                val metrics = listOf("انرژی", "خواب", "آب", "پوست", "بی‌رمقی")
-                SingleChoiceChips(options = metrics, selected = metric, accent = Purple) { metric = it }
-                Spacer(Modifier.height(18.dp))
+                Text(
+                    "هر شاخص را می‌توانی روشن یا خاموش کنی؛ فقط داده‌های واقعی ثبت‌شده نمایش داده می‌شوند.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                MultiChoiceChips(
+                    options = MetricOptions.map { it.label },
+                    selected = selectedMetrics.map { it.label },
+                    accent = Purple
+                ) { pickedLabels ->
+                    val picked = MetricOptions.filter { it.label in pickedLabels }
+                    selectedMetrics = picked.toSet()
+                }
+                Spacer(Modifier.height(16.dp))
 
                 val days = Dates.lastDays(range.days)
                 val byDate = checkIns.associateBy { it.date }
-                val points = days.map { d ->
-                    val ci = byDate[d]
-                    when (metric) {
-                        "انرژی" -> energyPercent(ci).toFloat()
-                        "خواب" -> ci?.sleepHours ?: 0f
-                        "آب" -> (ci?.waterGlasses ?: 0).toFloat()
-                        "پوست" -> skinScore(ci).toFloat()
-                        "بی‌رمقی" -> fatigueScore(ci).toFloat()
-                        else -> 0f
-                    }
-                }
+                val anyData = days.any { d -> byDate[d] != null }
 
-                if (points.all { it == 0f }) {
+                if (!anyData) {
                     Text(
                         "برای دیدن نمودار، چند روز وضعیتت را ثبت کن. " +
                                 "فقط داده‌های واقعی تو نمایش داده می‌شود.",
@@ -243,24 +266,44 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    LineChart(
-                        values = points,
-                        labels = days.map { Dates.shortLabel(it) },
-                        color = when (metric) {
-                            "انرژی" -> Purple
-                            "خواب" -> Cyan
-                            "آب" -> Color(0xFF38BDF8)
-                            "پوست" -> Amber
-                            else -> Rose
-                        }
-                    )
-                    metricAverage(metric, points)?.let { avg ->
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "میانگین $avg",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    val series = MetricOptions.filter { it in selectedMetrics }.map { m ->
+                        ChartSeries(
+                            label = m.label,
+                            color = m.color,
+                            points = days.map { d ->
+                                val ci = byDate[d]
+                                if (ci == null) null
+                                else m.value(ci).toFloat() / m.scale * 100f
+                            }
                         )
+                    }
+                    MultiLineChart(
+                        values = days.map { Dates.shortLabel(it) },
+                        series = series
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    MetricOptions.filter { it in selectedMetrics }.forEach { m ->
+                        val real = days.mapNotNull { d -> byDate[d]?.let { m.value(it) } }
+                        val avg = if (real.isEmpty()) null else real.average()
+                        Row(
+                            Modifier.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(9.dp)
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(m.color)
+                            )
+                            Spacer(Modifier.width(7.dp))
+                            Text(m.label, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                if (avg == null) "ثبت نشده"
+                                else "میانگین ${m.format(avg)}",
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -454,45 +497,129 @@ private fun ConditionCard(
     }
 }
 
-/** Cycle tile, sized like the BMI tile next to it. */
+/** Cycle tile, deliberately laid out like the BMI tile next to it. */
 @Composable
-private fun CycleTile(cycleDay: Int, subtitle: String, modifier: Modifier = Modifier) {
-    Box(
+private fun CycleTile(
+    cycleDay: Int,
+    phase: String?,
+    daysUntil: Int?,
+    modifier: Modifier = Modifier
+) {
+    Column(
         modifier
+            .height(BodyTileHeight)
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
-            .padding(14.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.Top
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(34.dp)
-                        .clip(Shape.badge)
-                        .background(Pink.copy(alpha = .16f)),
-                    contentAlignment = Alignment.Center
-                ) { Text("🩷", fontSize = 17.sp) }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "چرخه پریود",
-                    fontSize = 12.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Spacer(Modifier.height(9.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(Shape.badge)
+                    .background(Pink.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("🩷", fontSize = 17.sp) }
+            Spacer(Modifier.width(8.dp))
             Text(
-                if (cycleDay > 0) "روز ${Dates.fa(cycleDay)}" else "ثبت نشده",
+                "چرخه پریود",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(9.dp))
+
+        if (cycleDay > 0) {
+            Text(
+                "روز ${Dates.fa(cycleDay)}",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
             )
-            if (subtitle.isNotBlank()) {
+            if (phase != null) {
                 Spacer(Modifier.height(3.dp))
+                Text(phase, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Pink)
+            }
+            Spacer(Modifier.height(6.dp))
+            if (daysUntil != null && daysUntil > 0) {
+                BmiRow("⏳", "پریود بعدی", "حدود ${Dates.fa(daysUntil)} روز دیگر")
+            } else {
+                BmiRow("🌸", "وضعیت", "امروز در بازه قاعدگی")
+            }
+        } else {
+            Text("ثبت نشده", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "برای محاسبه، تاریخ آخرین پریود را در پروفایل ثبت کن",
+                fontSize = 10.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** Fixed height shared by the BMI and cycle tiles so they stay the same size. */
+private val BodyTileHeight = 148.dp
+
+/**
+ * Full-width smart tip derived from the user's current cycle phase. It always
+ * uses real cycle data; when AI is available the text is personalised, and the
+ * local phase tip is shown instantly while that happens.
+ */
+@Composable
+private fun CycleTipCard(
+    localTip: String?,
+    aiTip: String?,
+    loading: Boolean,
+    hasData: Boolean,
+    onRefresh: () -> Unit
+) {
+    val shown = aiTip ?: localTip
+    DastyarCard(accent = Pink) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Pink.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("🌸", fontSize = 19.sp) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("پیشنهاد امروز برای چرخه تو 🌸", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(
-                    subtitle,
-                    fontSize = 10.5.sp,
+                    "بر اساس روز چرخه و اطلاعات خودت",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else if (hasData) {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "تولید دوباره")
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        if (!hasData || shown == null) {
+            Text(
+                "اطلاعات کافی برای محاسبه دقیق وجود ندارد. " +
+                        "تاریخ آخرین پریود، طول چرخه و مدت پریود را در پروفایل ثبت کن.",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(shown, fontSize = 13.sp, lineHeight = 21.sp)
+            if (loading) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "در حال شخصی‌سازی بیشتر…",
+                    fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -636,72 +763,67 @@ private fun BmiTile(
     val ageApplies = Health.bmiAdultBandsApply(profile)
     val latest = weights.lastOrNull()
 
-    Box(
+    Column(
         modifier
+            .height(BodyTileHeight)
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .clickable { onUpdate() }
-            .padding(14.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.Top
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(34.dp)
-                        .clip(Shape.badge)
-                        .background(Green.copy(alpha = .16f)),
-                    contentAlignment = Alignment.Center
-                ) { Text("⚖️", fontSize = 17.sp) }
-                Spacer(Modifier.width(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(Shape.badge)
+                    .background(Green.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("⚖️", fontSize = 17.sp) }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "قد و وزن",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(9.dp))
+
+        when {
+            bmi == null -> {
+                Text("ثبت نشده", fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "قد و وزن",
-                    fontSize = 12.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.weight(1f)
+                    "برای محاسبه BMI بزن",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(Modifier.height(9.dp))
-
-            when {
-                bmi == null -> {
-                    Text("ثبت نشده", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            else -> {
+                Text(
+                    "شاخص توده بدنی ${Dates.fa("%.1f".format(bmi))}",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (ageApplies && category != null) {
+                    Spacer(Modifier.height(3.dp))
+                    Tag(category, if (category == "محدوده معمول") Green else Amber)
+                } else {
+                    Spacer(Modifier.height(3.dp))
                     Text(
-                        "برای محاسبه BMI بزن",
-                        fontSize = 11.sp,
+                        "دسته‌بندی بزرگسالان برای سن تو مناسب نیست",
+                        fontSize = 10.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                else -> {
-                    Text(
-                        "شاخص توده بدنی ${Dates.fa("%.1f".format(bmi))}",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (ageApplies && category != null) {
-                        Spacer(Modifier.height(3.dp))
-                        Tag(category, if (category == "محدوده معمول") Green else Amber)
-                    } else {
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            "دسته‌بندی بزرگسالان برای سن تو مناسب نیست",
-                            fontSize = 10.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    latest?.let {
-                        Spacer(Modifier.height(6.dp))
-                        BmiRow("⚖️", "وزن", "${Dates.fa("%.1f".format(it.weightKg))} کیلوگرم")
-                        Spacer(Modifier.height(3.dp))
-                        BmiRow("📅", "آخرین ثبت", Dates.pretty(it.date))
-                    }
+                latest?.let {
+                    Spacer(Modifier.height(6.dp))
+                    BmiRow("⚖️", "وزن", "${Dates.fa("%.1f".format(it.weightKg))} کیلوگرم")
+                    Spacer(Modifier.height(3.dp))
+                    BmiRow("📅", "آخرین ثبت", Dates.pretty(it.date))
                 }
-            }
-
-            if (weights.size >= 2) {
-                Spacer(Modifier.height(10.dp))
-                WeightSpark(weights.takeLast(12).map { w -> w.weightKg })
             }
         }
     }
@@ -821,21 +943,89 @@ private fun fatigueHint(ci: CheckIn?): String = when {
     else -> "انرژی‌ات خوب است؛ همین ریتم را نگه دار"
 }
 
-private fun cycleSubtitle(profile: Profile?, today: CheckIn?): String {
-    if (today?.isPeriodDay == true) return "امروز روز پریوده"
-    val until = Health.daysUntilPeriod(profile) ?: return ""
-    return if (until <= 0) "دوران قاعدگی" else "${Dates.fa(until)} روز تا پریود بعدی"
+/**
+ * One togglable indicator in the unified trend chart. Every value comes from a
+ * real recorded check-in; a day without data is left as a gap, never filled in.
+ */
+private enum class Metric(val label: String, val color: Color, val scale: Float) {
+    ENERGY("انرژی", Purple, 100f),
+    SLEEP("خواب", Cyan, 12f),
+    WATER("آب", Color(0xFF38BDF8), 15f),
+    FATIGUE("بی‌رمقی", Rose, 100f),
+    SKIN("پوست", Amber, 100f);
+
+    fun value(ci: CheckIn): Int = when (this) {
+        ENERGY -> energyPercent(ci)
+        SLEEP -> (ci.sleepHours * 10f).toInt()
+        WATER -> ci.waterGlasses
+        FATIGUE -> fatigueScore(ci)
+        SKIN -> skinScore(ci)
+    }
+
+    /** Average of the raw (unscaled) values, formatted in Persian. */
+    fun format(avg: Double): String = when (this) {
+        SLEEP -> "${Dates.fa("%.1f".format(avg / 10f))} ساعت"
+        WATER -> "${Dates.fa("%.0f".format(avg))} لیوان"
+        else -> "${Dates.fa("%.0f".format(avg))}٪"
+    }
 }
 
-private fun metricAverage(metric: String, points: List<Float>): String? {
-    val real = points.filter { it > 0f }
-    if (real.isEmpty()) return null
-    val avg = real.average()
-    return when (metric) {
-        "خواب" -> "${Dates.fa("%.1f".format(avg))} ساعت"
-        "آب" -> "${Dates.fa("%.0f".format(avg))} لیوان"
-        "انرژی" -> "${Dates.fa("%.0f".format(avg))}٪"
-        else -> Dates.fa("%.0f".format(avg))
+private val MetricOptions = Metric.entries
+
+/** A named, coloured series for the multi-line chart. Null means "no data". */
+data class ChartSeries(val label: String, val color: Color, val points: List<Float?>)
+
+/**
+ * The unified status trend: several indicators on one chart, each with its own
+ * colour, on a shared 0-100 axis. Missing days stay as gaps so nothing is
+ * invented. Series are kept in the legend above so the chart itself stays tidy
+ * on a phone.
+ */
+@Composable
+fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
+    val allPoints = series.flatMap { it.points }.filterNotNull()
+    val n = values.size.coerceAtLeast(2)
+
+    Column {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+            val w = size.width
+            val h = size.height
+            val pad = 14f
+
+            fun px(i: Int) = pad + (w - 2 * pad) * (i.toFloat() / (n - 1))
+            fun py(v: Float) = h - pad - (h - 2 * pad) * (v / 100f).coerceIn(0f, 1f)
+
+            repeat(4) { g ->
+                val y = pad + (h - 2 * pad) * (g / 3f)
+                drawLine(Color.Gray.copy(alpha = .18f), Offset(pad, y), Offset(w - pad, y), 1f)
+            }
+
+            series.forEach { s ->
+                val path = Path()
+                var started = false
+                s.points.forEachIndexed { i, v ->
+                    if (v == null) {
+                        started = false
+                    } else {
+                        val x = px(i); val y = py(v)
+                        if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
+                    }
+                }
+                drawPath(path, s.color, style = Stroke(width = 2.5f))
+                s.points.forEachIndexed { i, v ->
+                    if (v != null) {
+                        drawCircle(s.color, radius = 4.5f, center = Offset(px(i), py(v)))
+                        drawCircle(Color.White, radius = 1.8f, center = Offset(px(i), py(v)))
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            val step = (values.size / 7).coerceAtLeast(1)
+            values.filterIndexed { i, _ -> i % step == 0 }.forEach {
+                Text(it, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 

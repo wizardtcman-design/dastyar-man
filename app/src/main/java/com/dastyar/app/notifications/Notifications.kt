@@ -22,6 +22,7 @@ import java.time.ZoneId
 object NotificationHelper {
     const val CHANNEL_REMINDERS = "dastyar_reminders"
     const val CHANNEL_DAILY = "dastyar_daily"
+    const val CHANNEL_PERIOD = "dastyar_period"
 
     /** Daily check-in reminder notification id. */
     const val ID_DAILY = 9001
@@ -39,6 +40,12 @@ object NotificationHelper {
                 CHANNEL_DAILY, "یادآوری روزانه",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply { description = "یادآوری ثبت وضعیت روزانه" }
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_PERIOD, "یادآوری پریود",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "یادآوری نزدیک شدن زمان پریود" }
         )
     }
 
@@ -115,11 +122,41 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 }
 
+/**
+ * Fires the period countdown reminder on the morning of the 7, 3 and 1 day
+ * before the estimated next period. Each offset uses a stable notification id so
+ * a re-schedule replaces the old alarm and the user never gets duplicates. It
+ * runs entirely on the device with no network.
+ */
+class PeriodReminderReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (!PeriodReminder.isEnabled(context)) return
+        val daysBefore = intent.getIntExtra("daysBefore", 0)
+        val body = when (daysBefore) {
+            7 -> "حدود ۷ روز تا پریود بعدی باقی مانده 🌸"
+            3 -> "حدود ۳ روز تا پریود بعدی باقی مانده 🌸"
+            1 -> "احتمالاً حدود ۱ روز تا پریود بعدی باقی مانده 🌸"
+            else -> "نزدیک پریود بعدی هستی 🌸"
+        }
+        if (!NotificationHelper.canPost(context)) return
+        NotificationHelper.show(
+            context,
+            PeriodReminder.notificationId(daysBefore),
+            "یادآوری پریود",
+            body,
+            NotificationHelper.CHANNEL_PERIOD
+        )
+        // Re-arm the next cycle's reminder once today's has been delivered.
+        PeriodReminder.scheduleNext(context)
+    }
+}
+
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             ReminderScheduler.rescheduleAll(context)
             DailyReminder.reschedule(context)
+            PeriodReminder.reschedule(context)
         }
     }
 }

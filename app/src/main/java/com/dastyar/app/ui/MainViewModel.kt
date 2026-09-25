@@ -68,6 +68,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var conditionLoadedFor: String? = null
     private var conditionTopicIndex = 0
 
+    // ---- smart tip for the current cycle day ----
+    private val _cycleTip = MutableStateFlow<String?>(null)
+    val cycleTip: StateFlow<String?> = _cycleTip.asStateFlow()
+
+    private val _loadingCycleTip = MutableStateFlow(false)
+    val loadingCycleTip: StateFlow<Boolean> = _loadingCycleTip.asStateFlow()
+
+    private var cycleTipLoadedFor: String? = null
+
+    /**
+     * Personalises today's cycle tip with AI when it is available, using the
+     * real cycle day, phase, length and today's check-in. The local phase tip is
+     * already shown by the UI, so any failure simply keeps that text.
+     */
+    fun loadCycleTip(force: Boolean = false) = viewModelScope.launch {
+        val p = profile.value ?: return@launch
+        val phase = Health.phase(p) ?: run {
+            _cycleTip.value = null
+            return@launch
+        }
+        val day = Health.cycleDay(p)
+        val key = "$day-${phase.name}-${p.cycleLength}-${p.periodDays}"
+        if (!force && cycleTipLoadedFor == key && _cycleTip.value != null) return@launch
+        if (!AiClient.chatConfigured) return@launch
+
+        _loadingCycleTip.value = true
+        val res = AiClient.chat(
+            system = Prompts.base(),
+            history = emptyList(),
+            userMessage = Prompts.cycleTipPrompt(
+                profile = p,
+                today = _todayCheckIn.value,
+                day = day,
+                phase = phase.title,
+                daysUntil = Health.daysUntilPeriod(p),
+                irregular = Health.cycleIsIrregular(p)
+            )
+        )
+        _loadingCycleTip.value = false
+        res.onSuccess { text ->
+            val cleaned = text.trim()
+            if (cleaned.isNotBlank()) {
+                _cycleTip.value = cleaned
+                cycleTipLoadedFor = key
+            }
+        }
+    }
+
     /**
      * Produces a short, educational explanation of the conditions the user
      * declared in their profile. Each forced load advances to a new topic, so
@@ -151,7 +199,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (p.weightKg > 0f) {
             dao.saveWeight(WeightEntry(date = Dates.today(), weightKg = p.weightKg))
         }
-        withContext(Dispatchers.Main) { _todayCheckIn.value = dao.checkIn(Dates.today()) }
+        // Cycle data may have changed: re-arm the period reminders from it.
+        // Only period fields force a re-arm so weight edits stay cheap.
+        if (previous == null ||
+            previous.lastPeriodDate != p.lastPeriodDate ||
+            previous.cycleLength != p.cycleLength ||
+            previous.periodDays != p.periodDays
+        ) {
+            com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), p)
+        }
+        withContext(Dispatchers.Main) {
+            _todayCheckIn.value = dao.checkIn(Dates.today())
+            // The cycle day moved, so refresh the tip when cycle data changed.
+            if (previous?.lastPeriodDate != p.lastPeriodDate ||
+                previous?.cycleLength != p.cycleLength ||
+                previous?.periodDays != p.periodDays
+            ) {
+                _cycleTip.value = null
+                cycleTipLoadedFor = null
+                loadCycleTip(force = true)
+            }
+        }
     }
 
     /** Records a weight measurement for today and keeps the profile in sync. */

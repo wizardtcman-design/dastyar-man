@@ -164,6 +164,12 @@ object Dates {
     /** Convert a jalali day number back to a Jalali ISO date. */
     private fun dayNumberToIso(dayNumber: Int): String = Jalali.fromDayNumber(dayNumber)
 
+    /** Adds [days] to an ISO Jalali date and returns the new ISO string. */
+    fun plusDays(iso: String, days: Int): String {
+        val j = parse(iso) ?: return iso
+        return Jalali.fromDayNumber(Jalali.toDayNumber(j) + days)
+    }
+
     fun shortLabel(iso: String): String {
         val j = parse(iso) ?: return iso
         return fa(j.day.toString())

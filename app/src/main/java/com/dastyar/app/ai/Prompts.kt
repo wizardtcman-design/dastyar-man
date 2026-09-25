@@ -61,7 +61,7 @@ object Prompts {
                 sb.appendLine("— چرخه پریود —")
                 sb.appendLine("طول چرخه: ${profile.cycleLength} روز، طول پریود: ${profile.periodDays} روز")
                 sb.appendLine("امروز روز $cd چرخه است. $until روز تا پریود بعدی مانده.")
-                Health.cyclePhase(profile)?.let { sb.appendLine("دوران تقریبی: $it") }
+                Health.phase(profile)?.let { sb.appendLine("مرحله تقریبی: ${it.title}") }
                 if (profile.periodPainLevel > 0) sb.appendLine("شدت معمول درد: ${profile.periodPainLevel} از ۱۰")
                 if (profile.painLocation.isNotBlank()) sb.appendLine("محل معمول درد: ${profile.painLocation}")
                 if (profile.painRelief.isNotBlank()) sb.appendLine("روش کنترل درد: ${profile.painRelief}")
@@ -339,4 +339,56 @@ $who
         "خواب و استراحت",
         "روش‌های درمانی شناخته‌شده"
     )
+
+    /**
+     * Prompt for the wide dashboard card that gives a care tip for the user's
+     * current cycle day. It is built entirely from the user's own cycle data and
+     * today's check-in. It never diagnoses and never promises a certain outcome.
+     */
+    fun cycleTipPrompt(
+        profile: Profile?,
+        today: CheckIn?,
+        day: Int,
+        phase: String,
+        daysUntil: Int?,
+        irregular: Boolean
+    ): String {
+        val state = StringBuilder()
+        if (profile?.age?.let { it > 0 } == true) state.append("سن: ${profile.age}. ")
+        if (profile?.cycleLength?.let { it in 15..60 } == true) {
+            state.append("طول معمول چرخه: ${profile.cycleLength} روز. ")
+        }
+        if (profile?.periodDays?.let { it > 0 } == true) {
+            state.append("مدت معمول پریود: ${profile.periodDays} روز. ")
+        }
+        state.append("روز فعلی چرخه: $day. ")
+        state.append("مرحله فعلی: $phase. ")
+        if (daysUntil != null) state.append("تخمین روز تا پریود بعدی: $daysUntil. ")
+        if (irregular) state.append("چرخه کاربر نامنظم گزارش شده است. ")
+        today?.let { ci ->
+            if (ci.energyLevel.isNotBlank()) state.append("انرژی امروز: ${ci.energyLevel}. ")
+            if (ci.sleepHours > 0f) state.append("خواب دیشب: ${ci.sleepHours} ساعت. ")
+            if (ci.fatigueSeverity.isNotBlank()) state.append("بی‌رمقی امروز: ${ci.fatigueSeverity}. ")
+            if (ci.stressLevel.isNotBlank()) state.append("استرس امروز: ${ci.stressLevel}. ")
+            if (ci.isPeriodDay) state.append("امروز را روز پریود ثبت کرده. ")
+        }
+        val conditions = profile?.medicalConditions?.trim().orEmpty()
+        if (conditions.isNotBlank()) state.append("شرایط پزشکی ثبت‌شده: «$conditions». ")
+
+        return """
+این اطلاعات واقعی چرخه کاربر است:
+$state
+
+یک پیشنهاد مراقبتی کوتاه و امروزی برای همین روز از چرخه بنویس.
+خروجی فقط دو تا سه جملهٔ روان و گرم باشد، بدون تیتر و بدون خط جدید اضافه.
+
+قواعد:
+- محتوای پیشنهاد را متناسب با همین روز و همین مرحله بنویس، نه یک متن تکراری برای همه روزها.
+- اگر در حوالی تخمک‌گذاری است، بگو این بازه معمولاً احتمال باروری بیشتری دارد؛ و صریح بگو این محاسبه روش قطعی پیشگیری از بارداری نیست.
+- اگر چرخه نامنظم است، عددها را قطعی نگو و از عبارت «تقریبی» استفاده کن.
+- این متن آموزشی و مراقبتی است، نه تشخیص یا درمان. دارو یا دوز تجویز نکن.
+- اگر شرایط پزشکی ثبت‌شده به این موضوع مربوط است، کوتاه به آن اشاره کن؛ در غیر این صورت به آن اشاره نکن.
+- فقط فارسی، ساده و بدون ترس‌آفرینی. حداکثر ۳ جمله.
+""".trimIndent()
+    }
 }

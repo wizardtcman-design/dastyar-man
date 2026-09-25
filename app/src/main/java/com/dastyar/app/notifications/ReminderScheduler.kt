@@ -114,6 +114,113 @@ object DailyReminder {
     }
 }
 
+/**
+ * The period countdown reminder. It schedules an offline alarm for each of the
+ * 7, 3 and 1 day marks before the estimated next period, using the user's real
+ * cycle data. Alarms survive a reboot via [BootReceiver] and are re-armed
+ * whenever the cycle data changes, so no duplicate or stale notification is
+ * left behind. When there is not enough cycle data it schedules nothing.
+ */
+object PeriodReminder {
+
+    const val PREFS = "dastyar_period_reminder"
+    const val KEY_ENABLED = "enabled"
+
+    private const val BASE_REQUEST = 9200
+    private const val HOUR = 9
+
+    fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    fun isEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ENABLED, false)
+
+    fun setEnabled(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        if (enabled) {
+            NotificationHelper.createChannels(ctx)
+            scheduleNext(ctx, null)
+        } else {
+            cancel(ctx)
+        }
+    }
+
+    /** Stable per-offset id, so re-scheduling replaces rather than duplicates. */
+    fun notificationId(daysBefore: Int): Int = 9002 + daysBefore
+
+    /**
+     * (Re)schedules all three countdown alarms from the user's cycle data. A
+     * null profile reloads from the database. Cancels everything first so an old
+     * estimate cannot fire after the dates changed.
+     */
+    fun scheduleNext(ctx: Context, profile: com.dastyar.app.data.Profile? = null) {
+        cancel(ctx)
+        if (!isEnabled(ctx)) return
+
+        val p = profile ?: runCatching {
+            kotlinx.coroutines.runBlocking { DastyarDatabase.get(ctx).dao().profile() }
+        }.getOrNull() ?: return
+
+        // Not enough cycle data: never create a guessed reminder.
+        if (p.lastPeriodDate.isBlank()) return
+        val len = if (p.cycleLength in 15..60) p.cycleLength else return
+        val days = Dates.daysUntilNextPeriod(p.lastPeriodDate, len)
+        if (days < 0) return
+
+        val alarm = ctx.getSystemService(AlarmManager::class.java)
+        for (offset in intArrayOf(7, 3, 1)) {
+            val trigger = triggerFor(days, offset) ?: continue
+            val pi = pendingIntent(ctx, offset)
+            try {
+                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
+            } catch (_: SecurityException) {
+                alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
+            }
+        }
+    }
+
+    fun reschedule(ctx: Context) = scheduleNext(ctx, null)
+
+    fun cancel(ctx: Context) {
+        val alarm = ctx.getSystemService(AlarmManager::class.java)
+        for (offset in intArrayOf(7, 3, 1)) alarm.cancel(pendingIntent(ctx, offset))
+    }
+
+    /** Shows a sample 7-day reminder immediately for testing. */
+    fun showTestNow(ctx: Context) {
+        NotificationHelper.show(
+            ctx,
+            notificationId(7),
+            "یادآوری پریود",
+            "حدود ۷ روز تا پریود بعدی باقی مانده 🌸",
+            NotificationHelper.CHANNEL_PERIOD
+        )
+    }
+
+    /**
+     * The wall-clock moment for one countdown: 9 in the morning, [daysBefore]
+     * days before the estimated period. Returns null when that moment is
+     * already in the past.
+     */
+    private fun triggerFor(daysUntil: Int, daysBefore: Int): Long? {
+        val fireIn = daysUntil - daysBefore
+        if (fireIn < 0) return null
+        val target = LocalDateTime.now()
+            .toLocalDate()
+            .plusDays(fireIn.toLong())
+            .atTime(LocalTime.of(HOUR, 0))
+        if (!target.isAfter(LocalDateTime.now())) return null
+        return target.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+
+    private fun pendingIntent(ctx: Context, daysBefore: Int): PendingIntent {
+        val i = Intent(ctx, PeriodReminderReceiver::class.java)
+            .putExtra("daysBefore", daysBefore)
+        return PendingIntent.getBroadcast(
+            ctx, BASE_REQUEST + daysBefore, i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+}
+
 /** Schedules real system alarms for task reminders. */
 object ReminderScheduler {
 

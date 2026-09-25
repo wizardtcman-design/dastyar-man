@@ -23,6 +23,7 @@ import com.dastyar.app.data.Health
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Profile
 import com.dastyar.app.notifications.DailyReminder
+import com.dastyar.app.notifications.PeriodReminder
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
 import com.dastyar.app.ui.theme.Amber
@@ -42,6 +43,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var darkOverride by remember { mutableStateOf<Boolean?>(null) }
     var dailyEnabled by remember { mutableStateOf(DailyReminder.isEnabled(ctx)) }
+    var periodEnabled by remember { mutableStateOf(PeriodReminder.isEnabled(ctx)) }
     val dailyTime = remember {
         mutableStateOf("%02d:%02d".format(DailyReminder.hour(ctx), DailyReminder.minute(ctx)))
     }
@@ -243,7 +245,49 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- appearance & RTL ----
+        // ---- period reminder notification ----
+        DastyarCard(accent = MaterialTheme.colorScheme.tertiary) {
+            SectionTitle("یادآوری پریود", "🌸")
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "بر اساس تاریخ آخرین پریود و طول چرخه‌ات، ۷ روز و ۳ روز و ۱ روز قبل از " +
+                        "پریود بعدی یک اعلان محلی می‌گیری. این اعلان به اینترنت نیاز ندارد " +
+                        "و حتی با بسته بودن برنامه هم می‌رسد. زمان‌ها تقریبی‌اند.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = periodEnabled, onCheckedChange = {
+                    periodEnabled = it
+                    PeriodReminder.setEnabled(ctx, it)
+                    if (it) {
+                        com.dastyar.app.notifications.NotificationHelper.createChannels(ctx)
+                        PeriodReminder.showTestNow(ctx)
+                    }
+                })
+                Spacer(Modifier.width(10.dp))
+                Text("یادآوری نزدیک شدن پریود", fontSize = 14.sp)
+            }
+            if (periodEnabled && profile?.lastPeriodDate.isNullOrBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "برای محاسبهٔ زمان پریود، تاریخ آخرین پریود و طول چرخه را در پروفایل ثبت کن.",
+                    fontSize = 11.5.sp,
+                    color = Amber
+                )
+            }
+            if (periodEnabled && !com.dastyar.app.notifications.NotificationHelper.canPost(ctx)) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "برای دریافت اعلان، اجازه اعلان را در تنظیمات گوشی فعال کن.",
+                    fontSize = 11.5.sp,
+                    color = Amber
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
         DastyarCard(accent = MaterialTheme.colorScheme.primary) {
             SectionTitle("ظاهر و چیدمان", "🎨")
             Spacer(Modifier.height(8.dp))

@@ -187,19 +187,114 @@ object Health {
         return Dates.daysUntilNextPeriod(p.lastPeriodDate, p.cycleLength)
     }
 
-    /** Cycle phase name from the recorded length, used as a gentle context. */
-    fun cyclePhase(profile: Profile?): String? {
-        val day = cycleDay(profile)
+    /**
+     * The four cycle phases in plain Persian. The names are the ones a user
+     * recognises, not the English clinical terms.
+     */
+    enum class CyclePhase(val title: String, val note: String) {
+        MENSTRUAL("مرحله قاعدگی", "روزهای خونریزی؛ به بدنت استراحت و مراقبت بیشتری بده."),
+        FOLLICULAR("مرحله فولیکولی", "بعد از قاعدگی تا نزدیکی تخمک‌گذاری؛ معمولاً انرژی دوباره بالا می‌رود."),
+        OVULATION("مرحله تخمک‌گذاری", "در این بازه احتمال باروری بیشتر است."),
+        LUTEAL("مرحله لوتئال", "بعد از تخمک‌گذاری تا شروع قاعدگی؛ ممکن است انرژی و خلق تغییر کند.")
+    }
+
+    /** Inclusive start day of the ovulation window, from the cycle length. */
+    fun ovulationStart(cycleLength: Int): Int {
+        val len = if (cycleLength in 15..60) cycleLength else 28
+        return max(10, len - 16)
+    }
+
+    /** The current phase, or null when the cycle cannot be computed. */
+    fun phase(profile: Profile?): CyclePhase? {
+        val p = profile ?: return null
+        if (p.lastPeriodDate.isBlank() || Dates.parse(p.lastPeriodDate) == null) return null
+        val day = cycleDay(p)
         if (day <= 0) return null
-        val len = profile?.cycleLength ?: 28
-        val periodDays = profile?.periodDays ?: 5
-        val ovulation = max(10, len - 14)
+        val len = if (p.cycleLength in 15..60) p.cycleLength else 28
+        val periodDays = p.periodDays.coerceIn(1, 10)
+        val ovStart = ovulationStart(len)
         return when {
-            day <= periodDays -> "دوران قاعدگی"
-            day < ovulation -> "دوران قبل از تخمک‌گذاری"
-            day <= ovulation + 2 -> "حدود تخمک‌گذاری"
-            else -> "دوران قبل از قاعدگی"
+            day <= periodDays -> CyclePhase.MENSTRUAL
+            day < ovStart -> CyclePhase.FOLLICULAR
+            day <= ovStart + 3 -> CyclePhase.OVULATION
+            else -> CyclePhase.LUTEAL
         }
+    }
+
+    /**
+     * A gentle, data-driven care tip for today's cycle day. The content changes
+     * with the phase and with the user's own recorded state, so it is never the
+     * same paragraph every day. Returns null when there is no cycle data.
+     */
+    fun cycleTip(profile: Profile?, today: CheckIn?): String? {
+        val p = profile ?: return null
+        val ph = phase(p) ?: return null
+        val day = cycleDay(p)
+        val periodDays = p.periodDays.coerceIn(1, 10)
+        val len = if (p.cycleLength in 15..60) p.cycleLength else 28
+        val ovStart = ovulationStart(len)
+        return when (ph) {
+            CyclePhase.MENSTRUAL -> {
+                val left = (periodDays - day + 1).coerceAtLeast(1)
+                "امروز روز ${Dates.fa(day)} قاعدگی تو است و حدود ${Dates.fa(left)} روز خونریزی باقی مانده. " +
+                        "آب و مایعات کافی بنوش، غذاهای آهن‌دار مثل حبوبات و سبزی برگ‌سبز بخور، " +
+                        "گرم بمان و کارهای سنگین را به روزهای پرانرژی‌تر بسپار. شکم را با کیسه آب گرم آرام کن."
+            }
+            CyclePhase.FOLLICULAR -> {
+                val until = (ovStart - day).coerceAtLeast(0)
+                if (until <= 2) {
+                    "به آخرین روزهای مرحله فولیکولی رسیده‌ای و حدود ${Dates.fa(until)} روز تا شروع " +
+                            "بازه تخمک‌گذاری مانده. این روزها معمولاً انرژی‌ات بالاتر است؛ " +
+                            "فعالیت هوازی، پروتئین کافی و خواب منظم بهترین انتخاب‌های امروزند."
+                } else {
+                    "الان در مرحله فولیکولی هستی و بدن معمولاً پرانرژی‌تر است. " +
+                            "این فرصت خوبی برای ورزش، یادگیری و کارهای سنگین‌تر است. " +
+                            "پروتئین، سبزیجات و آب کافی هم به پایداری انرژی‌ات کمک می‌کند."
+                }
+            }
+            CyclePhase.OVULATION -> {
+                val fert = when {
+                    (p.medicalConditions + " " + p.medications).contains("باردار") ||
+                            p.medicalConditions.contains("نابارور") ->
+                        "اگر در حال بررسی بارداری هستی، این بازه معمولاً از بازه‌های با احتمال باروری بالاتر است."
+                    else ->
+                        "این بازه معمولاً از بازه‌های با احتمال باروری بالا است. " +
+                                "توجه کن که این محاسبه روش قطعی پیشگیری از بارداری نیست."
+                }
+                "امروز حدود تخمک‌گذاری تو است. $fert " +
+                        "ممکن است ترشح بیشتر یا کمی درد یک‌طرفه حس کنی؛ طبیعی است. " +
+                        "آب کافی بنوش و به تغییرات بدن خودت توجه کن."
+            }
+            CyclePhase.LUTEAL -> {
+                val until = len - day
+                "امروز مرحله لوتئال است و حدود ${Dates.fa(until.coerceAtLeast(0))} روز تا پریود بعدی مانده. " +
+                        "ممکن است انرژی و خلق‌وخو نوسان کند، نوسان خلق و کمی ورم طبیعی است. " +
+                        "خواب به‌موقع، کربوهیدرات پیچیده و کافئین کمتر در این روزها به پایداری حالت کمک می‌کند."
+            }
+        }
+    }
+
+    /** The four phase names in Persian, for a compact label row. */
+    fun phaseLabel(profile: Profile?): String? = phase(profile)?.title
+
+    /** The approximate date of the next period as a Jalali ISO string. */
+    fun nextPeriodDate(profile: Profile?): String? {
+        val p = profile ?: return null
+        if (p.lastPeriodDate.isBlank()) return null
+        val len = if (p.cycleLength in 15..60) p.cycleLength else 28
+        val days = Dates.daysUntilNextPeriod(p.lastPeriodDate, len)
+        if (days < 0) return null
+        return Dates.plusDays(Dates.today(), days)
+    }
+
+    /**
+     * True when the last two recorded cycles differ enough that a prediction
+     * should be shown as approximate rather than certain.
+     */
+    fun cycleIsIrregular(profile: Profile?): Boolean {
+        val p = profile ?: return false
+        if (p.lastPeriodDate.isBlank()) return false
+        return p.cycleLength !in 21..35
     }
 
     // ------------------------------------------------------- medical safety
