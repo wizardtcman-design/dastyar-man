@@ -56,6 +56,14 @@ object AiClient {
 
     val chatConfigured: Boolean get() = effectiveKey().isNotBlank()
 
+    /**
+     * Last real balance fetched, kept in memory so a later AI request can
+     * refresh it without a second provider round-trip on every screen.
+     */
+    @Volatile
+    var lastBalance: ServiceBalance? = null
+        private set
+
     /** Whether the active provider can generate images. */
     val imageConfigured: Boolean get() = chatConfigured && activeProvider().supportsImages
 
@@ -126,6 +134,126 @@ object AiClient {
             "⚠️ اتصال برقرار نشد: اینترنت را بررسی کن."
         }
     }
+
+    // ------------------------------------------------------------- balance
+
+    /**
+     * Real account credit reported by the provider, never computed locally.
+     *
+     * [remaining] and [usage] come straight from the provider's own API. When
+     * the provider has no balance/usage endpoint, [supported] is false and the
+     * UI shows a "not available" line instead of an invented number.
+     */
+    data class ServiceBalance(
+        val supported: Boolean,
+        val remaining: Double?,
+        val usage: Double?,
+        val currency: String = "$",
+        /** True when the provider itself reported the limit as exhausted. */
+        val exhausted: Boolean = false
+    ) {
+        companion object {
+            fun unsupported() = ServiceBalance(supported = false, remaining = null, usage = null)
+        }
+    }
+
+    private fun jsonDouble(root: kotlinx.serialization.json.JsonObject, key: String): Double? =
+        root[key]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+
+    /**
+     * Asks the active provider for the real remaining credit and usage.
+     *
+     * OpenRouter exposes two real endpoints: `/credits` (account total minus
+     * usage) and `/key` (this key's limit, remaining and usage). Both values are
+     * taken as-is from the response; nothing is derived by subtracting guessed
+     * amounts in the app. Providers without such an endpoint report
+     * [ServiceBalance.unsupported] and the UI says so.
+     */
+    suspend fun fetchBalance(): ServiceBalance = withContext(Dispatchers.IO) {
+        val provider = activeProvider()
+        val key = effectiveKey()
+        if (key.isBlank()) return@withContext ServiceBalance.unsupported()
+        if (provider.creditsPath.isBlank() && provider.keyInfoPath.isBlank()) {
+            return@withContext ServiceBalance.unsupported()
+        }
+
+        fun get(url: String): kotlinx.serialization.json.JsonObject? = try {
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Accept", "application/json")
+                .get().build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) null else
+                    json.parseToJsonElement(resp.body?.string().orEmpty())
+                        .jsonObject["data"]?.jsonObject
+            }
+        } catch (e: Exception) {
+            null
+        }
+
+        var remaining: Double? = null
+        var usage: Double? = null
+        var exhausted = false
+
+        provider.creditsUrl()?.let { url ->
+            get(url)?.let { d ->
+                val total = jsonDouble(d, "total_credits")
+                val used = jsonDouble(d, "total_usage")
+                usage = used
+                if (total != null && total > 0.0 && used != null) {
+                    val left = (total - used).coerceAtLeast(0.0)
+                    remaining = left
+                    exhausted = left <= 0.0
+                }
+            }
+        }
+
+        if (remaining == null) provider.keyInfoUrl()?.let { url ->
+            get(url)?.let { d ->
+                val rem = jsonDouble(d, "limit_remaining")
+                val limit = jsonDouble(d, "limit")
+                val used = jsonDouble(d, "usage")
+                if (used != null) usage = used
+                if (rem != null) {
+                    val left = rem.coerceAtLeast(0.0)
+                    remaining = left
+                    exhausted = left <= 0.0
+                } else if (limit != null && used != null) {
+                    val left = (limit - used).coerceAtLeast(0.0)
+                    remaining = left
+                    exhausted = left <= 0.0
+                }
+            }
+        }
+
+        if (remaining == null && usage == null) {
+            val none = ServiceBalance.unsupported()
+            lastBalance = none
+            return@withContext none
+        }
+        ServiceBalance(
+            supported = true,
+            remaining = remaining,
+            usage = usage,
+            exhausted = exhausted
+        ).also { lastBalance = it }
+    }
+
+    /**
+     * Re-reads the balance and usage after a successful AI request so the
+     * Settings card always reflects real provider numbers. Failures are
+     * swallowed: a balance refresh must never disturb the feature that succeeded.
+     */
+    private suspend fun refreshBalanceQuietly() {
+        try {
+            val b = fetchBalance()
+            if (b.supported) lastBalance = b
+        } catch (_: Exception) {
+        }
+    }
+
+    // ------------------------------------------------------------- balance end
 
     // ---------------------------------------------------------------- chat
 
@@ -209,6 +337,7 @@ object AiClient {
                 if (content.isNullOrBlank()) {
                     Result.failure(AiException("پاسخ خالی از سرور دریافت شد."))
                 } else {
+                    refreshBalanceQuietly()
                     Result.success(content.trim())
                 }
             }
@@ -280,7 +409,10 @@ object AiClient {
                         if (!url.isNullOrBlank()) {
                             val b64 = url.substringAfter("base64,", url)
                             val bytes = Base64.getDecoder().decode(b64)
-                            if (bytes.size > 500) return@withContext Result.success(bytes)
+                            if (bytes.size > 500) {
+                                refreshBalanceQuietly()
+                                return@withContext Result.success(bytes)
+                            }
                             lastErr = "تصویر خالی برگشت."
                         } else {
                             lastErr = "سرور تصویری برنگرداند."

@@ -20,11 +20,28 @@ data class AiProvider(
     /** Model used for text-to-image; empty when the provider cannot make images. */
     val imageModel: String = "",
     /** Whether this provider understands the `modalities: [image, text]` flag. */
-    val supportsImageModalities: Boolean = false
+    val supportsImageModalities: Boolean = false,
+    /**
+     * Path (relative to [baseUrl]) of the provider's account-credit endpoint.
+     * Empty when the provider exposes no balance over its API, in which case
+     * the app must say so instead of inventing a number.
+     */
+    val creditsPath: String = "",
+    /**
+     * Path of a per-key usage/limit endpoint, used as a fallback source of the
+     * real remaining balance when [creditsPath] is unavailable or returns zero.
+     */
+    val keyInfoPath: String = ""
 ) {
     val supportsImages: Boolean get() = imageModel.isNotBlank()
 
     fun chatUrl(): String = "${baseUrl.trimEnd('/')}/chat/completions"
+
+    fun creditsUrl(): String? =
+        creditsPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
+
+    fun keyInfoUrl(): String? =
+        keyInfoPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
 }
 
 object AiProviders {
@@ -35,7 +52,9 @@ object AiProviders {
         baseUrl = "https://openrouter.ai/api/v1",
         textModel = "google/gemini-2.5-flash-lite",
         imageModel = "google/gemini-2.5-flash-image",
-        supportsImageModalities = true
+        supportsImageModalities = true,
+        creditsPath = "credits",
+        keyInfoPath = "key"
     )
 
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */

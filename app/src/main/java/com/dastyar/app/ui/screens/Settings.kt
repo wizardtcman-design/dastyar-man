@@ -52,6 +52,15 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var altKey by remember { mutableStateOf("") }
     var altStatus by remember { mutableStateOf<String?>(null) }
     var selectedProvider by remember { mutableStateOf(AiClient.activeProvider()) }
+    var balance by remember { mutableStateOf<AiClient.ServiceBalance?>(null) }
+    var balanceLoading by remember { mutableStateOf(false) }
+
+    // Refresh the real provider balance as soon as Settings opens.
+    LaunchedEffect(Unit) {
+        balanceLoading = true
+        balance = AiClient.fetchBalance()
+        balanceLoading = false
+    }
 
     Column(
         Modifier
@@ -367,6 +376,95 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // ---- service balance (real, from the provider) ----
+        DastyarCard(accent = Green) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { SectionTitle("اعتبار سرویس هوش مصنوعی", "💳") }
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            balanceLoading = true
+                            balance = AiClient.fetchBalance()
+                            balanceLoading = false
+                        }
+                    },
+                    enabled = !balanceLoading
+                ) { Text(if (balanceLoading) "…" else "به‌روزرسانی") }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            val b = balance
+            when {
+                balanceLoading && b == null -> {
+                    Text(
+                        "در حال دریافت اطلاعات از سرویس…",
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                b == null || !b.supported -> {
+                    Text(
+                        "موجودی این سرویس از طریق API قابل دریافت نیست.",
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (b != null && b.usage != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "مصرف واقعی این سرویس: ${money(b.usage)}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                else -> {
+                    val rem = b.remaining
+                    Text(
+                        if (rem != null) "موجودی فعلی: ${money(rem)}"
+                        else "موجودی فعلی: قابل دریافت نیست",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (b.usage != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "مصرف کل: ${money(b.usage)}",
+                            fontSize = 12.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Real threshold warning, driven by the provider value only.
+                    val warn = when {
+                        b.exhausted || (rem != null && rem <= 0.0) -> "🔴 اعتبار سرویس تمام شده است. لطفاً API جدید وارد کنید."
+                        rem != null && rem <= 5.0 -> "⚠️ اعتبار سرویس رو به اتمام است"
+                        else -> null
+                    }
+                    if (warn != null) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            warn,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (b.exhausted || (rem != null && rem <= 0.0))
+                                MaterialTheme.colorScheme.error else Amber
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "این مقدار مستقیماً از API رسمی سرویس خوانده می‌شود و در برنامه محاسبه یا تخمین زده نمی‌شود.",
+                fontSize = 10.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Spacer(Modifier.height(14.dp))
@@ -707,4 +805,10 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
             Spacer(Modifier.height(20.dp))
         }
     }
+}
+
+/** Formats a provider-reported money amount with Persian digits, e.g. "$۹۷٫۴۰". */
+private fun money(v: Double): String {
+    val s = if (v >= 100) "%.0f".format(v) else "%.2f".format(v)
+    return "$" + Dates.fa(s).replace('.', '٫')
 }
