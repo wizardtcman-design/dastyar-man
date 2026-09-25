@@ -30,6 +30,7 @@ fun DastyarCard(
     Box(
         modifier
             .fillMaxWidth()
+            .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .cardOutline(accent)
@@ -143,6 +144,7 @@ fun StatTile(
 ) {
     Box(
         modifier
+            .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .cardOutline(accent)

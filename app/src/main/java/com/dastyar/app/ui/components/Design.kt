@@ -1,5 +1,7 @@
 package com.dastyar.app.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -7,11 +9,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -53,6 +61,33 @@ fun cardBorderColor(accent: Color? = null): Color {
 fun Modifier.cardOutline(accent: Color? = null): Modifier =
     this.border(1.dp, cardBorderColor(accent), Shape.card)
 
+/**
+ * Soft entrance used by every card: it fades in while rising a few pixels and
+ * gently settling from a slightly smaller scale. Because the animation starts
+ * when the card first composes, cards animate as a tab opens and as they scroll
+ * into view, without any screen having to opt in.
+ *
+ * [delayMillis] lets a screen stagger a column of cards so they cascade instead
+ * of all popping at once.
+ */
+@Composable
+fun Modifier.cardEnter(delayMillis: Int = 0): Modifier {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val progress by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(durationMillis = 420, delayMillis = delayMillis),
+        label = "cardEnter"
+    )
+    return this
+        .graphicsLayer {
+            alpha = progress
+            translationY = (1f - progress) * 34f
+            scaleX = 0.96f + 0.04f * progress
+            scaleY = 0.96f + 0.04f * progress
+        }
+}
+
 /** The brand gradient used by the header, the primary button and the step badge. */
 val BrandBrush: Brush get() = Brush.horizontalGradient(listOf(Purple, Pink))
 
@@ -70,6 +105,7 @@ fun ScreenHeader(
     Box(
         modifier
             .fillMaxWidth()
+            .cardEnter()
             .clip(Shape.card)
             .background(BrandBrush)
     ) {
@@ -132,6 +168,7 @@ fun SectionCard(
     Box(
         modifier
             .fillMaxWidth()
+            .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .cardOutline(accent)
@@ -189,6 +226,7 @@ fun QuestionCard(
     Box(
         Modifier
             .fillMaxWidth()
+            .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .cardOutline(accent)

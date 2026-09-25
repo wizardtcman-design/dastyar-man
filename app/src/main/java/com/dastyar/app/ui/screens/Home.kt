@@ -3,6 +3,8 @@ package com.dastyar.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -417,6 +419,7 @@ private fun GreetingCard(
     Box(
         Modifier
             .fillMaxWidth()
+            .cardEnter()
             .clip(Shape.card)
             .background(BrandBrush)
     ) {
@@ -598,6 +601,7 @@ private fun CycleTile(
 ) {
     Column(
         modifier
+            .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .cardOutline(Pink)
@@ -861,6 +865,7 @@ private fun BmiTile(
 
     Column(
         modifier
+            .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
             .cardOutline(Green)
@@ -1173,6 +1178,19 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
     val n = values.size.coerceAtLeast(2)
     var selected by remember { mutableStateOf(-1) }
 
+    // Lines are revealed left-to-right when the chart appears, so the card
+    // feels alive instead of snapping into place.
+    var revealed by remember { mutableStateOf(false) }
+    LaunchedEffect(series) {
+        revealed = false
+        revealed = true
+    }
+    val reveal by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(durationMillis = 900),
+        label = "chartReveal"
+    )
+
     Column {
         androidx.compose.foundation.Canvas(
             Modifier
@@ -1214,24 +1232,43 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
             }
 
             series.forEach { s ->
-                val path = Path()
-                var started = false
-                s.points.forEachIndexed { i, v ->
-                    if (v == null) {
-                        started = false
-                    } else {
-                        val x = px(i); val y = py(v, s)
-                        if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
+                val drawn = s.points.mapIndexedNotNull { i, v ->
+                    v?.let { i to py(it, s) }
+                }
+                // Reveal the line progressively from the first day onward.
+                val revealX = pad + (w - 2 * pad) * reveal
+
+                // Connect consecutive real points of this indicator so a line is
+                // always visible. A single point in the whole range would
+                // otherwise draw nothing at all, which is what made the chart
+                // look empty on the first days.
+                if (drawn.size >= 2) {
+                    val path = Path()
+                    path.moveTo(px(drawn.first().first), drawn.first().second)
+                    drawn.drop(1).forEach { (i, y) ->
+                        path.lineTo(px(i).coerceAtMost(revealX), y)
+                    }
+                    drawPath(path, s.color, style = Stroke(width = 3f))
+                } else if (drawn.size == 1) {
+                    // One real value: draw a clear level line across the chart so
+                    // the indicator is still visibly present.
+                    val (i, y) = drawn.first()
+                    drawLine(
+                        s.color.copy(alpha = .55f),
+                        Offset(pad, y),
+                        Offset(pad + (w - pad - pad) * reveal, y),
+                        1.5f
+                    )
+                    if (reveal > 0.6f) {
+                        drawLine(s.color, Offset(px(i) - 16f, y), Offset(px(i) + 16f, y), 3.5f)
                     }
                 }
-                drawPath(path, s.color, style = Stroke(width = 2.5f))
-                s.points.forEachIndexed { i, v ->
-                    if (v != null) {
+
+                if (reveal > 0.85f) {
+                    drawn.forEach { (i, y) ->
                         val big = i == selected
-                        drawCircle(s.color, radius = if (big) 6.5f else 4.5f,
-                            center = Offset(px(i), py(v, s)))
-                        drawCircle(Color.White, radius = if (big) 2.6f else 1.8f,
-                            center = Offset(px(i), py(v, s)))
+                        drawCircle(s.color, radius = if (big) 6.5f else 4.5f, center = Offset(px(i), y))
+                        drawCircle(Color.White, radius = if (big) 2.6f else 1.8f, center = Offset(px(i), y))
                     }
                 }
             }
