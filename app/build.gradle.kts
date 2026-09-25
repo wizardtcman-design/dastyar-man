@@ -41,13 +41,15 @@ android {
         targetSdk = 34
         // CI sets APP_VERSION (1.0.<run_number>); local builds fall back.
         val appVer = System.getenv("APP_VERSION") ?: "1.0.0"
+        versionName = appVer
+        // versionCode must strictly increase for in-place updates. Derive it
+        // from the same 1.0.<run> number, so build N always overrides N-1.
         versionCode = appVer.split(".").let { v ->
             val maj = v.getOrNull(0)?.toIntOrNull() ?: 1
             val min = v.getOrNull(1)?.toIntOrNull() ?: 0
             val pat = v.getOrNull(2)?.toIntOrNull() ?: 0
-            maj * 10000 + min * 100 + pat
+            maj * 1_000_000 + min * 10_000 + pat
         }
-        versionName = appVer
         resourceConfigurations += listOf("fa", "en")
     }
 
@@ -77,6 +79,12 @@ android {
             isMinifyEnabled = false
             buildConfigField("String", "OPENROUTER_API_KEY", "\"$aiKey\"")
             buildConfigField("String", "OPENROUTER_BASE_URL", "\"$chatUrl\"")
+            // Sign debug builds with the same release keystore when it is
+            // available. This makes installs upgrade-in-place across every
+            // build we publish, so the app never has to be uninstalled first.
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

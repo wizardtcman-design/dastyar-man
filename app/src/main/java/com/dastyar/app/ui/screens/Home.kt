@@ -1178,10 +1178,13 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
     val n = values.size.coerceAtLeast(2)
     var selected by remember { mutableStateOf(-1) }
 
-    // Lines are revealed left-to-right when the chart appears, so the card
-    // feels alive instead of snapping into place.
+    // Lines are revealed left-to-right when the chart first appears. The key is
+    // the number of series/points, not the list identity, so rebuilding the
+    // series on recomposition does not restart the animation and leave the
+    // chart looking empty.
     var revealed by remember { mutableStateOf(false) }
-    LaunchedEffect(series) {
+    val chartKey = series.size to series.firstOrNull()?.points?.size
+    LaunchedEffect(chartKey) {
         revealed = false
         revealed = true
     }
@@ -1235,13 +1238,11 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
                 val drawn = s.points.mapIndexedNotNull { i, v ->
                     v?.let { i to py(it, s) }
                 }
-                // Reveal the line progressively from the first day onward.
+                // Reveal the line progressively from the first day onward. Once
+                // the animation has run (or if it is ever interrupted), the full
+                // line is drawn, so a real mesh of points can never stay hidden.
                 val revealX = pad + (w - 2 * pad) * reveal
 
-                // Connect consecutive real points of this indicator so a line is
-                // always visible. A single point in the whole range would
-                // otherwise draw nothing at all, which is what made the chart
-                // look empty on the first days.
                 if (drawn.size >= 2) {
                     val path = Path()
                     path.moveTo(px(drawn.first().first), drawn.first().second)
@@ -1249,6 +1250,14 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
                         path.lineTo(px(i).coerceAtMost(revealX), y)
                     }
                     drawPath(path, s.color, style = Stroke(width = 3f))
+                    // Also draw the full path faintly once the reveal is done,
+                    // guaranteeing visibility even if the animation is skipped.
+                    if (reveal < 1f) {
+                        val full = Path()
+                        full.moveTo(px(drawn.first().first), drawn.first().second)
+                        drawn.drop(1).forEach { (i, y) -> full.lineTo(px(i), y) }
+                        drawPath(full, s.color.copy(alpha = .25f), style = Stroke(width = 2f))
+                    }
                 } else if (drawn.size == 1) {
                     // One real value: draw a clear level line across the chart so
                     // the indicator is still visibly present.
@@ -1259,17 +1268,13 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
                         Offset(pad + (w - pad - pad) * reveal, y),
                         1.5f
                     )
-                    if (reveal > 0.6f) {
-                        drawLine(s.color, Offset(px(i) - 16f, y), Offset(px(i) + 16f, y), 3.5f)
-                    }
+                    drawLine(s.color, Offset(px(i) - 16f, y), Offset(px(i) + 16f, y), 3.5f)
                 }
 
-                if (reveal > 0.85f) {
-                    drawn.forEach { (i, y) ->
-                        val big = i == selected
-                        drawCircle(s.color, radius = if (big) 6.5f else 4.5f, center = Offset(px(i), y))
-                        drawCircle(Color.White, radius = if (big) 2.6f else 1.8f, center = Offset(px(i), y))
-                    }
+                drawn.forEach { (i, y) ->
+                    val big = i == selected
+                    drawCircle(s.color, radius = if (big) 6.5f else 4.5f, center = Offset(px(i), y))
+                    drawCircle(Color.White, radius = if (big) 2.6f else 1.8f, center = Offset(px(i), y))
                 }
             }
         }

@@ -56,6 +56,9 @@ jobs:
             echo "--- $f"
             $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs "$f" || exit 1
           done
+          echo "==== signing fingerprint (must stay constant across builds) ===="
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs out/dastyar-man-release.apk \
+            | grep -i "SHA-256 digest" | head -1
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -111,7 +114,6 @@ jobs:
           name: دستیار من v${{ steps.ver.outputs.name }}
           body_path: /tmp/release_body.md
           files: |
-            out/dastyar-man-debug.apk
             out/dastyar-man-release.apk
           draft: false
           prerelease: false

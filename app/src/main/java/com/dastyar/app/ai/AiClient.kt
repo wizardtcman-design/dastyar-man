@@ -171,60 +171,58 @@ object AiClient {
      */
     suspend fun fetchBalance(): ServiceBalance = withContext(Dispatchers.IO) {
         val provider = activeProvider()
-        val key = effectiveKey()
-        if (key.isBlank()) return@withContext ServiceBalance.unsupported()
         if (provider.creditsPath.isBlank() && provider.keyInfoPath.isBlank()) {
             return@withContext ServiceBalance.unsupported()
         }
 
-        fun get(url: String): kotlinx.serialization.json.JsonObject? = try {
-            val req = Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("Accept", "application/json")
-                .get().build()
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) null else
-                    json.parseToJsonElement(resp.body?.string().orEmpty())
-                        .jsonObject["data"]?.jsonObject
+        fun probe(key: String): Pair<Double?, Double?>? {
+            fun get(url: String): kotlinx.serialization.json.JsonObject? = try {
+                val req = Request.Builder()
+                    .url(url)
+                    .addHeader("Authorization", "Bearer $key")
+                    .addHeader("Accept", "application/json")
+                    .get().build()
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) null else
+                        json.parseToJsonElement(resp.body?.string().orEmpty())
+                            .jsonObject["data"]?.jsonObject
+                }
+            } catch (e: Exception) {
+                null
             }
-        } catch (e: Exception) {
-            null
+
+            var rem: Double? = null
+            var used: Double? = null
+            provider.creditsUrl()?.let { url ->
+                get(url)?.let { d ->
+                    val total = jsonDouble(d, "total_credits")
+                    val u = jsonDouble(d, "total_usage")
+                    used = u
+                    if (total != null && total > 0.0 && u != null) {
+                        rem = (total - u).coerceAtLeast(0.0)
+                    }
+                }
+            }
+            if (rem == null) provider.keyInfoUrl()?.let { url ->
+                get(url)?.let { d ->
+                    val r = jsonDouble(d, "limit_remaining")
+                    val limit = jsonDouble(d, "limit")
+                    val u = jsonDouble(d, "usage")
+                    if (u != null) used = u
+                    if (r != null) rem = r.coerceAtLeast(0.0)
+                    else if (limit != null && u != null) rem = (limit - u).coerceAtLeast(0.0)
+                }
+            }
+            return if (rem == null && used == null) null else rem to used
         }
 
         var remaining: Double? = null
         var usage: Double? = null
-        var exhausted = false
-
-        provider.creditsUrl()?.let { url ->
-            get(url)?.let { d ->
-                val total = jsonDouble(d, "total_credits")
-                val used = jsonDouble(d, "total_usage")
-                usage = used
-                if (total != null && total > 0.0 && used != null) {
-                    val left = (total - used).coerceAtLeast(0.0)
-                    remaining = left
-                    exhausted = left <= 0.0
-                }
-            }
-        }
-
-        if (remaining == null) provider.keyInfoUrl()?.let { url ->
-            get(url)?.let { d ->
-                val rem = jsonDouble(d, "limit_remaining")
-                val limit = jsonDouble(d, "limit")
-                val used = jsonDouble(d, "usage")
-                if (used != null) usage = used
-                if (rem != null) {
-                    val left = rem.coerceAtLeast(0.0)
-                    remaining = left
-                    exhausted = left <= 0.0
-                } else if (limit != null && used != null) {
-                    val left = (limit - used).coerceAtLeast(0.0)
-                    remaining = left
-                    exhausted = left <= 0.0
-                }
-            }
+        for (key in candidateKeys(provider)) {
+            val r = probe(key) ?: continue
+            remaining = r.first
+            usage = r.second
+            if (remaining != null) break
         }
 
         if (remaining == null && usage == null) {
@@ -236,7 +234,7 @@ object AiClient {
             supported = true,
             remaining = remaining,
             usage = usage,
-            exhausted = exhausted
+            exhausted = remaining != null && remaining <= 0.0
         ).also { lastBalance = it }
     }
 
@@ -287,6 +285,20 @@ object AiClient {
         model = textModel()
     )
 
+    /**
+     * Keys to try, best first: the provider the user chose (which may be the
+     * built-in OpenRouter), then the built-in key as a safety net. If a user
+     * key has gone stale the app keeps working instead of appearing "cut off".
+     */
+    private fun candidateKeys(p: AiProvider): List<String> {
+        val builtIn = BuildConfig.OPENROUTER_API_KEY
+        val user = ApiKeys.userKey()?.takeIf { it.isNotBlank() }
+        val list = mutableListOf<String>()
+        if (user != null) list += user
+        if (builtIn.isNotBlank() && builtIn != user) list += builtIn
+        return list
+    }
+
     private suspend fun complete(
         system: String,
         history: List<Pair<String, String>>,
@@ -296,54 +308,72 @@ object AiClient {
         if (!chatConfigured) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
         )
-        try {
-            val messages = buildJsonArray {
-                add(buildJsonObject { put("role", "system"); put("content", system) })
-                history.forEach { (role, content) ->
-                    add(buildJsonObject { put("role", role); put("content", content) })
-                }
-                add(buildJsonObject {
-                    put("role", "user")
-                    put("content", buildJsonArray { userParts.forEach { add(it) } })
-                })
+
+        val messages = buildJsonArray {
+            add(buildJsonObject { put("role", "system"); put("content", system) })
+            history.forEach { (role, content) ->
+                add(buildJsonObject { put("role", role); put("content", content) })
             }
-
-            val body = buildJsonObject {
-                put("model", model)
-                put("messages", messages)
-                put("stream", false)
-                put("temperature", 0.6)
-                put("max_tokens", CHAT_MAX_TOKENS)
-            }.toString()
-
-            val req = Request.Builder()
-                .url(activeProvider().chatUrl())
-                .addHeader("Authorization", "Bearer ${effectiveKey()}")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
-                .build()
-
-            http.newCall(req).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    return@withContext Result.failure(AiException(describeError(resp.code, text)))
-                }
-                val content = json.parseToJsonElement(text)
-                    .jsonObject["choices"]?.jsonArray
-                    ?.firstOrNull()?.jsonObject
-                    ?.get("message")?.jsonObject
-                    ?.get("content")?.jsonPrimitive?.contentOrNull
-
-                if (content.isNullOrBlank()) {
-                    Result.failure(AiException("پاسخ خالی از سرور دریافت شد."))
-                } else {
-                    refreshBalanceQuietly()
-                    Result.success(content.trim())
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(AiException("اتصال به هوش مصنوعی ناموفق بود."))
+            add(buildJsonObject {
+                put("role", "user")
+                put("content", buildJsonArray { userParts.forEach { add(it) } })
+            })
         }
+
+        val body = buildJsonObject {
+            put("model", model)
+            put("messages", messages)
+            put("stream", false)
+            put("temperature", 0.6)
+            put("max_tokens", CHAT_MAX_TOKENS)
+        }.toString()
+
+        var lastError = "اتصال به هوش مصنوعی ناموفق بود."
+
+        // Try each key; retry transient server/rate-limit/IO problems before
+        // moving on. A stale user key therefore costs one attempt, not the
+        // whole feature, and a brief network blip no longer ends the request.
+        for (key in candidateKeys(activeProvider())) {
+            var stopKey = false
+            repeat(3) { attempt ->
+                if (stopKey) return@repeat
+                try {
+                    val req = Request.Builder()
+                        .url(activeProvider().chatUrl())
+                        .addHeader("Authorization", "Bearer $key")
+                        .addHeader("Content-Type", "application/json")
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    http.newCall(req).execute().use { resp ->
+                        val text = resp.body?.string().orEmpty()
+                        if (resp.isSuccessful) {
+                            val content = json.parseToJsonElement(text)
+                                .jsonObject["choices"]?.jsonArray
+                                ?.firstOrNull()?.jsonObject
+                                ?.get("message")?.jsonObject
+                                ?.get("content")?.jsonPrimitive?.contentOrNull
+                            if (!content.isNullOrBlank()) {
+                                refreshBalanceQuietly()
+                                return@withContext Result.success(content.trim())
+                            }
+                            lastError = "پاسخ خالی از سرور دریافت شد."
+                        } else {
+                            lastError = describeError(resp.code, text)
+                            // Auth or credit problems are key-specific: stop
+                            // retrying this key and move to the next one.
+                            if (resp.code == 401 || resp.code == 402 || resp.code == 403) {
+                                stopKey = true
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = "اتصال به هوش مصنوعی ناموفق بود. اینترنت را بررسی کن."
+                }
+                if (!stopKey && attempt < 2) Thread.sleep(1200L * (attempt + 1))
+            }
+        }
+        Result.failure(AiException(lastError))
     }
 
     // --------------------------------------------------------------- image
@@ -367,62 +397,66 @@ object AiClient {
         )
 
         var lastErr = ""
-        repeat(3) { attempt ->
-            try {
-                val body = buildJsonObject {
-                    put("model", imageModel())
-                    put("messages", buildJsonArray {
-                        add(buildJsonObject { put("role", "user"); put("content", prompt) })
-                    })
-                    if (activeProvider().supportsImageModalities) {
-                        put("modalities", buildJsonArray {
-                            add(kotlinx.serialization.json.JsonPrimitive("image"))
-                            add(kotlinx.serialization.json.JsonPrimitive("text"))
+        for (key in candidateKeys(activeProvider())) {
+            var stopKey = false
+            repeat(3) { attempt ->
+                if (stopKey) return@repeat
+                try {
+                    val body = buildJsonObject {
+                        put("model", imageModel())
+                        put("messages", buildJsonArray {
+                            add(buildJsonObject { put("role", "user"); put("content", prompt) })
                         })
-                    }
-                }.toString()
-
-                val req = Request.Builder()
-                    .url(activeProvider().chatUrl())
-                    .addHeader("Authorization", "Bearer ${effectiveKey()}")
-                    .addHeader("Content-Type", "application/json")
-                    .post(body.toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                http.newCall(req).execute().use { resp ->
-                    val text = resp.body?.string().orEmpty()
-                    if (!resp.isSuccessful) {
-                        lastErr = describeError(resp.code, text, image = true)
-                        if (resp.code !in listOf(429, 500, 502, 503, 504)) {
-                            return@withContext Result.failure(AiException(lastErr))
+                        if (activeProvider().supportsImageModalities) {
+                            put("modalities", buildJsonArray {
+                                add(kotlinx.serialization.json.JsonPrimitive("image"))
+                                add(kotlinx.serialization.json.JsonPrimitive("text"))
+                            })
                         }
-                    } else {
-                        val url = json.parseToJsonElement(text)
-                            .jsonObject["choices"]?.jsonArray
-                            ?.firstOrNull()?.jsonObject
-                            ?.get("message")?.jsonObject
-                            ?.get("images")?.jsonArray
-                            ?.firstOrNull()?.jsonObject
-                            ?.get("image_url")?.jsonObject
-                            ?.get("url")?.jsonPrimitive?.contentOrNull
+                    }.toString()
 
-                        if (!url.isNullOrBlank()) {
-                            val b64 = url.substringAfter("base64,", url)
-                            val bytes = Base64.getDecoder().decode(b64)
-                            if (bytes.size > 500) {
-                                refreshBalanceQuietly()
-                                return@withContext Result.success(bytes)
+                    val req = Request.Builder()
+                        .url(activeProvider().chatUrl())
+                        .addHeader("Authorization", "Bearer $key")
+                        .addHeader("Content-Type", "application/json")
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    http.newCall(req).execute().use { resp ->
+                        val text = resp.body?.string().orEmpty()
+                        if (!resp.isSuccessful) {
+                            lastErr = describeError(resp.code, text, image = true)
+                            if (resp.code == 401 || resp.code == 402 || resp.code == 403) {
+                                stopKey = true
                             }
-                            lastErr = "تصویر خالی برگشت."
                         } else {
-                            lastErr = "سرور تصویری برنگرداند."
+                            val url = json.parseToJsonElement(text)
+                                .jsonObject["choices"]?.jsonArray
+                                ?.firstOrNull()?.jsonObject
+                                ?.get("message")?.jsonObject
+                                ?.get("images")?.jsonArray
+                                ?.firstOrNull()?.jsonObject
+                                ?.get("image_url")?.jsonObject
+                                ?.get("url")?.jsonPrimitive?.contentOrNull
+
+                            if (!url.isNullOrBlank()) {
+                                val b64 = url.substringAfter("base64,", url)
+                                val bytes = Base64.getDecoder().decode(b64)
+                                if (bytes.size > 500) {
+                                    refreshBalanceQuietly()
+                                    return@withContext Result.success(bytes)
+                                }
+                                lastErr = "تصویر خالی برگشت."
+                            } else {
+                                lastErr = "سرور تصویری برنگرداند."
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    lastErr = "خطای شبکه در ساخت تصویر."
                 }
-            } catch (e: Exception) {
-                lastErr = "خطای شبکه در ساخت تصویر."
+                if (!stopKey && attempt < 2) Thread.sleep(3000L * (attempt + 1))
             }
-            if (attempt < 2) Thread.sleep(3000L * (attempt + 1))
         }
         Result.failure(AiException("ساخت تصویر ناموفق بود: $lastErr"))
     }
