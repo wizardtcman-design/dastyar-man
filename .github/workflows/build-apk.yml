@@ -75,17 +75,41 @@ jobs:
         id: ver
         run: echo "name=1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
 
+      - name: Build release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          # Pull the section for this exact version from CHANGELOG.md.
+          NOTES=$(awk -v ver="## $VERSION" '
+            $0 == ver {capture=1; next}
+            capture && /^## / {exit}
+            capture {print}
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="- به‌روزرسانی نسخه و بهبود کلی برنامه."
+          fi
+          {
+            echo "## 🌱 دستیار من — نسخه $VERSION"
+            echo ""
+            echo "$NOTES"
+            echo ""
+            echo "---"
+            echo "### 📲 دانلود و نصب"
+            echo "۱) فایل **dastyar-man-release.apk** را از بخش Assets همین صفحه دانلود کنید."
+            echo "۲) اگر اندروید اجازه خواست، «نصب از منابع نامشخص» را فعال کنید."
+            echo "۳) نصب کنید؛ نسخهٔ جدید روی نسخهٔ قبلی آپدیت می‌شود و اطلاعاتت پاک نمی‌شود."
+            echo ""
+            echo "[دانلود همیشگی آخرین نسخه](https://github.com/wizardtcman-design/dastyar-man/releases/latest)"
+          } > /tmp/release_body.md
+          echo "----- release body -----"
+          cat /tmp/release_body.md
+
       - name: Publish Release with APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.name }}
           name: دستیار من v${{ steps.ver.outputs.name }}
-          body: |
-            نسخه اندرویدی «دستیار من» 🌱
-            فایل APK را از بخش Assets دانلود و روی گوشی نصب کنید.
-
-            لینک دانلود مستقیم:
-            https://github.com/wizardtcman-design/dastyar-man/releases/latest
+          body_path: /tmp/release_body.md
           files: |
             out/dastyar-man-debug.apk
             out/dastyar-man-release.apk
