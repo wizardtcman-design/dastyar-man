@@ -372,6 +372,17 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp)
             ) { Text("بررسی اتصال هوش مصنوعی") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        aiStatus = "در حال تشخیص دقیق…"
+                        aiStatus = AiClient.diagnose()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("تشخیص دقیق اتصال (نمایش خطای واقعی)") }
             aiStatus?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

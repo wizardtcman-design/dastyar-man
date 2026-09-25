@@ -77,7 +77,67 @@ object AiClient {
     // ---------------------------------------------------------------- tests
 
     /** Verifies the active key with a tiny real request. Returns a Persian result line. */
-    suspend fun testConnection(): String = testKey(effectiveKey())
+    suspend fun testConnection(): String {
+        // Try every candidate key (user key first, then the healthy built-in
+        // one) and report the real outcome, including the exact failure reason,
+        // so a network block can be told apart from a bad key.
+        var last = "⚠️ اتصال برقرار نشد."
+        for (key in candidateKeys(activeProvider())) {
+            val r = testKey(key)
+            if (r.startsWith("✅")) return r
+            last = r
+        }
+        return last
+    }
+
+    /**
+     * Detailed diagnostic for Settings: reports the real HTTP status or the
+     * network exception, so it is clear whether the phone is blocked, offline,
+     * or the key is rejected.
+     */
+    suspend fun diagnose(): String = withContext(Dispatchers.IO) {
+        val p = activeProvider()
+        val keys = candidateKeys(p)
+        if (keys.isEmpty()) return@withContext "⚠️ هیچ کلیدی تنظیم نشده است."
+        val report = StringBuilder()
+        report.append("سرویس: ${p.label}\n")
+        report.append("تعداد کلید قابل‌تلاش: ${keys.size}\n")
+        for ((i, key) in keys.withIndex()) {
+            val tag = if (i == 0) "کلید اصلی" else "کلید پشتیبان"
+            try {
+                val body = buildJsonObject {
+                    put("model", p.textModel)
+                    put("max_tokens", 8)
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+                    })
+                }.toString()
+                val req = Request.Builder()
+                    .url(p.chatUrl())
+                    .addHeader("Authorization", "Bearer $key")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+                http.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        report.append("✅ $tag: پاسخ ۲۰۰ — سالم\n")
+                        return@withContext report.toString().trim()
+                    }
+                    report.append("❌ $tag: کد HTTP ${resp.code} — ${describeError(resp.code, "")}\n")
+                }
+            } catch (e: Exception) {
+                val reason = when (e) {
+                    is java.net.UnknownHostException -> "دامنه پیدا نشد (DNS) — احتمالاً فیلتر است"
+                    is java.net.SocketTimeoutException -> "زمان انتظار تمام شد — شبکه کند یا فیلتر"
+                    is javax.net.ssl.SSLException -> "خطای امنیتی SSL — احتمالاً فیلتر"
+                    is java.net.ConnectException -> "اتصال برقرار نشد — اینترنت قطع یا فیلتر"
+                    else -> e.javaClass.simpleName + ": " + (e.message ?: "")
+                }
+                report.append("⚠️ $tag: $reason\n")
+            }
+        }
+        report.toString().trim()
+    }
 
     /**
      * Verifies a specific key by sending a one-token chat request to the active
@@ -105,8 +165,17 @@ object AiClient {
                 else "⚠️ ${describeError(resp.code, resp.body?.string().orEmpty())}"
             }
         } catch (e: Exception) {
-            "⚠️ اتصال برقرار نشد: اینترنت را بررسی کن."
+            "⚠️ اتصال برقرار نشد: ${networkReason(e)}"
         }
+    }
+
+    /** Turns a network exception into a short Persian explanation. */
+    private fun networkReason(e: Exception): String = when (e) {
+        is java.net.UnknownHostException -> "دامنه پیدا نشد؛ محتمل است شبکه فیلتر باشد."
+        is java.net.SocketTimeoutException -> "زمان انتظار تمام شد؛ شبکه کند یا فیلتر است."
+        is javax.net.ssl.SSLException -> "خطای امنیتی اتصال؛ محتمل است شبکه فیلتر باشد."
+        is java.net.ConnectException -> "اینترنت قطع است یا سرور مسدود شده."
+        else -> "اینترنت را بررسی کن. (${e.javaClass.simpleName})"
     }
 
     /** Tests a candidate provider + key before it is saved. */
