@@ -317,4 +317,124 @@ object Health {
             else -> "با توجه به شرایطی که ثبت کردی، این پیشنهادها عمومی‌اند و جای نظر پزشکت را نمی‌گیرند."
         }
     }
+
+    // ----------------------------------------------------- questionnaire baseline
+
+    /**
+     * Converts the onboarding questionnaire into the user's Day-1 check-in.
+     *
+     * The questionnaire answers live on [Profile] under its own field names
+     * (`skinType`, `acneLevel`, `dryOrOily`, …), while the dashboard reads the
+     * check-in fields (`skinStatus`, `skinInflammation`, …). This is the single
+     * place that maps one to the other, so the skin and fatigue cards show the
+     * questionnaire answers on day one without asking the user to check in again.
+     */
+    fun fromQuestionnaire(p: Profile, date: String): CheckIn = CheckIn(
+        date = date,
+        energyLevel = when {
+            p.fatigueLevel.contains("خیلی زیاد") -> "خیلی کم"
+            p.fatigueLevel.contains("زیاد") -> "کم"
+            p.fatigueLevel.contains("متوسط") -> "متوسط"
+            p.fatigueLevel.contains("کم") -> "خوب"
+            p.fatigueLevel.contains("خیلی کم") -> "خیلی خوب"
+            else -> ""
+        },
+        fatigueSeverity = p.fatigueLevel,
+        sleepHours = p.sleepHours,
+        sleepQuality = p.sleepQuality,
+        waterGlasses = p.waterIntake,
+        stressLevel = p.stressLevel,
+        appetite = p.appetite,
+        physicalActivity = p.physicalActivity,
+        skinStatus = skinStatusFromQuestionnaire(p),
+        acneCount = p.acneLevel,
+        skinInflammation = p.hasRedness,
+        skinDryOily = p.dryOrOily,
+        skinSensitivity = p.hasSensitivity,
+        isPeriodDay = false,
+        periodPain = if (p.periodPainLevel > 0) "دارم" else "",
+        periodPainLevel = if (p.periodPainLevel > 0) p.periodPainLevel.toString() else "",
+        periodPainLocation = p.painLocation,
+        notes = "این اطلاعات از پرسشنامه اولیه (روز اول) ثبت شد."
+    )
+
+    /**
+     * A baseline skin label from the questionnaire. Only derived when the user
+     * actually answered a skin question; otherwise empty, so the dashboard can
+     * honestly say nothing was recorded.
+     */
+    private fun skinStatusFromQuestionnaire(p: Profile): String {
+        val hasAny = p.acneLevel.isNotBlank() || p.dryOrOily.isNotBlank() ||
+                p.hasSensitivity.isNotBlank() || p.hasRedness.isNotBlank() ||
+                p.skinType.isNotBlank()
+        if (!hasAny) return ""
+        return when {
+            p.acneLevel.contains("زیاد") -> "وضعیت پایه: جوش زیاد"
+            p.acneLevel.contains("متوسط") -> "وضعیت پایه: جوش متوسط"
+            p.acneLevel.contains("کم") -> "وضعیت پایه: جوش کم"
+            p.acneLevel.contains("ندارم") -> "وضعیت پایه: بدون جوش"
+            else -> "وضعیت پایه ثبت شد"
+        }
+    }
+
+    /**
+     * True when there is any skin information at all — from today's check-in
+     * or, failing that, from the questionnaire baseline in the profile. The
+     * dashboard uses this so it never claims nothing was recorded while the
+     * questionnaire actually has skin answers.
+     */
+    fun hasSkinData(profile: Profile?, today: CheckIn?): Boolean {
+        if (today != null && (
+                    today.skinStatus.isNotBlank() || today.acneCount.isNotBlank() ||
+                            today.skinInflammation.isNotBlank() || today.skinDryOily.isNotBlank() ||
+                            today.skinSensitivity.isNotBlank()
+                    )
+        ) return true
+        val p = profile ?: return false
+        return p.skinType.isNotBlank() || p.acneLevel.isNotBlank() || p.dryOrOily.isNotBlank() ||
+                p.hasSensitivity.isNotBlank() || p.hasRedness.isNotBlank() || p.acneLocation.isNotBlank()
+    }
+
+    /**
+     * A short Persian summary of the user's skin state, preferring today's
+     * check-in and falling back to the questionnaire baseline. Returns null only
+     * when there is genuinely no skin information.
+     */
+    fun skinSummary(profile: Profile?, today: CheckIn?): String? {
+        if (!hasSkinData(profile, today)) return null
+        val parts = mutableListOf<String>()
+        val acne = today?.acneCount?.takeIf { it.isNotBlank() } ?: profile?.acneLevel.orEmpty()
+        val type = profile?.skinType?.takeIf { it.isNotBlank() }.orEmpty()
+        val dryOily = today?.skinDryOily?.takeIf { it.isNotBlank() } ?: profile?.dryOrOily.orEmpty()
+        val sensitivity = today?.skinSensitivity?.takeIf { it.isNotBlank() } ?: profile?.hasSensitivity.orEmpty()
+        val redness = today?.skinInflammation?.takeIf { it.isNotBlank() } ?: profile?.hasRedness.orEmpty()
+
+        if (acne.isNotBlank() && !acne.startsWith("وضعیت پایه")) parts += "جوش $acne"
+        if (type.isNotBlank()) parts += convertList(type)
+        // Skip the dry/oily answer when it repeats the skin type's own wording
+        // (e.g. skinType "چرب" and dryOrOily "چربی"), so the line never stutters.
+        if (dryOily.isNotBlank() && dryOily != "هیچ‌کدام" && !repeatsType(dryOily, type)) parts += dryOily
+        if (sensitivity.isNotBlank() && sensitivity != "ندارم") parts += "حساسیت $sensitivity"
+        if (redness.isNotBlank() && redness != "ندارم") parts += "قرمزی $redness"
+        if (parts.isEmpty()) return null
+        return parts.joinToString("، ")
+    }
+
+    /** True when the dry/oily answer already says the same thing as the skin type. */
+    private fun repeatsType(dryOily: String, type: String): Boolean {
+        if (type.isBlank()) return false
+        val t = type.replace("‌", "")
+        val d = dryOily.replace("‌", "")
+        return (t.contains("چرب") && d.contains("چرب")) || (t.contains("خشک") && d.contains("خشک"))
+    }
+
+    /** "خشک,چرب" -> "خشک و چرب" for a readable Persian phrase. */
+    private fun convertList(joined: String): String {
+        val items = joined.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        return when (items.size) {
+            0 -> ""
+            1 -> items[0]
+            else -> items.dropLast(1).joinToString("، ") + " و " + items.last()
+        }
+    }
 }

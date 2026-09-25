@@ -362,7 +362,6 @@ $who
 - فارسی، ساده، گرم و بدون ترس‌آفرینی بنویس. حداکثر ۴ خط.
 """.trimIndent()
     }
-
     /** The rotating topics the condition card cycles through. */
     val conditionTopics = listOf(
         "اطلاعات عمومی",
@@ -374,6 +373,44 @@ $who
         "خواب و استراحت",
         "روش‌های درمانی شناخته‌شده"
     )
+
+    /**
+     * Prompt for the dashboard skin card. It is given the already-computed skin
+     * summary (from today's check-in or the questionnaire baseline), so the
+     * suggestion is grounded in the user's real answers and stays safe.
+     */
+    fun skinTipPrompt(profile: Profile?, today: CheckIn?, summary: String): String {
+        val extra = StringBuilder()
+        if (today != null) {
+            if (today.sleepHours > 0f) extra.append("خواب دیشب: ${today.sleepHours} ساعت. ")
+            if (today.waterGlasses > 0) extra.append("آب امروز: ${today.waterGlasses} لیوان. ")
+            if (today.stressLevel.isNotBlank()) extra.append("استرس امروز: ${today.stressLevel}. ")
+            if (today.skinNewProduct.isNotBlank()) extra.append("محصول جدید: ${today.skinNewProduct}. ")
+        }
+        if (profile?.currentProducts?.isNotBlank() == true) {
+            extra.append("محصولات فعلی کاربر: ${profile.currentProducts}. ")
+        }
+        val conditions = profile?.medicalConditions?.trim().orEmpty()
+        if (conditions.isNotBlank()) extra.append("شرایط پزشکی ثبت‌شده: «$conditions». ")
+
+        return """
+وضعیت پوست ثبت‌شده کاربر: $summary
+$extra
+
+یک پیشنهاد امروزِ کوتاه و مراقبتی برای همین وضعیت پوست بنویس.
+خروجی فقط یک تا دو جملهٔ روان باشد، بدون تیتر و بدون «پیشنهاد امروز» و بدون خط جدید.
+
+قواعد:
+- پیشنهاد متناسب با همین اطلاعات باشد، نه یک متن ثابت و تکراری.
+- فقط مراقبت‌های ساده و بی‌خطر بده: شست‌وشوی ملایم، مرطوب‌کننده، ضدآفتاب،
+  دست‌نزدن به جوش‌ها و کاهش محصولات تحریک‌کننده.
+- از توصیه‌های خانگی تحریک‌کننده مثل لیمو، جوش‌شیرین، خمیردندان، سیر یا سوزاندن روی پوست پرهیز کن.
+- اگر شرایط پزشکی یا محصول جدیدی هست که به پوست مربوط است، کوتاه به آن اشاره کن.
+- اگر نشانه‌های هشدار پوستی جدی وجود دارد، آرام به پزشک پوست ارجاع بده.
+- تشخیص نده، دارو تجویز نکن و درمان قطعی پیشنهاد نده.
+- فارسی، ساده، گرم و کوتاه.
+""".trimIndent()
+    }
 
     /**
      * Prompt for the wide dashboard card that gives a care tip for the user's

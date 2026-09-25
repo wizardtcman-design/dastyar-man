@@ -2,6 +2,7 @@ package com.dastyar.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,9 +18,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.dastyar.app.data.CheckIn
 import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.Dates
@@ -68,6 +71,9 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     val cycleTip by vm.cycleTip.collectAsState()
     val loadingCycleTip by vm.loadingCycleTip.collectAsState()
     val cycleTipError by vm.cycleTipError.collectAsState()
+    val skinTip by vm.skinTip.collectAsState()
+    val loadingSkinTip by vm.loadingSkinTip.collectAsState()
+    val skinSummary = remember(profile, today) { Health.skinSummary(profile, today) }
     val localPlan = remember(profile, today, checkIns) { vm.localPlan() }
     val conditionInfo by vm.conditionInfo.collectAsState()
     val loadingCondition by vm.loadingCondition.collectAsState()
@@ -80,6 +86,10 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 
     LaunchedEffect(cycleDay, cyclePhase) {
         vm.loadCycleTip()
+    }
+
+    LaunchedEffect(skinSummary, today?.date) {
+        vm.loadSkinTip()
     }
 
     // Generate today's suggestion when none is stored yet, so the AI actually
@@ -187,20 +197,21 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 
         // ------------------------------------------------ skin & fatigue status
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile(
-                    "✨", "وضعیت پوست",
-                    today?.skinStatus?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
-                    skinHint(today),
-                    Amber, Modifier.weight(1f)
-                )
-                StatTile(
-                    "🥱", "وضعیت بی‌رمقی",
-                    today?.fatigueSeverity?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
-                    fatigueHint(today),
-                    Rose, Modifier.weight(1f)
-                )
-            }
+            SkinCard(
+                summary = skinSummary,
+                tip = skinTip,
+                loading = loadingSkinTip,
+                onRefresh = { vm.loadSkinTip(force = true) }
+            )
+        }
+
+        item {
+            StatTile(
+                "🥱", "وضعیت بی‌رمقی",
+                today?.fatigueSeverity?.ifBlank { profileHintFatigue(profile) } ?: profileHintFatigue(profile),
+                fatigueHint(today),
+                Rose, Modifier.fillMaxWidth()
+            )
         }
 
         // ---------------------------------------------------- today's plan
@@ -249,28 +260,47 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                 ) { picked ->
                     Range.entries.firstOrNull { it.label == picked }?.let { range = it }
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "هر شاخص را می‌توانی روشن یا خاموش کنی؛ فقط داده‌های واقعی ثبت‌شده نمایش داده می‌شوند.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                MultiChoiceChips(
-                    options = MetricOptions.map { it.label },
-                    selected = selectedMetrics.map { it.label },
-                    accent = Purple
-                ) { pickedLabels ->
-                    val picked = MetricOptions.filter { it.label in pickedLabels }
-                    selectedMetrics = picked.toSet()
-                }
-                Spacer(Modifier.height(16.dp))
 
                 val days = Dates.lastDays(range.days)
                 val byDate = checkIns.associateBy { it.date }
-                val anyData = days.any { d -> byDate[d] != null }
+                val byWeight = weights.associateBy { it.date }
 
-                if (!anyData) {
+                // Raw value of one metric for one day, or null when not recorded.
+                // A recorded zero (no sleep logged, no glasses) counts as missing
+                // so the chart draws an honest gap instead of a false drop.
+                fun rawFor(m: Metric, d: String): Float? = when (m) {
+                    Metric.WEIGHT -> byWeight[d]?.weightKg
+                    Metric.SLEEP -> byDate[d]?.sleepHours?.takeIf { it > 0f }
+                    Metric.WATER -> byDate[d]?.waterGlasses?.takeIf { it > 0 }?.toFloat()
+                    else -> byDate[d]?.let { m.value(it).toFloat() }
+                }
+
+                // A metric is offered only when it has at least one real point in
+                // this range, so a missing indicator never breaks the chart.
+                val availableMetrics = MetricOptions.filter { m ->
+                    days.any { d -> rawFor(m, d) != null }
+                }
+
+                if (availableMetrics.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "هر شاخص را می‌توانی روشن یا خاموش کنی؛ فقط داده‌های واقعی ثبت‌شده نمایش داده می‌شوند.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    MultiChoiceChips(
+                        options = availableMetrics.map { it.label },
+                        selected = availableMetrics.filter { it in selectedMetrics }.map { it.label },
+                        accent = Purple
+                    ) { pickedLabels ->
+                        val picked = availableMetrics.filter { it.label in pickedLabels }
+                        selectedMetrics = picked.toSet()
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+
+                if (availableMetrics.isEmpty()) {
                     Text(
                         "برای دیدن نمودار، چند روز وضعیتت را ثبت کن. " +
                                 "فقط داده‌های واقعی تو نمایش داده می‌شود.",
@@ -278,14 +308,26 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    val series = MetricOptions.filter { it in selectedMetrics }.map { m ->
+                    val visible = availableMetrics.filter { it in selectedMetrics }
+                        .ifEmpty { listOf(availableMetrics.first()) }
+                    val series = visible.map { m ->
+                        val pts = days.map { d -> rawFor(m, d) }
+                        val avg = pts.filterNotNull().average().toFloat()
+                        val scale = when (m) {
+                            // Weight centres on its own average so small changes stay visible.
+                            Metric.WEIGHT -> (avg + 20f).coerceAtLeast(1f)
+                            else -> m.scale
+                        }
                         ChartSeries(
                             label = m.label,
                             color = m.color,
-                            points = days.map { d ->
-                                val ci = byDate[d]
-                                if (ci == null) null
-                                else m.value(ci).toFloat() / m.scale * 100f
+                            points = pts,
+                            scale = scale,
+                            unit = when (m) {
+                                Metric.SLEEP -> "ساعت"
+                                Metric.WATER -> "لیوان"
+                                Metric.WEIGHT -> "کیلو"
+                                else -> "٪"
                             }
                         )
                     }
@@ -294,8 +336,8 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                         series = series
                     )
                     Spacer(Modifier.height(10.dp))
-                    MetricOptions.filter { it in selectedMetrics }.forEach { m ->
-                        val real = days.mapNotNull { d -> byDate[d]?.let { m.value(it) } }
+                    visible.forEach { m ->
+                        val real = days.mapNotNull { d -> rawFor(m, d) }
                         val avg = if (real.isEmpty()) null else real.average()
                         Row(
                             Modifier.padding(vertical = 2.dp),
@@ -990,16 +1032,95 @@ private fun fatigueHint(ci: CheckIn?): String = when {
     else -> "انرژی‌ات خوب است؛ همین ریتم را نگه دار"
 }
 
+/** Fatigue label from the questionnaire baseline when today has no check-in. */
+private fun profileHintFatigue(p: Profile?): String =
+    p?.fatigueLevel?.takeIf { it.isNotBlank() } ?: "ثبت نشده"
+
+/**
+ * The skin card. It shows the user's real skin state — today's check-in when
+ * present, otherwise the questionnaire baseline — and only says nothing was
+ * recorded when there genuinely is no skin information at all. An AI suggestion
+ * for today sits below it.
+ */
+@Composable
+private fun SkinCard(
+    summary: String?,
+    tip: String?,
+    loading: Boolean,
+    onRefresh: () -> Unit
+) {
+    DastyarCard(accent = Amber) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Amber.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("✨", fontSize = 19.sp) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("وضعیت پوست", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    if (summary != null) "از اطلاعات ثبت‌شده خودت" else "اطلاعاتی ثبت نشده",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (summary != null) {
+                if (loading) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "تولید دوباره")
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
+        if (summary == null) {
+            Text(
+                "هنوز اطلاعات پوستی ثبت نشده. با ثبت وضعیت امروز، این کارت کامل می‌شود.",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text("وضعیت پوست: $summary", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+            if (tip != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "پیشنهاد امروز:",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Amber
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(tip, fontSize = 13.sp, lineHeight = 21.sp)
+            } else if (loading) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "در حال آماده‌سازی پیشنهاد…",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 /**
  * One togglable indicator in the unified trend chart. Every value comes from a
- * real recorded check-in; a day without data is left as a gap, never filled in.
+ * real recorded check-in (weight from the weight log); a day without data is
+ * left as a gap, never filled in.
  */
 private enum class Metric(val label: String, val color: Color, val scale: Float) {
     ENERGY("انرژی", Purple, 100f),
     SLEEP("خواب", Cyan, 12f),
     WATER("آب", Color(0xFF38BDF8), 15f),
     FATIGUE("بی‌رمقی", Rose, 100f),
-    SKIN("پوست", Amber, 100f);
+    SKIN("پوست", Amber, 100f),
+    WEIGHT("وزن", Green, 120f);
 
     fun value(ci: CheckIn): Int = when (this) {
         ENERGY -> energyPercent(ci)
@@ -1007,6 +1128,7 @@ private enum class Metric(val label: String, val color: Color, val scale: Float)
         WATER -> ci.waterGlasses
         FATIGUE -> fatigueScore(ci)
         SKIN -> skinScore(ci)
+        WEIGHT -> 0
     }
 
     /** Average of the raw (unscaled) values, formatted in Persian. */
@@ -1019,32 +1141,66 @@ private enum class Metric(val label: String, val color: Color, val scale: Float)
 
 private val MetricOptions = Metric.entries
 
-/** A named, coloured series for the multi-line chart. Null means "no data". */
-data class ChartSeries(val label: String, val color: Color, val points: List<Float?>)
+/**
+ * A named, coloured series for the multi-line chart. [points] holds the raw
+ * values (null = no data that day); the chart scales them to 0-100 on a shared
+ * axis, and touch shows the raw value with [unit].
+ */
+data class ChartSeries(
+    val label: String,
+    val color: Color,
+    val points: List<Float?>,
+    val scale: Float,
+    val unit: String
+)
 
 /**
  * The unified status trend: several indicators on one chart, each with its own
  * colour, on a shared 0-100 axis. Missing days stay as gaps so nothing is
- * invented. Series are kept in the legend above so the chart itself stays tidy
- * on a phone.
+ * invented. Tapping the chart shows the values of all visible series for the
+ * nearest day. The legend lives above the chart so it stays tidy on a phone.
  */
 @Composable
 fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
-    val allPoints = series.flatMap { it.points }.filterNotNull()
     val n = values.size.coerceAtLeast(2)
+    var selected by remember { mutableStateOf(-1) }
 
     Column {
-        androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+        androidx.compose.foundation.Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(190.dp)
+                .pointerInput(values, series) {
+                    detectTapGestures { offset ->
+                        val pad = 14f
+                        val w = size.width
+                        val step = (w - 2 * pad) / (n - 1).coerceAtLeast(1)
+                        val idx = ((offset.x - pad) / step).roundToInt().coerceIn(0, n - 1)
+                        selected = if (selected == idx) -1 else idx
+                    }
+                }
+        ) {
             val w = size.width
             val h = size.height
             val pad = 14f
 
             fun px(i: Int) = pad + (w - 2 * pad) * (i.toFloat() / (n - 1))
-            fun py(v: Float) = h - pad - (h - 2 * pad) * (v / 100f).coerceIn(0f, 1f)
+            fun py(value: Float, scale: Float) =
+                h - pad - (h - 2 * pad) * ((value / scale) * 100f / 100f).coerceIn(0f, 1f)
 
             repeat(4) { g ->
                 val y = pad + (h - 2 * pad) * (g / 3f)
                 drawLine(Color.Gray.copy(alpha = .18f), Offset(pad, y), Offset(w - pad, y), 1f)
+            }
+
+            // Highlight the tapped day across all series.
+            if (selected in 0 until n) {
+                drawLine(
+                    Purple.copy(alpha = .45f),
+                    Offset(px(selected), pad),
+                    Offset(px(selected), h - pad),
+                    2f
+                )
             }
 
             series.forEach { s ->
@@ -1054,23 +1210,42 @@ fun MultiLineChart(values: List<String>, series: List<ChartSeries>) {
                     if (v == null) {
                         started = false
                     } else {
-                        val x = px(i); val y = py(v)
+                        val x = px(i); val y = py(v, s.scale)
                         if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
                     }
                 }
                 drawPath(path, s.color, style = Stroke(width = 2.5f))
                 s.points.forEachIndexed { i, v ->
                     if (v != null) {
-                        drawCircle(s.color, radius = 4.5f, center = Offset(px(i), py(v)))
-                        drawCircle(Color.White, radius = 1.8f, center = Offset(px(i), py(v)))
+                        val big = i == selected
+                        drawCircle(s.color, radius = if (big) 6.5f else 4.5f,
+                            center = Offset(px(i), py(v, s.scale)))
+                        drawCircle(Color.White, radius = if (big) 2.6f else 1.8f,
+                            center = Offset(px(i), py(v, s.scale)))
                     }
                 }
             }
         }
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val step = (values.size / 7).coerceAtLeast(1)
             values.filterIndexed { i, _ -> i % step == 0 }.forEach {
                 Text(it, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        if (selected in 0 until n) {
+            val label = values.getOrNull(selected).orEmpty()
+            val shown = series.mapNotNull { s ->
+                s.points.getOrNull(selected)?.let { v -> "${s.label}: ${Dates.fa("%.1f".format(v))} ${s.unit}" }
+            }
+            if (shown.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "روز $label — " + shown.joinToString(" • "),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

@@ -96,6 +96,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var cycleTipLoadedFor: String? = null
 
+    // ---- AI summary for the skin card, from real recorded skin data ----
+    private val _skinTip = MutableStateFlow<String?>(null)
+    val skinTip: StateFlow<String?> = _skinTip.asStateFlow()
+
+    private val _loadingSkinTip = MutableStateFlow(false)
+    val loadingSkinTip: StateFlow<Boolean> = _loadingSkinTip.asStateFlow()
+
+    private var skinTipLoadedFor: String? = null
+
+    /**
+     * Produces a short, personalised skin suggestion from the user's real skin
+     * data (today's check-in, falling back to the questionnaire baseline). The
+     * card already shows the raw summary, so a failure just keeps that.
+     */
+    fun loadSkinTip(force: Boolean = false) = viewModelScope.launch {
+        val p = profile.value
+        val ci = _todayCheckIn.value
+        val summary = Health.skinSummary(p, ci) ?: run {
+            _skinTip.value = null
+            return@launch
+        }
+        val key = "$summary-${ci?.date ?: "base"}"
+        if (!force && skinTipLoadedFor == key && _skinTip.value != null) return@launch
+        if (!AiClient.chatConfigured) return@launch
+
+        _loadingSkinTip.value = true
+        val res = AiClient.chat(
+            system = Prompts.base(),
+            history = emptyList(),
+            userMessage = Prompts.skinTipPrompt(profile = p, today = ci, summary = summary)
+        )
+        _loadingSkinTip.value = false
+        res.onSuccess { text ->
+            val cleaned = text.trim()
+            if (cleaned.isNotBlank()) {
+                _skinTip.value = cleaned
+                skinTipLoadedFor = key
+            }
+        }
+    }
+
     /**
      * Personalises today's cycle tip with AI when it is available, using the
      * real cycle day, phase, length and today's check-in. The local phase tip is
@@ -291,34 +332,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Turns the completed questionnaire into a real first check-in row, so the
-     * dashboard shows it as day one of the history.
+     * dashboard shows it as day one of the history. Every answer the user gave
+     * (skin, fatigue, sleep, water, stress, activity, cycle) is carried over so
+     * no card says "nothing recorded" on day one. The mapping itself lives in
+     * [Health.fromQuestionnaire] so onboarding and the dashboard agree.
      */
-    private fun onboardingAsCheckIn(p: Profile, date: String) = CheckIn(
-        date = date,
-        energyLevel = when {
-            p.fatigueLevel.contains("خیلی زیاد") -> "خیلی کم"
-            p.fatigueLevel.contains("زیاد") -> "کم"
-            p.fatigueLevel.contains("متوسط") -> "متوسط"
-            p.fatigueLevel.contains("کم") -> "خوب"
-            p.fatigueLevel.contains("خیلی کم") -> "خیلی خوب"
-            else -> ""
-        },
-        fatigueSeverity = p.fatigueLevel,
-        sleepHours = p.sleepHours,
-        sleepQuality = p.sleepQuality,
-        waterGlasses = p.waterIntake,
-        stressLevel = p.stressLevel,
-        appetite = p.appetite,
-        physicalActivity = p.physicalActivity,
-        skinStatus = "",
-        skinDryOily = p.dryOrOily,
-        skinSensitivity = p.hasSensitivity,
-        isPeriodDay = false,
-        periodPain = if (p.periodPainLevel > 0) "دارم" else "",
-        periodPainLevel = if (p.periodPainLevel > 0) p.periodPainLevel.toString() else "",
-        periodPainLocation = p.painLocation,
-        notes = "این اطلاعات از پرسشنامه اولیه ثبت شد."
-    )
+    private fun onboardingAsCheckIn(p: Profile, date: String): CheckIn =
+        Health.fromQuestionnaire(p, date)
 
     // ------------------------------------------------------------ check-in
 
