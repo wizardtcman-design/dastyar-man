@@ -32,6 +32,7 @@ fun DastyarCard(
             .fillMaxWidth()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(accent)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(20.dp)
     ) {
@@ -144,6 +145,7 @@ fun StatTile(
         modifier
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(accent)
             .padding(16.dp)
     ) {
         Column(Modifier.fillMaxWidth()) {

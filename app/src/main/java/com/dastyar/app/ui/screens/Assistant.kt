@@ -1,6 +1,7 @@
 package com.dastyar.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -265,6 +266,13 @@ private fun MessageBubble(m: ChatMessage) {
                     else Modifier.background(
                         Brush.linearGradient(listOf(Purple.copy(alpha = .85f), Pink.copy(alpha = .75f)))
                     )
+                )
+                .then(
+                    if (isUser) Modifier.border(
+                        1.dp,
+                        Purple.copy(alpha = .40f),
+                        RoundedCornerShape(16.dp)
+                    ) else Modifier
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {

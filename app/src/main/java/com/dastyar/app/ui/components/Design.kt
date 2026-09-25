@@ -1,6 +1,7 @@
 package com.dastyar.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +33,25 @@ object Shape {
     val chip = RoundedCornerShape(15.dp)
     val badge = RoundedCornerShape(15.dp)
 }
+
+/**
+ * Colour of the thin border drawn around every card. When a card has its own
+ * accent the border takes that colour softly, otherwise the theme primary is
+ * used, so every card is visibly outlined but nothing shouts.
+ */
+@Composable
+fun cardBorderColor(accent: Color? = null): Color {
+    val base = accent ?: MaterialTheme.colorScheme.primary
+    return base.copy(alpha = if (accent != null) .45f else .28f)
+}
+
+/**
+ * Applies the shared thin coloured border to any surface card. Kept in one
+ * place so the whole app stays visually consistent.
+ */
+@Composable
+fun Modifier.cardOutline(accent: Color? = null): Modifier =
+    this.border(1.dp, cardBorderColor(accent), Shape.card)
 
 /** The brand gradient used by the header, the primary button and the step badge. */
 val BrandBrush: Brush get() = Brush.horizontalGradient(listOf(Purple, Pink))
@@ -114,6 +134,7 @@ fun SectionCard(
             .fillMaxWidth()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(accent)
             .padding(20.dp)
     ) {
         Column(
@@ -170,6 +191,7 @@ fun QuestionCard(
             .fillMaxWidth()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(accent)
             .padding(20.dp)
     ) {
         Column(

@@ -600,6 +600,7 @@ private fun CycleTile(
         modifier
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(Pink)
             .padding(14.dp),
         verticalArrangement = Arrangement.Top
     ) {
@@ -862,6 +863,7 @@ private fun BmiTile(
         modifier
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(Green)
             .clickable { onUpdate() }
             .padding(14.dp),
         verticalArrangement = Arrangement.Top
