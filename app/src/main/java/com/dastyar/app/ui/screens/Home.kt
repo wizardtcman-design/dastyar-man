@@ -80,8 +80,8 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             GreetingCard(
                 name = name,
                 emoji = greetingEmoji(),
-                subtitle = Dates.pretty(vm.today) +
-                        if (cycleDay > 0) " • روز ${Dates.fa(cycleDay)} چرخه" else " • امروز",
+                dateLabel = Dates.pretty(vm.today),
+                cycleDay = cycleDay,
                 onSettings = { showSettings = true }
             )
         }
@@ -295,14 +295,16 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 
 /**
  * The full-width welcome card at the very top of the dashboard. It always uses
- * the name the user gave in onboarding and carries the settings shortcut, so
- * the first thing on screen is complete, ordered and self-explanatory.
+ * the name the user gave in onboarding and carries the settings shortcut. Date
+ * and cycle day live in their own separated pills so numbers and words never
+ * run into each other in RTL.
  */
 @Composable
 private fun GreetingCard(
     name: String,
     emoji: String,
-    subtitle: String,
+    dateLabel: String,
+    cycleDay: Int,
     onSettings: () -> Unit
 ) {
     Box(
@@ -329,22 +331,14 @@ private fun GreetingCard(
                     contentAlignment = Alignment.Center
                 ) { Text(emoji, fontSize = 23.sp) }
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        greetingFor(name),
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 19.sp,
-                        maxLines = 1
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        subtitle,
-                        color = Color.White.copy(alpha = .92f),
-                        fontSize = 12.5.sp,
-                        maxLines = 1
-                    )
-                }
+                Text(
+                    greetingFor(name),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 19.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
                 Box(
                     Modifier
                         .size(42.dp)
@@ -354,7 +348,39 @@ private fun GreetingCard(
                     contentAlignment = Alignment.Center
                 ) { Text("⚙️", fontSize = 20.sp) }
             }
+            Spacer(Modifier.height(12.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HeaderPill("📅", dateLabel)
+                if (cycleDay > 0) {
+                    HeaderPill("🩷", "روز ${Dates.fa(cycleDay)} چرخه")
+                }
+            }
         }
+    }
+}
+
+/** A compact, self-contained value chip used inside the greeting card. */
+@Composable
+private fun HeaderPill(emoji: String, text: String) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = .18f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(emoji, fontSize = 12.5.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text,
+            color = Color.White,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
     }
 }
 
@@ -569,9 +595,9 @@ private fun WaterCard(water: Int, goal: Int, onAdd: () -> Unit, onRemove: () -> 
                 )
             }
             Text(
-                "${Dates.fa(water)} / ${Dates.fa(goal)}",
+                "${Dates.fa(water)} از ${Dates.fa(goal)}",
                 fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
+                fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.tertiary
             )
         }
@@ -649,8 +675,8 @@ private fun BmiTile(
                 }
                 else -> {
                     Text(
-                        "${Dates.fa("%.1f".format(bmi))}",
-                        fontSize = 20.sp,
+                        "شاخص توده بدنی ${Dates.fa("%.1f".format(bmi))}",
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                     if (ageApplies && category != null) {
@@ -665,21 +691,40 @@ private fun BmiTile(
                         )
                     }
                     latest?.let {
+                        Spacer(Modifier.height(6.dp))
+                        BmiRow("⚖️", "وزن", "${Dates.fa("%.1f".format(it.weightKg))} کیلوگرم")
                         Spacer(Modifier.height(3.dp))
-                        Text(
-                            "${Dates.fa("%.1f".format(it.weightKg))} کیلو • ${Dates.pretty(it.date)}",
-                            fontSize = 10.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        BmiRow("📅", "آخرین ثبت", Dates.pretty(it.date))
                     }
                 }
             }
 
             if (weights.size >= 2) {
                 Spacer(Modifier.height(10.dp))
-                WeightSpark(weights.takeLast(12).map { it.weightKg })
+                WeightSpark(weights.takeLast(12).map { w -> w.weightKg })
             }
         }
+    }
+}
+
+/** One label/value line inside the BMI tile, safely ordered for RTL. */
+@Composable
+private fun BmiRow(emoji: String, label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(emoji, fontSize = 10.5.sp)
+        Spacer(Modifier.width(5.dp))
+        Text(
+            label,
+            fontSize = 10.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            value,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
