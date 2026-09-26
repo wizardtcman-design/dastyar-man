@@ -49,27 +49,38 @@ object CloudflareClient {
         val id: String,
         val label: String,
         val imageInput: Boolean = false,
-        val returnsJson: Boolean = false
+        val returnsJson: Boolean = false,
+        /**
+         * Documented relative consumption. Cloudflare publishes per-model
+         * Neuron rates in its pricing docs; when a rate is not published for a
+         * model this stays null and the UI shows no number for it. It is never
+         * guessed.
+         */
+        val neuronHint: String? = null
     )
 
     val MODELS: List<CfModel> = listOf(
         CfModel(
             id = "@cf/black-forest-labs/flux-1-schnell",
             label = "Flux 1 Schnell (سریع)",
-            returnsJson = true
+            returnsJson = true,
+            neuronHint = "مصرف نسبتاً پایین بین مدل‌های تصویری"
         ),
         CfModel(
             id = "@cf/bytedance/stable-diffusion-xl-lightning",
-            label = "SDXL Lightning (متعادل)"
+            label = "SDXL Lightning (متعادل)",
+            neuronHint = "تک‌مرحله‌ای، مصرف پایین‌تر از SDXL کامل"
         ),
         CfModel(
             id = "@cf/lykon/dreamshaper-8-lcm",
-            label = "DreamShaper 8 (هنری)"
+            label = "DreamShaper 8 (هنری)",
+            neuronHint = null
         ),
         CfModel(
             id = "@cf/leonardo/phoenix-1.0",
             label = "Leonardo Phoenix (ویرایش تصویر)",
-            imageInput = true
+            imageInput = true,
+            neuronHint = "برای ویرایش تصویر کاربرد دارد"
         )
     )
 
@@ -96,7 +107,13 @@ object CloudflareClient {
         val ok: Boolean,
         val kind: CfFail,
         val message: String,
-        val value: T? = null
+        val value: T? = null,
+        /** Real HTTP status, for the usage log. 0 when the call never left. */
+        val http: Int = 0,
+        /** Neurons the provider actually reported, when it reported any. */
+        val neurons: Double? = null,
+        /** True when the provider itself said the daily allowance is used up. */
+        val quotaExhausted: Boolean = false
     )
 
     /**
@@ -109,8 +126,14 @@ object CloudflareClient {
                 false, CfFail.NO_CREDENTIALS, "شناسه حساب و توکن لازم است."
             )
             val r = textToImage(accountId, token, model, "a small blue circle on white")
-            if (r.ok) CfResult(true, CfFail.NONE, "✅ اتصال برقرار است", r.value)
-            else CfResult(false, r.kind, r.message)
+            if (r.ok) CfResult(
+                true, CfFail.NONE, "✅ اتصال برقرار است",
+                value = r.value, http = r.http, neurons = r.neurons
+            )
+            else CfResult(
+                false, r.kind, r.message,
+                http = r.http, neurons = r.neurons, quotaExhausted = r.quotaExhausted
+            )
         }
 
     /** Lists the models the account can reach and that output images. */
@@ -201,28 +224,50 @@ object CloudflareClient {
                 .build()
             http.newCall(req).execute().use { resp ->
                 val bytes = resp.body?.bytes() ?: ByteArray(0)
+                val text = bytes.toString(Charsets.UTF_8)
                 if (!resp.isSuccessful) {
-                    val text = bytes.toString(Charsets.UTF_8)
-                    return CfResult(false, cfClassify(resp.code, text), cfDescribe(resp.code, text))
+                    val kind = cfClassify(resp.code, text)
+                    return CfResult(
+                        false, kind, cfDescribe(resp.code, text),
+                        http = resp.code, neurons = extractNeurons(text),
+                        quotaExhausted = kind == CfFail.RATE_LIMIT && text.lowercase().contains("neuron")
+                    )
                 }
                 // Raw pixels come back directly for some models.
                 if (bytes.size > 500 && !looksLikeJson(bytes)) {
-                    return CfResult(true, CfFail.NONE, "✅ تصویر ساخته شد", bytes)
+                    return CfResult(true, CfFail.NONE, "✅ تصویر ساخته شد", bytes,
+                        http = resp.code, neurons = extractNeurons(text))
                 }
                 // Others answer with JSON containing a base64 image.
-                val text = bytes.toString(Charsets.UTF_8)
                 val b64 = extractBase64Image(text)
                 if (b64 != null) {
                     val raw = try { Base64.getDecoder().decode(b64) } catch (e: Exception) { null }
                     if (raw != null && raw.size > 500) {
-                        return CfResult(true, CfFail.NONE, "✅ تصویر ساخته شد", raw)
+                        return CfResult(true, CfFail.NONE, "✅ تصویر ساخته شد", raw,
+                            http = resp.code, neurons = extractNeurons(text))
                     }
                 }
-                CfResult(false, cfClassify(resp.code, text), cfDescribe(resp.code, text))
+                CfResult(false, cfClassify(resp.code, text), cfDescribe(resp.code, text),
+                    http = resp.code, neurons = extractNeurons(text))
             }
         } catch (e: Exception) {
             CfResult(false, cfFailFromException(e), cfNetworkReason(e))
         }
+    }
+
+    /**
+     * Neurons Cloudflare reported in the reply, if it reported any. Cloudflare's
+     * image models normally do not return a Neuron figure, so this is usually
+     * null and the UI must then say the exact usage is unavailable rather than
+     * inventing a number.
+     */
+    private fun extractNeurons(text: String): Double? = try {
+        val root = json.parseToJsonElement(text).jsonObject
+        val usage = root["result"]?.jsonObject?.get("usage")?.jsonObject
+        val v = usage?.get("neurons")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+        v
+    } catch (e: Exception) {
+        null
     }
 
     private fun looksLikeJson(bytes: ByteArray): Boolean =

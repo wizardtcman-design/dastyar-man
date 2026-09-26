@@ -22,7 +22,9 @@ import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.AiProviders
 import com.dastyar.app.ai.CloudflareClient
 import com.dastyar.app.ai.PollinationsClient
+import com.dastyar.app.ai.QuotaGuard
 import com.dastyar.app.ai.ServiceKeys
+import com.dastyar.app.ai.UsageLog
 import com.dastyar.app.data.Health
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Profile
@@ -532,11 +534,80 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
             Spacer(Modifier.height(10.dp))
             Text("مصرف Workers AI", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+
+            // Everything below is built only from facts: the documented daily
+            // allowance, and the app's own recorded requests. Cloudflare's
+            // image models do not return a Neuron figure, so the exact consumed
+            // amount is stated as unavailable rather than guessed.
+            val cfUsage = UsageLog.todaySummary(ctx)
+            val exhausted = QuotaGuard.cloudflareExhaustedToday(ctx)
+
             Text(
-                "سهمیه رایگان روزانه: ${Dates.fa(CloudflareClient.FREE_DAILY_NEURONS)} Neuron " +
-                        "(هر روز ریست می‌شود). مصرف دقیق از API قابل دریافت نیست.",
-                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                "سهمیه روزانه: ${Dates.fa(CloudflareClient.FREE_DAILY_NEURONS)} Neuron",
+                fontSize = 12.sp
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "میزان مصرف دقیق از API قابل دریافت نیست.",
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "تولید تصویر امروز: ${Dates.fa(cloudflareRequests(cfUsage))} درخواست",
+                fontSize = 12.sp
+            )
+            Text(
+                "ویرایش تصویر امروز: ${Dates.fa(cfUsage.cloudflareEdit)} درخواست",
+                fontSize = 12.sp
+            )
+            if (cfUsage.cloudflareFailed > 0) {
+                Text(
+                    "درخواست ناموفق امروز: ${Dates.fa(cfUsage.cloudflareFailed)}",
+                    fontSize = 11.sp, color = Amber
+                )
+            }
+            if (cfUsage.fallbackGenerate > 0) {
+                Text(
+                    "تولید با Pollinations (پشتیبان): ${Dates.fa(cfUsage.fallbackGenerate)}",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (cfUsage.hasNeuronData && cfUsage.neuronsReported != null) {
+                Text(
+                    "Neuron گزارش‌شده توسط سرویس: ${Dates.fa(cfUsage.neuronsReported!!.toInt())}",
+                    fontSize = 11.sp, color = Green
+                )
+            }
+            if (cfUsage.models.isNotEmpty()) {
+                Text(
+                    "مدل‌های استفاده‌شده: " + cfUsage.models.joinToString("، "),
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Quota warnings, shown only when Cloudflare itself reported it.
+            if (exhausted) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "سهمیه رایگان Cloudflare برای امروز تمام شده است. تولید تصویر به Pollinations منتقل شد.",
+                    fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(QuotaGuard.RESET_NOTE, fontSize = 10.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // Per-model documented consumption hint, next to each model name.
+            Spacer(Modifier.height(8.dp))
+            Text("مدل‌های تصویری:", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+            CloudflareClient.MODELS.forEach { m ->
+                Text(
+                    "• ${m.label}" + (m.neuronHint?.let { " — $it" } ?: ""),
+                    fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             cfStatus?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -881,6 +952,10 @@ private fun money(v: Double): String {
     val s = if (v >= 100) "%.0f".format(v) else "%.2f".format(v)
     return "$" + Dates.fa(s).replace('.', '٫')
 }
+
+/** Total Cloudflare image requests recorded today (generate + edit). */
+private fun cloudflareRequests(s: UsageLog.Summary): Int =
+    s.cloudflareGenerate + s.cloudflareEdit
 
 /** Masks a secret, keeping only the start and the last few characters. */
 private fun maskKey(v: String?): String {

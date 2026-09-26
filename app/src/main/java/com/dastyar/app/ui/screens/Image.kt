@@ -29,6 +29,8 @@ import com.dastyar.app.ai.ImageEngine
 import com.dastyar.app.ai.Prompts
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
+import com.dastyar.app.ui.theme.Amber
+import com.dastyar.app.ui.theme.Cyan
 import com.dastyar.app.ui.theme.Purple
 import kotlinx.coroutines.launch
 
@@ -80,6 +82,7 @@ private val categories = listOf(
 @Composable
 fun ImageScreen(vm: MainViewModel) {
     val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var selectedCat by remember { mutableIntStateOf(0) }
     var prompt by remember { mutableStateOf(categories[0].prompts[0]) }
     var editInstruction by remember { mutableStateOf("") }
@@ -101,6 +104,29 @@ fun ImageScreen(vm: MainViewModel) {
             title = "تصویر AI",
             subtitle = "با هوش مصنوعی تصویر بساز یا تصویر موجود را ویرایش کن."
         )
+
+        // Honest engine + quota line. It reflects only recorded facts: the model
+        // in use, which provider will run, and whether today's free allowance is
+        // known to be spent. No usage number is shown unless Cloudflare returned
+        // one, which its image models normally do not.
+        Spacer(Modifier.height(12.dp))
+        val cfExhausted = com.dastyar.app.ai.QuotaGuard.cloudflareExhaustedToday(ctx)
+        DastyarCard(accent = if (cfExhausted) Amber else Cyan) {
+            Text(
+                if (com.dastyar.app.ai.ServiceKeys.cloudflareReady() && !cfExhausted)
+                    "موتور تصویر: Cloudflare AI"
+                else "موتور تصویر: Pollinations (پشتیبان)",
+                fontSize = 13.sp, fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (cfExhausted)
+                    "سهمیه رایگان Cloudflare امروز تمام شده است؛ تصویر با Pollinations تولید می‌شود."
+                else "مدل Cloudflare: ${com.dastyar.app.ai.ServiceKeys.cloudflareModel()}",
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
 
@@ -208,7 +234,7 @@ fun ImageScreen(vm: MainViewModel) {
                         android.util.Base64.NO_WRAP
                     )
                     lastPrompt = instr
-                    ImageEngine.edit(instr, src)
+                    ImageEngine.edit(ctx, instr, src)
                 } else {
                     val finalPrompt: String =
                         if (isEditing && editInstruction.isNotBlank()) {
@@ -228,7 +254,7 @@ fun ImageScreen(vm: MainViewModel) {
                         return@launch
                     }
                     lastPrompt = finalPrompt
-                    ImageEngine.generate(finalPrompt)
+                    ImageEngine.generate(ctx, finalPrompt)
                 }
                 loading = false
                 res.onSuccess { out ->

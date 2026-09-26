@@ -35,8 +35,13 @@ object ImageEngine {
 
     /**
      * Text -> image with the Cloudflare-first priority.
+     *
+     * Each provider attempt is one real inference: there is no app-level retry
+     * around Cloudflare, and once Cloudflare reports its daily quota is used up
+     * it is not called again in this request (or for the rest of the day).
      */
     suspend fun generate(
+        ctx: android.content.Context?,
         prompt: String,
         width: Int = 768,
         height: Int = 1024,
@@ -47,22 +52,34 @@ object ImageEngine {
         )
         val reasons = mutableListOf<String>()
 
-        // 1) Cloudflare, only when the user connected it.
+        // 1) Cloudflare, only when connected and not already out of quota today.
         val cfModel = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
             ?: CloudflareClient.DEFAULT_MODEL
-        if (ServiceKeys.cloudflareReady()) {
+        if (ServiceKeys.cloudflareReady() && !QuotaGuard.cloudflareExhaustedToday(ctx)) {
+            val t0 = System.currentTimeMillis()
             val r = CloudflareClient.textToImage(
                 accountId = ServiceKeys.cloudflareAccount(),
                 token = ServiceKeys.cloudflareToken(),
                 model = cfModel,
                 prompt = prompt
             )
+            UsageLog.record(
+                ctx, UsageLog.Provider.CLOUDFLARE, cfModel.id, UsageLog.Kind.GENERATE,
+                r.ok, r.http, System.currentTimeMillis() - t0, r.neurons, r.message
+            )
             if (r.ok && r.value != null) {
                 return@withContext Result.success(
                     ImageOutcome(r.value, Source.CLOUDFLARE, "تولید تصویر با Cloudflare AI")
                 )
             }
-            reasons += "Cloudflare: ${r.message}"
+            // A quota error marks Cloudflare used-up for today, so nothing else
+            // in the app will spend the (already exhausted) allowance again.
+            if (r.quotaExhausted) {
+                QuotaGuard.markCloudflareExhausted(ctx)
+                reasons += "Cloudflare: سهمیه رایگان امروز تمام شده است"
+            } else reasons += "Cloudflare: ${r.message}"
+        } else if (QuotaGuard.cloudflareExhaustedToday(ctx)) {
+            reasons += "Cloudflare: سهمیه امروز تمام شده است"
         } else {
             reasons += "Cloudflare: متصل نشده است"
         }
@@ -70,22 +87,32 @@ object ImageEngine {
         // 2) Pollinations fallback. The endpoint only understands English, so a
         // Persian prompt is translated first with the chat model.
         val english = toEnglishPrompt(prompt)
+        val pt0 = System.currentTimeMillis()
         val p = PollinationsClient.image(english, width, height, seed, ServiceKeys.pollinationsKey())
+        UsageLog.record(
+            ctx, UsageLog.Provider.POLLINATIONS, "flux", UsageLog.Kind.GENERATE,
+            p.ok, if (p.ok) 200 else 0, System.currentTimeMillis() - pt0, null, p.message
+        )
         if (p.ok && p.value != null) {
-            return@withContext Result.success(
-                ImageOutcome(
-                    p.value,
-                    Source.POLLINATIONS,
-                    "Cloudflare در دسترس نبود — تصویر با Pollinations تولید شد."
-                )
-            )
+            val why = if (QuotaGuard.cloudflareExhaustedToday(ctx))
+                "Cloudflare امروز به سقف سهمیه رسیده؛ تصویر با Pollinations تولید شد."
+            else "Cloudflare در دسترس نبود — تصویر با Pollinations تولید شد."
+            return@withContext Result.success(ImageOutcome(p.value, Source.POLLINATIONS, why))
         }
         reasons += "Pollinations: ${p.message}"
 
-        // 3) OpenRouter image, only when it has a working image model/credit.
-        if (AiClient.chatConfigured) {
+        // 3) OpenRouter image, only when the user's account is known to have a
+        // usable image model. A free account that only ever answered 402 for
+        // images does not get another wasted inference on every request.
+        if (AiClient.chatConfigured && ServiceKeys.openRouterSupportsImage() &&
+            ServiceKeys.openRouterState() == ServiceKeys.State.CONNECTED
+        ) {
             val o = AiClient.providerImage(prompt, seed)
             if (o != null) {
+                UsageLog.record(
+                    ctx, UsageLog.Provider.OPENROUTER, AiClient.discoveredImageModel,
+                    UsageLog.Kind.GENERATE, true, 200, 0, null, ""
+                )
                 return@withContext Result.success(
                     ImageOutcome(o, Source.OPENROUTER, "تصویر با OpenRouter تولید شد.")
                 )
@@ -101,6 +128,7 @@ object ImageEngine {
      * image; otherwise Pollinations is used as the fallback.
      */
     suspend fun edit(
+        ctx: android.content.Context?,
         prompt: String,
         sourceBase64: String,
         mime: String = "image/png",
@@ -115,18 +143,23 @@ object ImageEngine {
         val reasons = mutableListOf<String>()
 
         val model = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
-        if (ServiceKeys.cloudflareReady()) {
+        if (ServiceKeys.cloudflareReady() && !QuotaGuard.cloudflareExhaustedToday(ctx)) {
             val editModel = when {
                 model != null && model.imageInput -> model
                 else -> CloudflareClient.editModel()
             }
             if (editModel != null && editModel.imageInput) {
+                val t0 = System.currentTimeMillis()
                 val r = CloudflareClient.imageToImage(
                     accountId = ServiceKeys.cloudflareAccount(),
                     token = ServiceKeys.cloudflareToken(),
                     model = editModel,
                     prompt = prompt,
                     sourceBase64 = sourceBase64
+                )
+                UsageLog.record(
+                    ctx, UsageLog.Provider.CLOUDFLARE, editModel.id, UsageLog.Kind.EDIT,
+                    r.ok, r.http, System.currentTimeMillis() - t0, r.neurons, r.message
                 )
                 if (r.ok && r.value != null) {
                     return@withContext Result.success(
@@ -137,10 +170,15 @@ object ImageEngine {
                         )
                     )
                 }
-                reasons += "Cloudflare: ${r.message}"
+                if (r.quotaExhausted) {
+                    QuotaGuard.markCloudflareExhausted(ctx)
+                    reasons += "Cloudflare: سهمیه رایگان امروز تمام شده است"
+                } else reasons += "Cloudflare: ${r.message}"
             } else {
                 reasons += "Cloudflare: مدل مناسبی برای ویرایش تصویر در دسترس نیست"
             }
+        } else if (QuotaGuard.cloudflareExhaustedToday(ctx)) {
+            reasons += "Cloudflare: سهمیه امروز تمام شده است"
         } else {
             reasons += "Cloudflare: متصل نشده است"
         }
@@ -148,7 +186,12 @@ object ImageEngine {
         // Pollinations fallback: it takes a text prompt, so the edit request is
         // folded into a full description and rendered fresh.
         val english = toEnglishPrompt(prompt)
+        val pt0 = System.currentTimeMillis()
         val p = PollinationsClient.image(english, 768, 1024, seed, ServiceKeys.pollinationsKey())
+        UsageLog.record(
+            ctx, UsageLog.Provider.POLLINATIONS, "flux", UsageLog.Kind.EDIT,
+            p.ok, if (p.ok) 200 else 0, System.currentTimeMillis() - pt0, null, p.message
+        )
         if (p.ok && p.value != null) {
             return@withContext Result.success(
                 ImageOutcome(
