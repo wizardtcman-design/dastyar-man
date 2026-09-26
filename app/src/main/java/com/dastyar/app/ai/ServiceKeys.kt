@@ -101,6 +101,17 @@ object ServiceKeys {
         prefs(ctx).edit().putString(OR_STATE, state.name).apply()
     }
 
+    /**
+     * Remembers the text model that actually answered. Used when the configured
+     * model is unaffordable on a free account and a free model took over, so the
+     * app keeps using the one that demonstrably works.
+     */
+    fun setOpenRouterTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        orTextModel = model
+        prefs(ctx).edit().putString(OR_MODEL, model).apply()
+    }
+
     fun clearOpenRouter(ctx: Context) {
         orKey = null
         orState = State.NOT_SET

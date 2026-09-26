@@ -189,6 +189,11 @@ object AiClient {
     /**
      * Sends one real chat request with [key], classifies the exact result and
      * records the service state, so the settings screen always reflects reality.
+     *
+     * The configured model is tried first; if the account cannot afford it, the
+     * provider's free models are tried, so a valid free-account key connects
+     * instead of being rejected for a paid model it cannot reach. A key with no
+     * working model at all still fails with the provider's real reason.
      */
     suspend fun testKey(ctx: android.content.Context, key: String): ConnectResult =
         withContext(Dispatchers.IO) {
@@ -196,51 +201,78 @@ object AiClient {
                 false, FailKind.NO_KEY, "کلید هوش مصنوعی وارد نشده است."
             )
             val p = activeProvider()
-            try {
-                val body = buildJsonObject {
-                    put("model", ServiceKeys.openRouterTextModel())
-                    put("max_tokens", 8)
-                    put("messages", buildJsonArray {
-                        add(buildJsonObject { put("role", "user"); put("content", "سلام") })
-                    })
-                }.toString()
-                val req = Request.Builder()
-                    .url(p.chatUrl())
-                    .addHeader("Authorization", "Bearer $key")
-                    .addHeader("Content-Type", "application/json")
-                    .post(body.toRequestBody("application/json".toMediaType()))
-                    .build()
-                http.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        // Discover the real image capability from the catalogue.
-                        val caps = resolveImageModel(p, key)
-                        if (caps != null) {
-                            ServiceKeys.updateOpenRouterCaps(
-                                ctx, caps.id, supportsImg = true, supportsEdit = caps.imageInput
-                            )
-                        } else {
-                            ServiceKeys.setOpenRouterState(ctx, ServiceKeys.State.CONNECTED)
-                        }
-                        ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
-                    } else {
-                        val t = resp.body?.string().orEmpty()
-                        ServiceKeys.setOpenRouterState(ctx, orStateFor(resp.code))
-                        ConnectResult(false, classify(resp.code, t), describeError(resp.code, t))
+            var lastResult = ConnectResult(false, FailKind.PROVIDER, "اتصال برقرار نشد.")
+            var lastFree = ""
+            for (candidate in textModelChain(p)) {
+                val r = probeModel(ctx, p, key, candidate.model)
+                if (r.ok) {
+                    // The chain may have fallen back to a free model: remember
+                    // which model actually answers so chat keeps working.
+                    if (candidate.model != ServiceKeys.openRouterTextModel()) {
+                        ServiceKeys.setOpenRouterTextModel(ctx, candidate.model)
                     }
+                    val caps = resolveImageModel(p, key)
+                    if (caps != null) {
+                        ServiceKeys.updateOpenRouterCaps(
+                            ctx, caps.id, supportsImg = true, supportsEdit = caps.imageInput
+                        )
+                    } else {
+                        ServiceKeys.setOpenRouterState(ctx, ServiceKeys.State.CONNECTED)
+                    }
+                    lastFree = candidate.model
+                    return@withContext ConnectResult(
+                        true, FailKind.NONE,
+                        if (candidate.free)
+                            "✅ اتصال برقرار است (با مدل رایگان «${candidate.model}»)"
+                        else "✅ اتصال برقرار است"
+                    )
                 }
-            } catch (e: Exception) {
-                ServiceKeys.setOpenRouterState(ctx, ServiceKeys.State.NETWORK)
-                ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}")
+                lastResult = r
+                // A bad key or a network fault is not model-specific: stop.
+                if (r.kind == FailKind.BAD_KEY || r.kind == FailKind.NETWORK) break
             }
+            ServiceKeys.setOpenRouterState(ctx, orStateFor(lastResult.kind))
+            lastResult
         }
 
-    /** Maps an HTTP status to the stored OpenRouter state. */
-    private fun orStateFor(code: Int): ServiceKeys.State = when (code) {
-        401, 403 -> ServiceKeys.State.BAD_KEY
-        402 -> ServiceKeys.State.NO_CREDIT
-        429 -> ServiceKeys.State.RATE_LIMIT
-        404 -> ServiceKeys.State.MODEL
-        in 500..599 -> ServiceKeys.State.PROVIDER
+    /** One real chat request against a specific model. */
+    private fun probeModel(
+        ctx: android.content.Context,
+        p: AiProvider,
+        key: String,
+        model: String
+    ): ConnectResult = try {
+        val body = buildJsonObject {
+            put("model", model)
+            put("max_tokens", 24)
+            put("messages", buildJsonArray {
+                add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+            })
+        }.toString()
+        val req = Request.Builder()
+            .url(p.chatUrl())
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
+            else {
+                val t = resp.body?.string().orEmpty()
+                ConnectResult(false, classify(resp.code, t), describeError(resp.code, t))
+            }
+        }
+    } catch (e: Exception) {
+        ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}")
+    }
+
+    /** Maps a failure kind to the stored OpenRouter state. */
+    private fun orStateFor(kind: FailKind): ServiceKeys.State = when (kind) {
+        FailKind.BAD_KEY -> ServiceKeys.State.BAD_KEY
+        FailKind.NO_CREDIT -> ServiceKeys.State.NO_CREDIT
+        FailKind.RATE_LIMIT -> ServiceKeys.State.RATE_LIMIT
+        FailKind.MODEL -> ServiceKeys.State.MODEL
+        FailKind.NETWORK -> ServiceKeys.State.NETWORK
         else -> ServiceKeys.State.PROVIDER
     }
 
@@ -343,35 +375,55 @@ object AiClient {
         if (key.isBlank()) return@withContext ConnectResult(
             false, FailKind.NO_KEY, "کلید خالی است."
         ) to null
-        try {
-            val body = buildJsonObject {
-                put("model", provider.textModel)
-                put("max_tokens", 8)
-                put("messages", buildJsonArray {
-                    add(buildJsonObject { put("role", "user"); put("content", "سلام") })
-                })
-            }.toString()
-            val req = Request.Builder()
-                .url(provider.chatUrl())
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
-                .build()
-            http.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val caps = resolveImageModel(provider, key)
-                    val dc = if (caps != null)
-                        DiscoveredCaps(caps.id, supportsImage = true, supportsEdit = caps.imageInput)
-                    else DiscoveredCaps("", supportsImage = false, supportsEdit = false)
-                    ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است") to dc
-                } else {
-                    val t = resp.body?.string().orEmpty()
-                    ConnectResult(false, classify(resp.code, t), describeError(resp.code, t)) to null
-                }
+
+        // Try the model the user would actually use, then free models, so a
+        // valid free-account key is not rejected just because the default model
+        // is paid. The first model that answers is remembered.
+        var last = ConnectResult(false, FailKind.PROVIDER, "اتصال برقرار نشد.")
+        var chosen = provider.textModel
+        for (candidate in textModelChain(provider, key)) {
+            val r = probeModelFor(provider, key, candidate.model)
+            if (r.ok) {
+                chosen = candidate.model
+                val caps = resolveImageModel(provider, key)
+                val dc = if (caps != null)
+                    DiscoveredCaps(caps.id, supportsImage = true, supportsEdit = caps.imageInput)
+                else DiscoveredCaps("", supportsImage = false, supportsEdit = false)
+                val label = if (candidate.free)
+                    "✅ اتصال برقرار است (با مدل رایگان «${candidate.model}»)"
+                else "✅ اتصال برقرار است"
+                return@withContext ConnectResult(true, FailKind.NONE, label) to dc
             }
-        } catch (e: Exception) {
-            ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}") to null
+            last = r
+            if (r.kind == FailKind.BAD_KEY || r.kind == FailKind.NETWORK) break
         }
+        last to null
+    }
+
+    /** One real chat request against a specific model, without side effects. */
+    private fun probeModelFor(provider: AiProvider, key: String, model: String): ConnectResult = try {
+        val body = buildJsonObject {
+            put("model", model)
+            put("max_tokens", 24)
+            put("messages", buildJsonArray {
+                add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+            })
+        }.toString()
+        val req = Request.Builder()
+            .url(provider.chatUrl())
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
+            else {
+                val t = resp.body?.string().orEmpty()
+                ConnectResult(false, classify(resp.code, t), describeError(resp.code, t))
+            }
+        }
+    } catch (e: Exception) {
+        ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}")
     }
 
     /** Capabilities discovered from a provider's own model catalogue. */
@@ -643,10 +695,47 @@ object AiClient {
      * whenever it is available.
      */
     private fun textModelChain(provider: AiProvider): List<ModelAttempt> {
-        val primary = ServiceKeys.openRouterTextModel()
-            .ifBlank { provider.textModel }
+        val primary = ServiceKeys.openRouterTextModel().ifBlank { provider.textModel }
+        return buildChain(provider, primary, freeTextModels())
+    }
+
+    /**
+     * The same chain but evaluated against a key that has not been saved yet,
+     * used by the connection test so a free-account key is judged by what it
+     * can really reach.
+     */
+    private fun textModelChain(provider: AiProvider, key: String): List<ModelAttempt> {
+        val free = freeTextModelsFor(provider, key)
+        return buildChain(provider, provider.textModel, free)
+    }
+
+    /**
+     * Free models verified to answer quickly and cleanly are tried first, so a
+     * fallback does not land on a slow or reasoning-heavy model. Any other free
+     * model follows. The preference list is only an ordering hint; every entry
+     * still has to succeed in a real request to be used.
+     */
+    private val PREFERRED_FREE = listOf(
+        "openrouter/free",
+        "stealth/space-bunny-alpha",
+        "inclusionai/ling-3.0-flash-sante:free",
+        "cohere/north-mini-code:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "nvidia/nemotron-3-super-120b-a12b:free"
+    )
+
+    private fun buildChain(
+        provider: AiProvider,
+        primary: String,
+        free: List<String>
+    ): List<ModelAttempt> {
+        val ordered = free.sortedBy { m ->
+            val i = PREFERRED_FREE.indexOf(m)
+            if (i >= 0) i else PREFERRED_FREE.size + 10
+        }
         val chain = mutableListOf(ModelAttempt(primary, 2, free = false))
-        for (m in freeTextModels()) {
+        for (m in ordered) {
             if (m != primary) chain += ModelAttempt(m, 1, free = true)
         }
         return chain
@@ -663,8 +752,16 @@ object AiClient {
         freeModelsCache?.let { return it }
         val key = effectiveKey()
         if (key.isBlank()) return emptyList()
-        val list = try {
-            val url = activeProvider().modelsUrl() ?: return emptyList()
+        val list = freeTextModelsFor(activeProvider(), key)
+        freeModelsCache = list
+        return list
+    }
+
+    /** Free text model ids for a provider + key, read from its catalogue. */
+    private fun freeTextModelsFor(provider: AiProvider, key: String): List<String> {
+        if (key.isBlank()) return emptyList()
+        return try {
+            val url = provider.modelsUrl() ?: return emptyList()
             val req = Request.Builder().url(url)
                 .addHeader("Authorization", "Bearer $key")
                 .addHeader("Accept", "application/json")
@@ -682,15 +779,13 @@ object AiClient {
                     val outMods = obj["architecture"]?.jsonObject
                         ?.get("output_modalities")?.jsonArray
                         ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-                    // Free, text-capable, and not a preview model that may vanish.
+                    // Free and text-capable, so it can stand in for a paid model.
                     if (pr == 0.0 && co == 0.0 && outMods.contains("text")) id else null
                 }
             }
         } catch (e: Exception) {
             emptyList()
         }
-        freeModelsCache = list
-        return list
     }
 
     // --------------------------------------------------------------- image
@@ -846,20 +941,28 @@ object AiClient {
 
 
     /**
-     * Turns an OpenRouter error into an accurate Persian sentence. The 402 case
-     * is checked carefully: OpenRouter uses 402 both for a genuinely empty
-     * balance and for a request whose max_tokens exceeds the balance, so the
-     * message must not claim the credit has run out unless it really has.
+     * Turns an OpenRouter error into an accurate Persian sentence.
+     *
+     * The 402 case is subtle: OpenRouter appends a generic hint mentioning
+     * `max_tokens` to EVERY 402 body, including "This account never purchased
+     * credits". So a plain `contains("max_tokens")` check would mislabel an
+     * empty account as a request-size problem. The real cause is read first:
+     * an account with no credits is reported as "not enough credit", and only a
+     * genuinely too-large request is reported that way.
      */
     private fun describeError(code: Int, raw: String, image: Boolean = false): String {
         val low = raw.lowercase()
+        val noCredit = low.contains("never purchased") || low.contains("insufficient credits") ||
+                low.contains("out of credits") || low.contains("exceed your available credits")
         return when (code) {
             401 -> "کلید هوش مصنوعی نامعتبر یا منقضی است. کلید را بررسی یا تعویض کن."
             402 -> when {
-                low.contains("max_tokens") ->
-                    "تنظیمات درخواست با موجودی سرویس هم‌خوان نبود. دوباره تلاش کن."
-                low.contains("fewer max_tokens") ->
-                    "طول پاسخ بیش از حد بود؛ درخواست کوتاه‌تر ارسال شد."
+                noCredit ->
+                    "اعتبار حساب OpenRouter کافی نیست (حساب رایگان است). " +
+                            if (image) "برای ساخت تصویر به شارژ حساب نیاز است."
+                            else "لطفاً حساب را شارژ کن؛ فعلاً از مدل‌های رایگان استفاده می‌شود."
+                low.contains("fewer max_tokens") || low.contains("lower max_tokens") ->
+                    "طول درخواست بیش از سقف این حساب بود؛ با مقدار کمتر دوباره تلاش می‌شود."
                 else ->
                     "اعتبار سرویس کافی نیست. " +
                             if (image) "برای ساخت تصویر به شارژ حساب نیاز است."
