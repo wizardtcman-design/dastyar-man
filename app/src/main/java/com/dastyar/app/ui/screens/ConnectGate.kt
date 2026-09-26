@@ -37,6 +37,11 @@ fun ConnectGate(onConnected: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // ServiceKeys keeps its state in @Volatile fields backed by SharedPreferences,
+    // which Compose cannot observe. Bumping this counter after every save forces a
+    // recomposition so the "ادامه" button reflects the new connection at once.
+    var connected by remember { mutableIntStateOf(0) }
+
     var orKey by remember { mutableStateOf("") }
     var orStatus by remember { mutableStateOf<AiClient.ConnectResult?>(null) }
     var orBusy by remember { mutableStateOf(false) }
@@ -108,6 +113,7 @@ fun ConnectGate(onConnected: () -> Unit) {
                             supportsEdit = caps?.supportsEdit ?: false
                         )
                         orKey = ""
+                        connected++
                     }
                 }
             }
@@ -172,6 +178,7 @@ fun ConnectGate(onConnected: () -> Unit) {
                             ServiceKeys.State.CONNECTED
                         )
                         cfStatus = CloudflareClient.CfResult(true, CloudflareClient.CfFail.NONE, "✅ اتصال برقرار است")
+                        connected++
                     } else {
                         ServiceKeys.saveCloudflare(
                             ctx, cfAccount.trim(), cfToken.trim(), model.id,
@@ -212,9 +219,12 @@ fun ConnectGate(onConnected: () -> Unit) {
                     scope.launch {
                         val r = PollinationsClient.test(poKey.trim().ifBlank { null })
                         poBusy = false; poStatus = r
-                        if (r.ok) ServiceKeys.setPollinations(
-                            ctx, poKey.trim().ifBlank { null }, ServiceKeys.State.CONNECTED
-                        )
+                        if (r.ok) {
+                            ServiceKeys.setPollinations(
+                                ctx, poKey.trim().ifBlank { null }, ServiceKeys.State.CONNECTED
+                            )
+                            connected++
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -226,12 +236,16 @@ fun ConnectGate(onConnected: () -> Unit) {
 
         Spacer(Modifier.height(18.dp))
 
+        // Reading `connected` here makes the button recompose the moment a service
+        // is saved, instead of staying disabled until the screen is recreated.
+        val ready = connected >= 0 && ServiceKeys.anyConnected()
+
         GradientButton(
             text = "ادامه",
-            enabled = ServiceKeys.anyConnected()
+            enabled = ready
         ) { onConnected() }
 
-        if (!ServiceKeys.anyConnected()) {
+        if (!ready) {
             Spacer(Modifier.height(6.dp))
             Text(
                 "برای ادامه، حداقل یکی از سرویس‌ها را وصل کن.",
