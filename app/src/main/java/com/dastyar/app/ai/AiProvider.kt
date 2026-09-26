@@ -21,6 +21,8 @@ data class AiProvider(
     val imageModel: String = "",
     /** Whether this provider understands the `modalities: [image, text]` flag. */
     val supportsImageModalities: Boolean = false,
+    /** Whether the image model accepts an input image (image-to-image / edit). */
+    val supportsImageEdit: Boolean = false,
     /**
      * Path (relative to [baseUrl]) of the provider's account-credit endpoint.
      * Empty when the provider exposes no balance over its API, in which case
@@ -31,7 +33,13 @@ data class AiProvider(
      * Path of a per-key usage/limit endpoint, used as a fallback source of the
      * real remaining balance when [creditsPath] is unavailable or returns zero.
      */
-    val keyInfoPath: String = ""
+    val keyInfoPath: String = "",
+    /**
+     * Path of the model catalogue endpoint (`/models`). Used to discover which
+     * models really output images and whether they accept image input, instead
+     * of trusting a hard-coded boolean.
+     */
+    val modelsPath: String = ""
 ) {
     val supportsImages: Boolean get() = imageModel.isNotBlank()
 
@@ -42,10 +50,19 @@ data class AiProvider(
 
     fun keyInfoUrl(): String? =
         keyInfoPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
+
+    fun modelsUrl(): String? =
+        modelsPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
 }
 
 object AiProviders {
 
+    /**
+     * OpenRouter is the app's primary provider. Its image models are reached
+     * through the same `/chat/completions` endpoint with `modalities`, which is
+     * how OpenRouter actually returns images (its `/images` endpoint requires
+     * purchased credit). Capabilities are re-derived from `/models` at runtime.
+     */
     val openRouter = AiProvider(
         id = "openrouter",
         label = "OpenRouter",
@@ -53,8 +70,10 @@ object AiProviders {
         textModel = "google/gemini-2.5-flash-lite",
         imageModel = "google/gemini-2.5-flash-image",
         supportsImageModalities = true,
+        supportsImageEdit = true,
         creditsPath = "credits",
-        keyInfoPath = "key"
+        keyInfoPath = "key",
+        modelsPath = "models"
     )
 
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */

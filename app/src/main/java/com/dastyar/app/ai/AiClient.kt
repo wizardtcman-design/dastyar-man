@@ -1,11 +1,11 @@
 package com.dastyar.app.ai
 
-import com.dastyar.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -56,13 +56,31 @@ object AiClient {
      * otherwise the built-in OpenRouter default. Screens never care which one,
      * so a new provider only needs an [AiProviders] entry.
      */
-    fun activeProvider(): AiProvider = ApiKeys.userProvider() ?: AiProviders.openRouter
+    fun activeProvider(): AiProvider = AiProviders.openRouter
 
-    /** The key for the active provider. */
+    /**
+     * The key for OpenRouter. It comes only from the user's own entry, stored in
+     * the app's private preferences -- never from a compiled-in constant, the
+     * source tree or the APK.
+     */
     private fun effectiveKey(): String =
-        ApiKeys.userKey()?.takeIf { it.isNotBlank() } ?: BuildConfig.OPENROUTER_API_KEY
+        ServiceKeys.openRouterKey()?.takeIf { it.isNotBlank() }.orEmpty()
 
+    /** True once the user has entered a key, so text AI features are usable. */
     val chatConfigured: Boolean get() = effectiveKey().isNotBlank()
+
+    /** True when OpenRouter is connected and verified. */
+    val ready: Boolean get() = ServiceKeys.openRouterReady()
+
+    /** The real reason a provider image attempt failed, for the image engine. */
+    @Volatile
+    var lastImageError: String = ""
+        private set
+
+    /** The text model that last answered, so the UI can show the truth. */
+    @Volatile
+    var activeTextModel: String = ""
+        private set
 
     /**
      * Last real balance fetched, kept in memory so a later AI request can
@@ -72,49 +90,115 @@ object AiClient {
     var lastBalance: ServiceBalance? = null
         private set
 
-    /** Whether the active provider can generate images. */
-    val imageConfigured: Boolean get() = chatConfigured && activeProvider().supportsImages
+    /** Whether OpenRouter itself can generate images (needs paid credit). */
+    val imageConfigured: Boolean get() = chatConfigured && ServiceKeys.openRouterSupportsImage()
 
     /** A short, Persian-friendly description of the active service. */
     fun activeServiceLabel(): String = activeProvider().label
 
-    private fun textModel(): String = activeProvider().textModel
+    private fun textModel(): String = ServiceKeys.openRouterTextModel()
 
-    private fun imageModel(): String = activeProvider().imageModel
+    // -------------------------------------------------- model capabilities
 
-    // ---------------------------------------------------------------- tests
+    /** What a provider's catalogue says about one model. */
+    private data class ModelCaps(
+        val id: String,
+        val imageOutput: Boolean,
+        val imageInput: Boolean
+    )
 
-    /** Verifies the active key with a tiny real request. Returns a Persian result line. */
-    suspend fun testConnection(): String {
-        // Try every candidate key (user key first, then the healthy built-in
-        // one) and report the real outcome, including the exact failure reason,
-        // so a network block can be told apart from a bad key.
-        var last = "⚠️ اتصال برقرار نشد."
-        for (key in candidateKeys(activeProvider())) {
-            val r = testKey(key)
-            if (r.startsWith("✅")) return r
-            last = r
+    /**
+     * Reads the provider's real `/models` catalogue and returns the capability
+     * of every model id it lists. When the catalogue is unavailable the result
+     * is empty and the caller keeps the provider's declared model, so a network
+     * hiccup never turns into "this model cannot make images".
+     */
+    private fun fetchCatalogue(provider: AiProvider, key: String): List<ModelCaps> {
+        val url = provider.modelsUrl() ?: return emptyList()
+        return try {
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Accept", "application/json")
+                .get().build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
+                val arr = root["data"]?.jsonArray ?: return emptyList()
+                arr.mapNotNull { el ->
+                    val obj = el.jsonObject
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val arch = obj["architecture"]?.jsonObject
+                    val out = arch?.get("output_modalities")?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    val inp = arch?.get("input_modalities")?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    ModelCaps(
+                        id = id,
+                        imageOutput = out.contains("image"),
+                        imageInput = inp.contains("image")
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
         }
-        return last
     }
 
     /**
-     * Detailed diagnostic for Settings: reports the real HTTP status or the
-     * network exception, so it is clear whether the phone is blocked, offline,
-     * or the key is rejected.
+     * Picks a real image-output model from the catalogue. The provider's own
+     * image model wins when it really outputs images; otherwise the first
+     * capable model is used. Returns null when nothing in the catalogue can
+     * make images, so the UI can say exactly that.
      */
-    suspend fun diagnose(): String = withContext(Dispatchers.IO) {
+    private fun resolveImageModel(provider: AiProvider, key: String): ModelCaps? {
+        val catalogue = fetchCatalogue(provider, key)
+        if (catalogue.isEmpty()) return null
+        val capable = catalogue.filter { it.imageOutput }
+        if (capable.isEmpty()) return null
+        return capable.firstOrNull { it.id == provider.imageModel } ?: capable.first()
+    }
+
+    /** Models the catalogue lists as able to make images. */
+    suspend fun imageCapableModels(): List<String> = withContext(Dispatchers.IO) {
         val p = activeProvider()
-        val keys = candidateKeys(p)
-        if (keys.isEmpty()) return@withContext "⚠️ هیچ کلیدی تنظیم نشده است."
-        val report = StringBuilder()
-        report.append("سرویس: ${p.label}\n")
-        report.append("تعداد کلید قابل‌تلاش: ${keys.size}\n")
-        for ((i, key) in keys.withIndex()) {
-            val tag = if (i == 0) "کلید اصلی" else "کلید پشتیبان"
+        val key = effectiveKey()
+        if (key.isBlank()) return@withContext emptyList()
+        fetchCatalogue(p, key).filter { it.imageOutput }.map { it.id }
+    }
+
+    // ---------------------------------------------------------------- tests
+
+    /**
+     * The outcome of a real connection test. Each kind is kept separate so the
+     * UI can show one precise reason and never blur a network problem into an
+     * account problem (or the reverse).
+     */
+    enum class FailKind { NONE, NO_KEY, BAD_KEY, NO_CREDIT, RATE_LIMIT, MODEL, PROVIDER, NETWORK }
+
+    data class ConnectResult(
+        val ok: Boolean,
+        val kind: FailKind,
+        val message: String
+    )
+
+    /** Verifies the saved OpenRouter key with a tiny real chat request. */
+    suspend fun testConnection(ctx: android.content.Context): ConnectResult =
+        testKey(ctx, effectiveKey())
+
+    /**
+     * Sends one real chat request with [key], classifies the exact result and
+     * records the service state, so the settings screen always reflects reality.
+     */
+    suspend fun testKey(ctx: android.content.Context, key: String): ConnectResult =
+        withContext(Dispatchers.IO) {
+            if (key.isBlank()) return@withContext ConnectResult(
+                false, FailKind.NO_KEY, "کلید هوش مصنوعی وارد نشده است."
+            )
+            val p = activeProvider()
             try {
                 val body = buildJsonObject {
-                    put("model", p.textModel)
+                    put("model", ServiceKeys.openRouterTextModel())
                     put("max_tokens", 8)
                     put("messages", buildJsonArray {
                         add(buildJsonObject { put("role", "user"); put("content", "سلام") })
@@ -128,52 +212,113 @@ object AiClient {
                     .build()
                 http.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        report.append("✅ $tag: پاسخ ۲۰۰ — سالم\n")
-                        return@withContext report.toString().trim()
+                        // Discover the real image capability from the catalogue.
+                        val caps = resolveImageModel(p, key)
+                        if (caps != null) {
+                            ServiceKeys.updateOpenRouterCaps(
+                                ctx, caps.id, supportsImg = true, supportsEdit = caps.imageInput
+                            )
+                        } else {
+                            ServiceKeys.setOpenRouterState(ctx, ServiceKeys.State.CONNECTED)
+                        }
+                        ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
+                    } else {
+                        val t = resp.body?.string().orEmpty()
+                        ServiceKeys.setOpenRouterState(ctx, orStateFor(resp.code))
+                        ConnectResult(false, classify(resp.code, t), describeError(resp.code, t))
                     }
-                    report.append("❌ $tag: کد HTTP ${resp.code} — ${describeError(resp.code, "")}\n")
                 }
             } catch (e: Exception) {
-                val reason = when (e) {
-                    is java.net.UnknownHostException -> "دامنه پیدا نشد (DNS) — احتمالاً فیلتر است"
-                    is java.net.SocketTimeoutException -> "زمان انتظار تمام شد — شبکه کند یا فیلتر"
-                    is javax.net.ssl.SSLException -> "خطای امنیتی SSL — احتمالاً فیلتر"
-                    is java.net.ConnectException -> "اتصال برقرار نشد — اینترنت قطع یا فیلتر"
-                    else -> e.javaClass.simpleName + ": " + (e.message ?: "")
-                }
-                report.append("⚠️ $tag: $reason\n")
+                ServiceKeys.setOpenRouterState(ctx, ServiceKeys.State.NETWORK)
+                ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}")
             }
         }
-        report.toString().trim()
+
+    /** Maps an HTTP status to the stored OpenRouter state. */
+    private fun orStateFor(code: Int): ServiceKeys.State = when (code) {
+        401, 403 -> ServiceKeys.State.BAD_KEY
+        402 -> ServiceKeys.State.NO_CREDIT
+        429 -> ServiceKeys.State.RATE_LIMIT
+        404 -> ServiceKeys.State.MODEL
+        in 500..599 -> ServiceKeys.State.PROVIDER
+        else -> ServiceKeys.State.PROVIDER
     }
 
     /**
-     * Verifies a specific key by sending a one-token chat request to the active
-     * provider. Returns a Persian sentence starting with ✅ on success or ⚠️ on
-     * failure.
+     * Detailed diagnostic for Settings: reports the real HTTP status or the
+     * network exception, so it is clear whether the phone is blocked, offline,
+     * or the key is rejected.
      */
-    suspend fun testKey(key: String): String = withContext(Dispatchers.IO) {
-        if (key.isBlank()) return@withContext "⚠️ کلید خالی است."
+    suspend fun diagnose(): String = withContext(Dispatchers.IO) {
+        val p = activeProvider()
+        val key = effectiveKey()
+        if (key.isBlank()) return@withContext "⚠️ هنوز هیچ کلیدی وارد نشده است."
+
+        val report = StringBuilder()
+        report.append("سرویس: ${p.label}\n")
+        report.append("مدل متن: ${ServiceKeys.openRouterTextModel()}\n\n")
         try {
             val body = buildJsonObject {
-                put("model", textModel())
+                put("model", ServiceKeys.openRouterTextModel())
                 put("max_tokens", 8)
                 put("messages", buildJsonArray {
                     add(buildJsonObject { put("role", "user"); put("content", "سلام") })
                 })
             }.toString()
             val req = Request.Builder()
-                .url(activeProvider().chatUrl())
+                .url(p.chatUrl())
                 .addHeader("Authorization", "Bearer $key")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             http.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) "✅ اتصال برقرار است"
-                else "⚠️ ${describeError(resp.code, resp.body?.string().orEmpty())}"
+                if (resp.isSuccessful) {
+                    report.append("✅ چت: پاسخ ۲۰۰ — سالم\n")
+                } else {
+                    val t = resp.body?.string().orEmpty()
+                    report.append("❌ چت: کد HTTP ${resp.code}\n")
+                    report.append("دلیل: ${describeError(resp.code, t)}\n")
+                    // Show the provider's own words for the real cause.
+                    val detail = providerDetail(t)
+                    if (detail.isNotBlank()) report.append("جزئیات سرویس: $detail\n")
+                    return@withContext report.toString().trim()
+                }
             }
         } catch (e: Exception) {
-            "⚠️ اتصال برقرار نشد: ${networkReason(e)}"
+            report.append("⚠️ شبکه: ${networkReason(e)}\n")
+            report.append("این خطا مربوط به کلید یا اعتبار نیست؛ مشکل اتصال اینترنت است.\n")
+            return@withContext report.toString().trim()
+        }
+
+        // The key works for chat, so also check whether an image model exists.
+        val caps = resolveImageModel(p, key)
+        report.append(
+            if (caps != null) "✅ تصویر: مدل «${caps.id}» در دسترس است\n"
+            else "ℹ️ تصویر: هیچ مدل تصویری در فهرست سرویس پیدا نشد\n"
+        )
+        report.toString().trim()
+    }
+
+    /** Extracts the provider's own error message from a JSON error body. */
+    private fun providerDetail(raw: String): String = try {
+        json.parseToJsonElement(raw).jsonObject["error"]?.jsonObject
+            ?.get("message")?.jsonPrimitive?.contentOrNull.orEmpty()
+    } catch (e: Exception) {
+        ""
+    }
+
+    /** Classifies an HTTP status into the exact failure kind. */
+    private fun classify(code: Int, raw: String): FailKind {
+        val low = raw.lowercase()
+        return when {
+            code == 401 -> FailKind.BAD_KEY
+            code == 403 -> FailKind.BAD_KEY
+            code == 402 -> FailKind.NO_CREDIT
+            code == 429 -> FailKind.RATE_LIMIT
+            code == 404 -> FailKind.MODEL
+            code == 400 && (low.contains("model") || low.contains("modalit")) -> FailKind.MODEL
+            code in 500..599 -> FailKind.PROVIDER
+            else -> FailKind.PROVIDER
         }
     }
 
@@ -186,9 +331,18 @@ object AiClient {
         else -> "اینترنت را بررسی کن. (${e.javaClass.simpleName})"
     }
 
-    /** Tests a candidate provider + key before it is saved. */
-    suspend fun testProvider(provider: AiProvider, key: String): String = withContext(Dispatchers.IO) {
-        if (key.isBlank()) return@withContext "⚠️ کلید خالی است."
+    /**
+     * Tests a candidate OpenRouter key before it is saved, and returns the
+     * capability discovered from the live catalogue. No vendor is assumed; the
+     * models list decides what can make images.
+     */
+    suspend fun testProvider(
+        provider: AiProvider,
+        key: String
+    ): Pair<ConnectResult, DiscoveredCaps?> = withContext(Dispatchers.IO) {
+        if (key.isBlank()) return@withContext ConnectResult(
+            false, FailKind.NO_KEY, "کلید خالی است."
+        ) to null
         try {
             val body = buildJsonObject {
                 put("model", provider.textModel)
@@ -204,13 +358,28 @@ object AiClient {
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             http.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) "✅ اتصال برقرار است"
-                else "⚠️ ${describeError(resp.code, resp.body?.string().orEmpty())}"
+                if (resp.isSuccessful) {
+                    val caps = resolveImageModel(provider, key)
+                    val dc = if (caps != null)
+                        DiscoveredCaps(caps.id, supportsImage = true, supportsEdit = caps.imageInput)
+                    else DiscoveredCaps("", supportsImage = false, supportsEdit = false)
+                    ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است") to dc
+                } else {
+                    val t = resp.body?.string().orEmpty()
+                    ConnectResult(false, classify(resp.code, t), describeError(resp.code, t)) to null
+                }
             }
         } catch (e: Exception) {
-            "⚠️ اتصال برقرار نشد: اینترنت را بررسی کن."
+            ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}") to null
         }
     }
+
+    /** Capabilities discovered from a provider's own model catalogue. */
+    data class DiscoveredCaps(
+        val imageModel: String,
+        val supportsImage: Boolean,
+        val supportsEdit: Boolean
+    )
 
     // ------------------------------------------------------------- balance
 
@@ -363,18 +532,12 @@ object AiClient {
     )
 
     /**
-     * Keys to try, best first: the provider the user chose (which may be the
-     * built-in OpenRouter), then the built-in key as a safety net. If a user
-     * key has gone stale the app keeps working instead of appearing "cut off".
+     * Keys to try. There is exactly one: the key the user entered. The app has
+     * no compiled-in key, so a fresh install with no key has nothing to leak and
+     * nothing to fall back to.
      */
-    private fun candidateKeys(p: AiProvider): List<String> {
-        val builtIn = BuildConfig.OPENROUTER_API_KEY
-        val user = ApiKeys.userKey()?.takeIf { it.isNotBlank() }
-        val list = mutableListOf<String>()
-        if (user != null) list += user
-        if (builtIn.isNotBlank() && builtIn != user) list += builtIn
-        return list
-    }
+    private fun candidateKeys(p: AiProvider): List<String> =
+        ServiceKeys.openRouterKey()?.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
 
     private suspend fun complete(
         system: String,
@@ -397,60 +560,137 @@ object AiClient {
             })
         }
 
-        val body = buildJsonObject {
-            put("model", model)
-            put("messages", messages)
-            put("stream", false)
-            put("temperature", 0.6)
-            put("max_tokens", CHAT_MAX_TOKENS)
-        }.toString()
-
         var lastError = "اتصال به هوش مصنوعی ناموفق بود."
+        var usedFreeFallback = false
 
-        // Try each key; retry transient server/rate-limit/IO problems before
-        // moving on. A stale user key therefore costs one attempt, not the
-        // whole feature, and a brief network blip no longer ends the request.
-        for (key in candidateKeys(activeProvider())) {
-            var stopKey = false
-            repeat(3) { attempt ->
-                if (stopKey) return@repeat
-                try {
-                    val req = Request.Builder()
-                        .url(activeProvider().chatUrl())
-                        .addHeader("Authorization", "Bearer $key")
-                        .addHeader("Content-Type", "application/json")
-                        .post(body.toRequestBody("application/json".toMediaType()))
-                        .build()
+        // Try the configured model first, then genuinely free models. A paid
+        // model on a free account answers 402; instead of failing the whole
+        // feature, a free model of the same provider is used and its name is
+        // returned so nothing is hidden. "Free" is decided by the catalogue's
+        // own pricing, never guessed.
+        for (candidate in textModelChain(activeProvider())) {
+            val body = buildJsonObject {
+                put("model", candidate.model)
+                put("messages", messages)
+                put("stream", false)
+                put("temperature", 0.6)
+                put("max_tokens", CHAT_MAX_TOKENS)
+            }.toString()
 
-                    http.newCall(req).execute().use { resp ->
-                        val text = resp.body?.string().orEmpty()
-                        if (resp.isSuccessful) {
-                            val content = json.parseToJsonElement(text)
-                                .jsonObject["choices"]?.jsonArray
-                                ?.firstOrNull()?.jsonObject
-                                ?.get("message")?.jsonObject
-                                ?.get("content")?.jsonPrimitive?.contentOrNull
-                            if (!content.isNullOrBlank()) {
-                                refreshBalanceQuietly()
-                                return@withContext Result.success(content.trim())
-                            }
-                            lastError = "پاسخ خالی از سرور دریافت شد."
-                        } else {
-                            lastError = describeError(resp.code, text)
-                            // Auth or credit problems are key-specific: stop
-                            // retrying this key and move to the next one.
-                            if (resp.code == 401 || resp.code == 402 || resp.code == 403) {
-                                stopKey = true
+            for (key in candidateKeys(activeProvider())) {
+                var stopKey = false
+                repeat(candidate.attempts) { attempt ->
+                    if (stopKey) return@repeat
+                    try {
+                        val req = Request.Builder()
+                            .url(activeProvider().chatUrl())
+                            .addHeader("Authorization", "Bearer $key")
+                            .addHeader("Content-Type", "application/json")
+                            .post(body.toRequestBody("application/json".toMediaType()))
+                            .build()
+
+                        http.newCall(req).execute().use { resp ->
+                            val text = resp.body?.string().orEmpty()
+                            if (resp.isSuccessful) {
+                                val msg = json.parseToJsonElement(text)
+                                    .jsonObject["choices"]?.jsonArray
+                                    ?.firstOrNull()?.jsonObject
+                                    ?.get("message")?.jsonObject
+                                val content = msg?.get("content")?.jsonPrimitive?.contentOrNull
+                                // A model that returns an image replies with a
+                                // null content and the picture under
+                                // `message.images`; reading only `content`
+                                // would wrongly look empty.
+                                val hasImage = !msg?.get("images")?.jsonArray.isNullOrEmpty()
+                                if (!content.isNullOrBlank()) {
+                                    if (candidate.model != model) usedFreeFallback = true
+                                    activeTextModel = candidate.model
+                                    refreshBalanceQuietly()
+                                    return@withContext Result.success(content.trim())
+                                }
+                                lastError = if (hasImage)
+                                    "پاسخ تصویری از سرویس دریافت شد."
+                                else "پاسخ خالی از سرور دریافت شد."
+                            } else {
+                                lastError = describeError(resp.code, text)
+                                // A 402/401/403 is model- or key-specific: stop
+                                // this candidate so the next model can be tried.
+                                if (resp.code == 401 || resp.code == 402 ||
+                                    resp.code == 403 || resp.code == 404
+                                ) stopKey = true
                             }
                         }
+                    } catch (e: Exception) {
+                        lastError = "اتصال به هوش مصنوعی ناموفق بود. اینترنت را بررسی کن."
                     }
-                } catch (e: Exception) {
-                    lastError = "اتصال به هوش مصنوعی ناموفق بود. اینترنت را بررسی کن."
+                    if (!stopKey && attempt < candidate.attempts - 1) {
+                        Thread.sleep(1200L * (attempt + 1))
+                    }
                 }
-                if (!stopKey && attempt < 2) Thread.sleep(1200L * (attempt + 1))
             }
+            if (lastError.contains("اعتبار") || lastError.contains("نامعتبر")) continue
         }
         Result.failure(AiException(lastError))
+    }
+
+    /** One model to try, how many times, and whether it is a free one. */
+    private data class ModelAttempt(val model: String, val attempts: Int, val free: Boolean)
+
+    /**
+     * The model order for chat: the configured/verified model first, then free
+     * models from the provider's catalogue. The free list is only used when the
+     * primary cannot answer (paid model on a free account), so quality is kept
+     * whenever it is available.
+     */
+    private fun textModelChain(provider: AiProvider): List<ModelAttempt> {
+        val primary = ServiceKeys.openRouterTextModel()
+            .ifBlank { provider.textModel }
+        val chain = mutableListOf(ModelAttempt(primary, 2, free = false))
+        for (m in freeTextModels()) {
+            if (m != primary) chain += ModelAttempt(m, 1, free = true)
+        }
+        return chain
+    }
+
+    /**
+     * Free text models reported by the provider's own catalogue. Cached after
+     * the first lookup so chat does not fetch the list on every message.
+     */
+    @Volatile
+    private var freeModelsCache: List<String>? = null
+
+    private fun freeTextModels(): List<String> {
+        freeModelsCache?.let { return it }
+        val key = effectiveKey()
+        if (key.isBlank()) return emptyList()
+        val list = try {
+            val url = activeProvider().modelsUrl() ?: return emptyList()
+            val req = Request.Builder().url(url)
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Accept", "application/json")
+                .get().build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
+                val arr = root["data"]?.jsonArray ?: return emptyList()
+                arr.mapNotNull { el ->
+                    val obj = el.jsonObject
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val p = obj["pricing"]?.jsonObject
+                    val pr = p?.get("prompt")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+                    val co = p?.get("completion")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+                    val outMods = obj["architecture"]?.jsonObject
+                        ?.get("output_modalities")?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    // Free, text-capable, and not a preview model that may vanish.
+                    if (pr == 0.0 && co == 0.0 && outMods.contains("text")) id else null
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        freeModelsCache = list
+        return list
     }
 
     // --------------------------------------------------------------- image
@@ -458,158 +698,151 @@ object AiClient {
     /**
      * Text -> image.
      *
-     * First tries the active provider's image model (Gemini via OpenRouter, or
-     * whatever the user configured). Image models need real credit, so when that
-     * is unavailable the request falls back to the free, key-less Pollinations
-     * endpoint. The user therefore still gets a real image without paying, and
-     * automatically gets the provider's quality once credit exists.
+     * 1) Uses the provider's real image model, discovered from the live model
+     *    catalogue, through the provider's own image path.
+     * 2) If the provider has no image-capable model (or the account cannot pay
+     *    for one), it does NOT claim the provider is broken. It tells the user
+     *    exactly which model is unavailable and falls back to the free,
+     *    key-less endpoint so a picture is still produced.
      */
-    suspend fun generateImage(
-        prompt: String,
-        width: Int = 768,
-        height: Int = 1024,
-        seed: Int = (1..999_999).random()
-    ): Result<ByteArray> = withContext(Dispatchers.IO) {
-        if (prompt.isBlank()) return@withContext Result.failure(AiException("توصیف تصویر خالی است."))
-
-        // 1) Try the provider's paid image model when one is configured.
-        if (chatConfigured && activeProvider().supportsImages) {
-            paidImage(prompt, seed).getOrNull()?.let { return@withContext Result.success(it) }
+    /**
+     * Generates an image with OpenRouter itself, through its chat endpoint with
+     * the `modalities` flag. This is only a tertiary route: OpenRouter's image
+     * models need real account credit, so a free account returns 402 and the
+     * image engine simply keeps using the other providers. A 402 here is an
+     * account state, never reported as "provider disconnected".
+     */
+    suspend fun providerImage(prompt: String, seed: Int = (1..999_999).random()): ByteArray? =
+        withContext(Dispatchers.IO) {
+            lastImageError = ""
+            val key = effectiveKey()
+            if (key.isBlank()) {
+                lastImageError = "کلید OpenRouter تنظیم نشده است."
+                return@withContext null
+            }
+            val p = activeProvider()
+            val caps = resolveImageModel(p, key)
+            if (caps == null) {
+                lastImageError = "هیچ مدل تصویری در فهرست OpenRouter پیدا نشد."
+                return@withContext null
+            }
+            discoveredImageModel = caps.id
+            discoveredImageInput = caps.imageInput
+            val r = callImage(p, key, caps.id, prompt, null, null)
+            val out = if (r.ok) r.value else {
+                lastImageError = r.message
+                null
+            }
+            refreshBalanceQuietly()
+            out
         }
-
-        // 2) Free fallback that needs no key and no credit. The free endpoint
-        // only understands English prompts, so a Persian prompt is translated
-        // first with the chat model (which the same key already powers).
-        val englishPrompt = toEnglishPrompt(prompt)
-        freeImage(englishPrompt, seed)
-    }
 
     /**
-     * Turns a prompt into English for the free image endpoint. Keeps the text
-     * as-is when it is already English or when translation is unavailable.
+     * The image model OpenRouter's own catalogue reported, and whether it accepts
+     * an input image. Screens with a Context read these after a call and persist
+     * them, so capabilities are never guessed from a stale boolean.
      */
-    private suspend fun toEnglishPrompt(prompt: String): String {
-        val hasPersian = prompt.any { it in '\u0600'..'\u06FF' }
-        if (!hasPersian) return prompt
-        return try {
-            val res = chat(
-                system = "You translate image descriptions to English. " +
-                        "Output only the English description, nothing else.",
-                history = emptyList(),
-                userMessage = prompt
-            )
-            res.getOrNull()?.trim()?.takeIf { it.isNotBlank() && it.length < 400 } ?: prompt
-        } catch (e: Exception) {
-            prompt
-        }
-    }
+    @Volatile
+    var discoveredImageModel: String = ""
+        private set
 
-    /** Provider image model (Gemini image via OpenRouter). Needs real credit. */
-    private suspend fun paidImage(prompt: String, seed: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
-        var lastErr = ""
-        for (key in candidateKeys(activeProvider())) {
-            var stopKey = false
-            repeat(2) { attempt ->
-                if (stopKey) return@repeat
-                try {
-                    val body = buildJsonObject {
-                        put("model", imageModel())
-                        // Image models also need an explicit max_tokens. Without
-                        // it OpenRouter assumes the full 29k context and rejects
-                        // the call with a 402 that reads like an empty balance,
-                        // even when the key has plenty of credit.
-                        put("max_tokens", IMAGE_MAX_TOKENS)
-                        put("messages", buildJsonArray {
-                            add(buildJsonObject { put("role", "user"); put("content", prompt) })
-                        })
-                        if (activeProvider().supportsImageModalities) {
-                            put("modalities", buildJsonArray {
-                                add(kotlinx.serialization.json.JsonPrimitive("image"))
-                                add(kotlinx.serialization.json.JsonPrimitive("text"))
+    @Volatile
+    var discoveredImageInput: Boolean = false
+        private set
+
+    /**
+     * Real image request to OpenRouter. Returns the bytes and the provider's own
+     * reason on failure. [sourceBase64] is set for image-to-image.
+     */
+    private suspend fun callImage(
+        provider: AiProvider,
+        key: String,
+        model: String,
+        prompt: String,
+        sourceBase64: String?,
+        sourceMime: String?
+    ): CfLikeResult = withContext(Dispatchers.IO) {
+        var lastErr = "ساخت تصویر با مدل «$model» ناموفق بود."
+        var stop = false
+        repeat(2) { attempt ->
+            if (stop) return@repeat
+            try {
+                val userContent: kotlinx.serialization.json.JsonElement =
+                    if (sourceBase64 != null && sourceMime != null) {
+                        buildJsonArray {
+                            add(buildJsonObject { put("type", "text"); put("text", prompt) })
+                            add(buildJsonObject {
+                                put("type", "image_url")
+                                put("image_url", buildJsonObject {
+                                    put("url", "data:$sourceMime;base64,$sourceBase64")
+                                })
                             })
                         }
-                    }.toString()
+                    } else JsonPrimitive(prompt)
 
-                    val req = Request.Builder()
-                        .url(activeProvider().chatUrl())
-                        .addHeader("Authorization", "Bearer $key")
-                        .addHeader("Content-Type", "application/json")
-                        .post(body.toRequestBody("application/json".toMediaType()))
-                        .build()
-
-                    http.newCall(req).execute().use { resp ->
-                        val text = resp.body?.string().orEmpty()
-                        if (!resp.isSuccessful) {
-                            lastErr = describeError(resp.code, text, image = true)
-                            if (resp.code == 401 || resp.code == 402 || resp.code == 403) {
-                                stopKey = true
-                            }
-                        } else {
-                            val url = json.parseToJsonElement(text)
-                                .jsonObject["choices"]?.jsonArray
-                                ?.firstOrNull()?.jsonObject
-                                ?.get("message")?.jsonObject
-                                ?.get("images")?.jsonArray
-                                ?.firstOrNull()?.jsonObject
-                                ?.get("image_url")?.jsonObject
-                                ?.get("url")?.jsonPrimitive?.contentOrNull
-
-                            if (!url.isNullOrBlank()) {
-                                val b64 = url.substringAfter("base64,", url)
-                                val bytes = Base64.getDecoder().decode(b64)
-                                if (bytes.size > 500) {
-                                    refreshBalanceQuietly()
-                                    return@withContext Result.success(bytes)
-                                }
-                                lastErr = "تصویر خالی برگشت."
-                            } else {
-                                lastErr = "سرور تصویری برنگرداند."
-                            }
-                        }
+                val body = buildJsonObject {
+                    put("model", model)
+                    put("max_tokens", IMAGE_MAX_TOKENS)
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject { put("role", "user"); put("content", userContent) })
+                    })
+                    if (provider.supportsImageModalities) {
+                        put("modalities", buildJsonArray {
+                            add(JsonPrimitive("image"))
+                            add(JsonPrimitive("text"))
+                        })
                     }
-                } catch (e: Exception) {
-                    lastErr = "خطای شبکه در ساخت تصویر."
-                }
-                if (!stopKey && attempt < 1) Thread.sleep(2500L)
-            }
-        }
-        Result.failure(AiException(lastErr))
-    }
+                }.toString()
 
-    /**
-     * Free image generation via Pollinations. No API key, no credit; a plain
-     * GET that returns real JPEG bytes. Used automatically when the provider's
-     * paid image model is not available.
-     */
-    private suspend fun freeImage(prompt: String, seed: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
-        val encoded = java.net.URLEncoder.encode(prompt, "UTF-8")
-        val url = "https://image.pollinations.ai/prompt/$encoded" +
-                "?width=768&height=1024&nologo=true&seed=$seed"
-        var lastErr = "ساخت تصویر ناموفق بود."
-        repeat(3) { attempt ->
-            try {
                 val req = Request.Builder()
-                    .url(url)
-                    .addHeader("User-Agent", "Dastyar/1.0")
-                    .get().build()
+                    .url(provider.chatUrl())
+                    .addHeader("Authorization", "Bearer $key")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+
                 http.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val bytes = resp.body?.bytes()
-                        if (bytes != null && bytes.size > 1000) {
-                            return@withContext Result.success(bytes)
-                        }
-                        lastErr = "تصویر خالی برگشت."
+                    val text = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) {
+                        val detail = providerDetail(text)
+                        lastErr = if (detail.isNotBlank()) "$model — $detail"
+                        else describeError(resp.code, text, image = true)
+                        if (resp.code == 401 || resp.code == 402 || resp.code == 403) stop = true
                     } else {
-                        lastErr = "سرویس تصویر رایگان پاسخ نداد (${resp.code})."
+                        val url = json.parseToJsonElement(text)
+                            .jsonObject["choices"]?.jsonArray
+                            ?.firstOrNull()?.jsonObject
+                            ?.get("message")?.jsonObject
+                            ?.get("images")?.jsonArray
+                            ?.firstOrNull()?.jsonObject
+                            ?.get("image_url")?.jsonObject
+                            ?.get("url")?.jsonPrimitive?.contentOrNull
+                        if (!url.isNullOrBlank()) {
+                            val bytes = Base64.getDecoder().decode(url.substringAfter("base64,", url))
+                            if (bytes.size > 500) {
+                                return@withContext CfLikeResult(true, lastErr, bytes)
+                            }
+                            lastErr = "تصویر خالی از مدل «$model» برگشت."
+                        } else lastErr = "مدل «$model» تصویری برنگرداند."
                     }
                 }
             } catch (e: Exception) {
-                lastErr = "خطای شبکه در ساخت تصویر."
+                lastErr = "خطای شبکه در ساخت تصویر: ${networkReason(e)}"
             }
-            if (attempt < 2) Thread.sleep(3000L * (attempt + 1))
+            if (!stop && attempt < 1) Thread.sleep(2500L)
         }
-        Result.failure(AiException(lastErr))
+        CfLikeResult(false, lastErr, null)
     }
+
+    /** Small result holder for the OpenRouter image path. */
+    data class CfLikeResult(val ok: Boolean, val message: String, val value: ByteArray?)
+
+    /**
+     * Turns an OpenRouter error into an accurate Persian sentence. The 402 case
+     * is checked carefully: OpenRouter uses 402 both for a genuinely empty
+     * balance and for a request whose max_tokens exceeds the balance, so the
+     * message must not claim the credit has run out unless it really has.
+     */
 
 
     /**
@@ -621,21 +854,25 @@ object AiClient {
     private fun describeError(code: Int, raw: String, image: Boolean = false): String {
         val low = raw.lowercase()
         return when (code) {
-            401 -> "کلید هوش مصنوعی معتبر نیست یا لغو شده است."
+            401 -> "کلید هوش مصنوعی نامعتبر یا منقضی است. کلید را بررسی یا تعویض کن."
             402 -> when {
                 low.contains("max_tokens") ->
                     "تنظیمات درخواست با موجودی سرویس هم‌خوان نبود. دوباره تلاش کن."
                 low.contains("fewer max_tokens") ->
                     "طول پاسخ بیش از حد بود؛ درخواست کوتاه‌تر ارسال شد."
                 else ->
-                    "موجودی سرویس هوش مصنوعی کافی نیست. " +
+                    "اعتبار سرویس کافی نیست. " +
                             if (image) "برای ساخت تصویر به شارژ حساب نیاز است."
                             else "برای ادامه گفتگو به شارژ حساب نیاز است."
             }
             403 -> "دسترسی این مدل برای کلید فعلی باز نیست."
-            404 -> "مدل درخواستی در دسترس نیست."
+            404, 400 -> when {
+                low.contains("modalit") || low.contains("image") || low.contains("model") ->
+                    "مدل فعلی قابلیت تولید تصویر ندارد؛ یک مدل تصویری فعال انتخاب کنید."
+                else -> "مدل درخواستی در دسترس نیست."
+            }
             429 -> "تعداد درخواست‌ها زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
-            in 500..599 -> "سرور هوش مصنوعی موقتاً پاسخ نمی‌دهد؛ دوباره تلاش کن."
+            in 500..599 -> "سرویس موقتاً پاسخ نمی‌دهد؛ دوباره تلاش کن."
             else -> "خطای سرویس هوش مصنوعی (کد $code)."
         }
     }

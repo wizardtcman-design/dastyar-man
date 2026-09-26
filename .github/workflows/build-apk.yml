@@ -29,13 +29,11 @@ jobs:
 
       - name: Build Debug APK
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           APP_VERSION: 1.0.${{ github.run_number }}
         run: ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Build Release APK
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           APP_VERSION: 1.0.${{ github.run_number }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}

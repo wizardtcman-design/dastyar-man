@@ -11,6 +11,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -18,7 +21,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dastyar.app.notifications.DailyReminder
+import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.ui.MainViewModel
+import com.dastyar.app.ui.screens.ConnectGate
 import com.dastyar.app.ui.screens.MainScaffold
 import com.dastyar.app.ui.screens.OnboardingFlow
 import com.dastyar.app.ui.theme.DastyarTheme
@@ -50,14 +55,19 @@ class MainActivity : ComponentActivity() {
                         if (openCheckIn && profile?.onboardingDone == true) vm.requestOpenCheckIn()
                     }
 
+                    // First run: the app has no built-in key, so the user
+                    // connects their own before anything else. The flag is held
+                    // in state so a successful test moves straight on.
+                    var keyReady by remember { mutableStateOf(ServiceKeys.anyConnected()) }
+
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        if (profile?.onboardingDone == true) {
-                            MainScaffold(vm)
-                        } else {
-                            OnboardingFlow(vm)
+                        when {
+                            !keyReady -> ConnectGate { keyReady = true }
+                            profile?.onboardingDone == true -> MainScaffold(vm)
+                            else -> OnboardingFlow(vm)
                         }
                     }
                 }

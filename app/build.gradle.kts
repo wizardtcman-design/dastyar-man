@@ -10,9 +10,6 @@ plugins {
 // ---------------------------------------------------------------- secrets
 // Injected as env vars by the GitHub Actions workflow, so no key ever lives
 // in the source. Local builds may set the same values in keystore.properties.
-val aiKey: String = System.getenv("OPENROUTER_API_KEY")
-    ?: (project.findProperty("OPENROUTER_API_KEY") as String?)
-    ?: ""
 val chatUrl: String = System.getenv("OPENROUTER_BASE_URL")
     ?: "https://openrouter.ai/api/v1"
 
@@ -69,7 +66,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            buildConfigField("String", "OPENROUTER_API_KEY", "\"$aiKey\"")
+            // No API key is compiled in: the user enters their own on first run
+            // and it is stored only in the device's private preferences.
             buildConfigField("String", "OPENROUTER_BASE_URL", "\"$chatUrl\"")
             if (hasSigning) {
                 signingConfig = signingConfigs.getByName("release")
@@ -77,7 +75,6 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            buildConfigField("String", "OPENROUTER_API_KEY", "\"$aiKey\"")
             buildConfigField("String", "OPENROUTER_BASE_URL", "\"$chatUrl\"")
             // Sign debug builds with the same release keystore when it is
             // available. This makes installs upgrade-in-place across every

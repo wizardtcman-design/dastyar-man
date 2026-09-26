@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.ai.AiClient
+import com.dastyar.app.ai.ImageEngine
 import com.dastyar.app.ai.Prompts
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
@@ -87,6 +88,7 @@ fun ImageScreen(vm: MainViewModel) {
     var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
     var lastPrompt by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var usedNote by remember { mutableStateOf<String?>(null) }
 
     Column(
         Modifier
@@ -197,27 +199,41 @@ fun ImageScreen(vm: MainViewModel) {
             loading = true
             error = null
             scope.launch {
-                val finalPrompt: String = if (isEditing && editInstruction.isNotBlank()) {
-                    // Ask the real text model to turn the short instruction into
-                    // a full English prompt, then render that.
-                    val expanded = AiClient.chat(
-                        system = Prompts.base(),
-                        history = emptyList(),
-                        userMessage = Prompts.imageEditPrompt(editInstruction, prompt)
-                    ).getOrNull()
-                    expanded ?: "$prompt, $editInstruction"
-                } else prompt
+                val res: Result<ImageEngine.ImageOutcome> = if (isEditing && imageBytes != null) {
+                    // Real image-to-image: send the current picture back to a
+                    // model that accepts image input, with the edit text.
+                    val instr = if (editInstruction.isNotBlank()) editInstruction else prompt
+                    val src = android.util.Base64.encodeToString(
+                        imageBytes,
+                        android.util.Base64.NO_WRAP
+                    )
+                    lastPrompt = instr
+                    ImageEngine.edit(instr, src)
+                } else {
+                    val finalPrompt: String =
+                        if (isEditing && editInstruction.isNotBlank()) {
+                            // No base image yet: ask the text model to turn the
+                            // instruction into a full prompt, then render it.
+                            val expanded = AiClient.chat(
+                                system = Prompts.base(),
+                                history = emptyList(),
+                                userMessage = Prompts.imageEditPrompt(editInstruction, prompt)
+                            ).getOrNull()
+                            expanded ?: "$prompt, $editInstruction"
+                        } else prompt
 
-                if (finalPrompt.isBlank()) {
-                    error = "لطفاً توصیف تصویر را بنویس."
-                    loading = false
-                    return@launch
+                    if (finalPrompt.isBlank()) {
+                        error = "لطفاً توصیف تصویر را بنویس."
+                        loading = false
+                        return@launch
+                    }
+                    lastPrompt = finalPrompt
+                    ImageEngine.generate(finalPrompt)
                 }
-                lastPrompt = finalPrompt
-                val res = AiClient.generateImage(finalPrompt)
                 loading = false
-                res.onSuccess {
-                    imageBytes = it
+                res.onSuccess { out ->
+                    imageBytes = out.bytes
+                    usedNote = out.note
                 }.onFailure {
                     error = it.message ?: "ساخت تصویر ناموفق بود."
                 }
@@ -237,6 +253,13 @@ fun ImageScreen(vm: MainViewModel) {
             Spacer(Modifier.height(14.dp))
             DastyarCard(accent = MaterialTheme.colorScheme.error) {
                 Text("⚠️ $it", fontSize = 13.sp)
+            }
+        }
+
+        usedNote?.let { note ->
+            Spacer(Modifier.height(14.dp))
+            DastyarCard(accent = MaterialTheme.colorScheme.primary) {
+                Text(note, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             }
         }
 

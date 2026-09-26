@@ -16,9 +16,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
 import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.AiProviders
-import com.dastyar.app.ai.ApiKeys
+import com.dastyar.app.ai.CloudflareClient
+import com.dastyar.app.ai.PollinationsClient
+import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.data.Health
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Profile
@@ -27,7 +31,9 @@ import com.dastyar.app.notifications.PeriodReminder
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
 import com.dastyar.app.ui.theme.Amber
+import com.dastyar.app.ui.theme.Cyan
 import com.dastyar.app.ui.theme.Green
+import com.dastyar.app.ui.theme.Purple
 import kotlinx.coroutines.launch
 
 @Composable
@@ -48,12 +54,23 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         mutableStateOf("%02d:%02d".format(DailyReminder.hour(ctx), DailyReminder.minute(ctx)))
     }
     var showTimePicker by remember { mutableStateOf(false) }
-    var aiStatus by remember { mutableStateOf<String?>(null) }
-    var altKey by remember { mutableStateOf("") }
-    var altStatus by remember { mutableStateOf<String?>(null) }
-    var selectedProvider by remember { mutableStateOf(AiClient.activeProvider()) }
     var balance by remember { mutableStateOf<AiClient.ServiceBalance?>(null) }
     var balanceLoading by remember { mutableStateOf(false) }
+    // OpenRouter card
+    var orStatus by remember { mutableStateOf<String?>(null) }
+    var orNewKey by remember { mutableStateOf("") }
+    var showOrEdit by remember { mutableStateOf(false) }
+    // Cloudflare card
+    var cfAccount by remember { mutableStateOf("") }
+    var cfToken by remember { mutableStateOf("") }
+    var cfStatus by remember { mutableStateOf<String?>(null) }
+    var showCfEdit by remember { mutableStateOf(false) }
+    var cfBusy by remember { mutableStateOf(false) }
+    var cfModels by remember { mutableStateOf<List<String>?>(null) }
+    // Pollinations card
+    var poKey by remember { mutableStateOf("") }
+    var poStatus by remember { mutableStateOf<String?>(null) }
+    var showPoEdit by remember { mutableStateOf(false) }
 
     // Refresh the real provider balance as soon as Settings opens.
     LaunchedEffect(Unit) {
@@ -329,61 +346,81 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- AI status ----
-        DastyarCard {
-            SectionTitle("وضعیت هوش مصنوعی", "🤖")
+        // ---- three AI services, managed independently ----
+
+        // OpenRouter card (chat / text)
+        DastyarCard(accent = Purple) {
+            SectionTitle("OpenRouter", "💬")
+            Spacer(Modifier.height(6.dp))
+            ServiceStatus(ServiceKeys.openRouterState().name)
             Spacer(Modifier.height(8.dp))
-            val provider = AiClient.activeProvider()
-            val usingUserKey = ApiKeys.userKey()?.isNotBlank() == true
+            Text("وظیفه: چت و همه قابلیت‌های متنی", fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("مدل چت: ${ServiceKeys.openRouterTextModel()}", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (ServiceKeys.openRouterSupportsImage())
+                    "مدل تصویر: ${ServiceKeys.openRouterImageModel()}" else "مدل تصویر: ندارد",
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text("کلید: " + maskKey(ServiceKeys.openRouterKey()), fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ServiceButton("تست", Modifier.weight(1f)) {
+                    scope.launch {
+                        orStatus = "در حال تست واقعی…"
+                        val r = AiClient.testConnection(ctx)
+                        orStatus = if (r.ok) "✅ اتصال برقرار است" else "⚠️ ${r.message}"
+                    }
+                }
+                ServiceButton("تغییر", Modifier.weight(1f)) { showOrEdit = !showOrEdit }
+                ServiceButton("حذف", Modifier.weight(1f)) {
+                    ServiceKeys.clearOpenRouter(ctx)
+                    orStatus = "کلید OpenRouter حذف شد."
+                }
+            }
+            if (showOrEdit) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = orNewKey, onValueChange = { orNewKey = it.trim() },
+                    label = { Text("کلید جدید OpenRouter") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp), singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            orStatus = "در حال آزمایش کلید جدید…"
+                            val (r, caps) = AiClient.testProvider(AiProviders.openRouter, orNewKey.trim())
+                            if (r.ok) {
+                                ServiceKeys.saveOpenRouter(
+                                    ctx, orNewKey.trim(),
+                                    imageModel = caps?.imageModel ?: AiProviders.openRouter.imageModel,
+                                    supportsImg = caps?.supportsImage ?: false,
+                                    supportsEdit = caps?.supportsEdit ?: false
+                                )
+                                orNewKey = ""; showOrEdit = false
+                                balance = AiClient.fetchBalance()
+                                orStatus = "✅ کلید جدید ذخیره شد و از این به بعد استفاده می‌شود"
+                            } else orStatus = "⚠️ ${r.message}"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("آزمایش و ذخیره کلید جدید") }
+            }
+            Spacer(Modifier.height(8.dp))
             Text(
                 when {
-                    !AiClient.chatConfigured -> "⚠️ کلید هوش مصنوعی تنظیم نشده"
-                    usingUserKey -> "✅ متصل به سرویس «${provider.label}» (کلید خودت)"
-                    else -> "✅ متصل به سرویس «${provider.label}»"
+                    balanceLoading -> "در حال دریافت اعتبار…"
+                    balance?.remaining != null -> "اعتبار OpenRouter: ${money(balance!!.remaining!!)}"
+                    else -> "اعتبار OpenRouter: قابل دریافت نیست"
                 },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "سرویس فعلی: ${provider.label}",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "مدل متن: ${provider.textModel}",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                if (provider.supportsImages) "ساخت تصویر: پشتیبانی می‌شود"
-                else "ساخت تصویر: این سرویس پشتیبانی نمی‌کند",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(
-                onClick = {
-                    scope.launch {
-                        aiStatus = "در حال بررسی اتصال…"
-                        aiStatus = AiClient.testConnection()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
-            ) { Text("بررسی اتصال هوش مصنوعی") }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = {
-                    scope.launch {
-                        aiStatus = "در حال تشخیص دقیق…"
-                        aiStatus = AiClient.diagnose()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
-            ) { Text("تشخیص دقیق اتصال (نمایش خطای واقعی)") }
-            aiStatus?.let {
+            orStatus?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -391,158 +428,179 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- service balance (real, from the provider) ----
-        DastyarCard(accent = Green) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { SectionTitle("اعتبار سرویس هوش مصنوعی", "💳") }
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            balanceLoading = true
-                            balance = AiClient.fetchBalance()
-                            balanceLoading = false
-                        }
-                    },
-                    enabled = !balanceLoading
-                ) { Text(if (balanceLoading) "…" else "به‌روزرسانی") }
-            }
-            Spacer(Modifier.height(8.dp))
-
-            val b = balance
-            when {
-                balanceLoading && b == null -> {
-                    Text(
-                        "در حال دریافت اطلاعات از سرویس…",
-                        fontSize = 12.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                b == null || !b.supported -> {
-                    Text(
-                        "موجودی این سرویس از طریق API قابل دریافت نیست.",
-                        fontSize = 12.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (b != null && b.usage != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "مصرف واقعی این سرویس: ${money(b.usage)}",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                else -> {
-                    val rem = b.remaining
-                    Text(
-                        if (rem != null) "موجودی فعلی: ${money(rem)}"
-                        else "موجودی فعلی: قابل دریافت نیست",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (b.usage != null) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "مصرف کل: ${money(b.usage)}",
-                            fontSize = 12.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // Real threshold warning, driven by the provider value only.
-                    val warn = when {
-                        b.exhausted || (rem != null && rem <= 0.0) -> "🔴 اعتبار سرویس تمام شده است. لطفاً API جدید وارد کنید."
-                        rem != null && rem <= 5.0 -> "⚠️ اعتبار سرویس رو به اتمام است"
-                        else -> null
-                    }
-                    if (warn != null) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            warn,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (b.exhausted || (rem != null && rem <= 0.0))
-                                MaterialTheme.colorScheme.error else Amber
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "این مقدار مستقیماً از API رسمی سرویس خوانده می‌شود و در برنامه محاسبه یا تخمین زده نمی‌شود.",
-                fontSize = 10.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ---- alternate API key & provider ----
-        DastyarCard(accent = MaterialTheme.colorScheme.secondary) {
-            SectionTitle("API جایگزین", "🔑")
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "اگر اعتبار سرویس فعلی تمام شد، می‌توانی کلید سرویس دیگری را همین‌جا وارد کنی. " +
-                        "کلید فقط روی همین گوشی ذخیره می‌شود و هیچ‌وقت داخل خود برنامه یا فایل عمومی قرار نمی‌گیرد.",
-                fontSize = 11.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            Text("سرویس جایگزین:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        // Cloudflare card (image engine)
+        DastyarCard(accent = Cyan) {
+            SectionTitle("Cloudflare AI", "🎨")
             Spacer(Modifier.height(6.dp))
-            SingleChoiceChips(
-                options = AiProviders.all.map { it.label },
-                selected = selectedProvider.label,
-                accent = MaterialTheme.colorScheme.secondary
-            ) { picked ->
-                AiProviders.all.firstOrNull { it.label == picked }?.let { selectedProvider = it }
+            ServiceStatus(ServiceKeys.cloudflareState().name)
+            Spacer(Modifier.height(8.dp))
+            Text("وظیفه: تولید و ویرایش تصویر (موتور اصلی)", fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Account ID: " + maskKey(ServiceKeys.cloudflareAccount()), fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("API Token: " + maskKey(ServiceKeys.cloudflareToken()), fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("مدل تصویر: ${ServiceKeys.cloudflareModel()}", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            cfModels?.let { models ->
+                if (models.size > 1) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("انتخاب مدل تصویر:", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    models.forEach { m ->
+                        val on = ServiceKeys.cloudflareModel() == m
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (on) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                .clickable { ServiceKeys.setCloudflareModel(ctx, m) }
+                        ) {
+                            Text(m, Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                fontSize = 11.sp,
+                                color = if (on) Color.White
+                                else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             }
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = altKey,
-                onValueChange = { altKey = it },
-                label = { Text("کلید API") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                singleLine = true
-            )
+
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ServiceButton("تست", Modifier.weight(1f)) {
+                    scope.launch {
+                        cfBusy = true
+                        cfStatus = "در حال تست واقعی…"
+                        val m = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
+                            ?: CloudflareClient.DEFAULT_MODEL
+                        val r = CloudflareClient.test(
+                            ServiceKeys.cloudflareAccount(), ServiceKeys.cloudflareToken(), m
+                        )
+                        cfBusy = false
+                        cfStatus = if (r.ok) "✅ اتصال برقرار است" else "⚠️ ${r.message}"
+                    }
+                }
+                ServiceButton("تغییر", Modifier.weight(1f)) { showCfEdit = !showCfEdit }
+                ServiceButton("حذف", Modifier.weight(1f)) {
+                    ServiceKeys.clearCloudflare(ctx)
+                    cfModels = null
+                    cfStatus = "اطلاعات Cloudflare حذف شد."
+                }
+            }
+            if (showCfEdit) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = cfAccount, onValueChange = { cfAccount = it.trim() },
+                    label = { Text("Account ID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp), singleLine = true
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = cfToken, onValueChange = { cfToken = it.trim() },
+                    label = { Text("API Token") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp), singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
                         scope.launch {
-                            altStatus = "در حال آزمایش اتصال سرویس…"
-                            val r = AiClient.testProvider(selectedProvider, altKey.trim())
-                            altStatus = r
-                            if (r.startsWith("✅")) {
-                                ApiKeys.saveUserKey(ctx, altKey.trim(), selectedProvider)
-                                altStatus = "$r — ذخیره شد و از این به بعد استفاده می‌شود"
-                                altKey = ""
+                            cfStatus = "در حال آزمایش و کشف مدل‌ها…"
+                            val models = CloudflareClient.listImageModels(cfAccount.trim(), cfToken.trim())
+                            val pick = CloudflareClient.DEFAULT_MODEL.id
+                                .takeIf { models.isEmpty() || it in models }
+                                ?: models.firstOrNull() ?: CloudflareClient.DEFAULT_MODEL.id
+                            val model = CloudflareClient.modelById(pick) ?: CloudflareClient.DEFAULT_MODEL
+                            val r = CloudflareClient.test(cfAccount.trim(), cfToken.trim(), model)
+                            if (r.ok) {
+                                ServiceKeys.saveCloudflare(ctx, cfAccount.trim(), cfToken.trim(), model.id)
+                                cfModels = models.ifEmpty { listOf(model.id) }
+                                showCfEdit = false
+                                cfStatus = "✅ ذخیره شد"
+                            } else {
+                                ServiceKeys.saveCloudflare(ctx, cfAccount.trim(), cfToken.trim(), model.id,
+                                    ServiceKeys.State.ERROR)
+                                cfStatus = "⚠️ ${r.message}"
                             }
                         }
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp)
                 ) { Text("آزمایش و ذخیره") }
-                OutlinedButton(
-                    onClick = {
-                        ApiKeys.clearUserKey(ctx)
-                        altKey = ""
-                        altStatus = "کلید جایگزین حذف شد؛ سرویس پیش‌فرض برگشت"
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
-                ) { Text("حذف کلید") }
             }
-            altStatus?.let {
+
+            Spacer(Modifier.height(10.dp))
+            Text("مصرف Workers AI", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "سهمیه رایگان روزانه: ${Dates.fa(CloudflareClient.FREE_DAILY_NEURONS)} Neuron " +
+                        "(هر روز ریست می‌شود). مصرف دقیق از API قابل دریافت نیست.",
+                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            cfStatus?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
+        Spacer(Modifier.height(14.dp))
+
+        // Pollinations card (image fallback)
+        DastyarCard(accent = Green) {
+            SectionTitle("Pollinations", "🖼")
+            Spacer(Modifier.height(6.dp))
+            ServiceStatus(ServiceKeys.pollinationsState().name)
+            Spacer(Modifier.height(8.dp))
+            Text("وظیفه: پشتیبان تولید تصویر", fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("مدل تصویر: flux", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("کلید: " + maskKey(ServiceKeys.pollinationsKey()), fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ServiceButton("تست", Modifier.weight(1f)) {
+                    scope.launch {
+                        poStatus = "در حال تست واقعی…"
+                        val r = PollinationsClient.test(ServiceKeys.pollinationsKey())
+                        if (r.ok) {
+                            ServiceKeys.setPollinations(ctx, ServiceKeys.pollinationsKey(),
+                                ServiceKeys.State.CONNECTED)
+                            poStatus = "✅ اتصال برقرار است"
+                        } else poStatus = "⚠️ ${r.message}"
+                    }
+                }
+                ServiceButton("تغییر", Modifier.weight(1f)) { showPoEdit = !showPoEdit }
+                ServiceButton("حذف", Modifier.weight(1f)) {
+                    ServiceKeys.clearPollinations(ctx)
+                    poStatus = "کلید Pollinations حذف شد."
+                }
+            }
+            if (showPoEdit) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = poKey, onValueChange = { poKey = it.trim() },
+                    label = { Text("Pollinations API Key (اختیاری)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp), singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        ServiceKeys.setPollinations(ctx, poKey.trim().ifBlank { null },
+                            ServiceKeys.State.CONNECTED)
+                        poKey = ""; showPoEdit = false
+                        poStatus = "ذخیره شد"
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("ذخیره") }
+            }
+            poStatus?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         Spacer(Modifier.height(14.dp))
 
         // ---- version ----
@@ -822,4 +880,22 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
 private fun money(v: Double): String {
     val s = if (v >= 100) "%.0f".format(v) else "%.2f".format(v)
     return "$" + Dates.fa(s).replace('.', '٫')
+}
+
+/** Masks a secret, keeping only the start and the last few characters. */
+private fun maskKey(v: String?): String {
+    if (v.isNullOrBlank()) return "تنظیم نشده"
+    return if (v.length <= 10) "••••" else "${v.take(6)}…${v.takeLast(4)}"
+}
+
+/** A compact outlined button used in the service cards. */
+@Composable
+private fun ServiceButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    OutlinedButton(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(12.dp)) {
+        Text(text, fontSize = 12.sp)
+    }
 }
