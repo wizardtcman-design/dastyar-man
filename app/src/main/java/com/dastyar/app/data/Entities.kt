@@ -46,3 +46,16 @@ data class SavedImage(
     val kind: String = "generate",      // generate / edit
     val createdAt: Long = System.currentTimeMillis()
 )
+
+/**
+ * A recipe the user chose to keep from the cooking section. The full recipe
+ * text is stored as-is so it can be shown again without another AI call.
+ */
+@Entity(tableName = "saved_recipes")
+data class SavedRecipe(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String = "",
+    val meal: String = "ناهار",          // ناهار / شام
+    val body: String = "",              // the recipe text (ingredients + steps)
+    val createdAt: Long = System.currentTimeMillis()
+)

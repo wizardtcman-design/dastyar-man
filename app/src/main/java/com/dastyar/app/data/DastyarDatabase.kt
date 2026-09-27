@@ -16,9 +16,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailySuggestion::class,
         WeightEntry::class,
         SmartFact::class,
-        SavedImage::class
+        SavedImage::class,
+        SavedRecipe::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class DastyarDatabase : RoomDatabase() {
@@ -42,13 +43,28 @@ abstract class DastyarDatabase : RoomDatabase() {
             }
         }
 
+        // v3 -> v4 only adds the saved-recipes table; everything else is kept.
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `saved_recipes` (" +
+                            "`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                            "`title` TEXT NOT NULL, " +
+                            "`meal` TEXT NOT NULL, " +
+                            "`body` TEXT NOT NULL, " +
+                            "`createdAt` INTEGER NOT NULL)"
+                )
+            }
+        }
+
         fun get(context: Context): DastyarDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     DastyarDatabase::class.java,
                     "dastyar.db"
-                ).addMigrations(MIGRATION_2_3).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4).fallbackToDestructiveMigration()
+                    .build().also { INSTANCE = it }
             }
     }
 }

@@ -131,6 +131,16 @@ interface DastyarDao {
     @Query("DELETE FROM saved_images WHERE id = :id")
     suspend fun deleteSavedImage(id: Long)
 
+    // ---- Saved recipes ----
+    @Query("SELECT * FROM saved_recipes ORDER BY createdAt DESC")
+    fun savedRecipesFlow(): Flow<List<SavedRecipe>>
+
+    @Insert
+    suspend fun addSavedRecipe(r: SavedRecipe): Long
+
+    @Query("DELETE FROM saved_recipes WHERE id = :id")
+    suspend fun deleteSavedRecipe(id: Long)
+
     // ---- Data management ----
     @Query("DELETE FROM checkins")
     suspend fun clearCheckIns()

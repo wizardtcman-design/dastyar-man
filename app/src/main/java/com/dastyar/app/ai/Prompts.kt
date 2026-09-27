@@ -254,9 +254,86 @@ object Prompts {
 ⏱ زمان آماده‌سازی: [مقدار]
 📊 سختی: [آسان/متوسط/سخت]
 🧺 مواد لازم: [با مقدار]
-👩🍳 دستور: [مراحل شماره‌دار، کوتاه]
+👩‍🍳 دستور: [مراحل شماره‌دار، کوتاه]
 
 فقط با مواد ذکرشده یا مواد ساده و رایج آشپزخانه بساز. فارسی و جمع‌وجور بنویس.
+""".trimIndent()
+
+    /**
+     * Shared rules for the cooking section. The output format is exact and
+     * marker-based so the app can split dishes and render each field reliably.
+     * Everything is grounded in ordinary Iranian home cooking.
+     */
+    private val COOKING_RULES = """
+تو یک آشپز ایرانی باتجربه و صمیمی هستی. هدف: غذای واقعی و قابل پخت در خانه.
+
+قواعد:
+- فقط غذای ایرانی/خانگی/معمولی و ارزان پیشنهاد بده؛ نه رستورانی، نه لاکچری، نه
+  مواد اولیه کمیاب یا گران.
+- مواد اولیه باید ساده و در دسترس باشند (برنج، حبوبات، گوشت ارزان، تخم‌مرغ، سیب‌زمینی،
+  پیاز، گوجه، ماکارونی، نان...).
+- پیشنهادها متنوع باشند و غذای تکراری نده.
+- بدون ادعای پزشکی، رژیمی یا درمانی؛ فقط دستور پخت.
+- فارسی، کوتاه و روان بنویس. عددها فارسی باشند.
+
+قالب پاسخ را دقیقاً و بدون هیچ متن اضافه رعایت کن. بین غذاها یک خط «###» بگذار.
+برای هر غذا این بلوک را بنویس (هر فیلد در یک خط جدا):
+
+نام: [نام غذا]
+نفرات: [تعداد نفر]
+آماده‌سازی: [مقدار دقیقه]
+پخت: [مقدار دقیقه]
+مواد:
+- [ماده]: [مقدار]
+- [ماده]: [مقدار]
+مراحل:
+۱. [مرحله کوتاه]
+۲. [مرحله کوتاه]
+۳. [مرحله کوتاه]
+""".trimIndent()
+
+    /** Lunch/dinner suggestion, optionally shaped by filters and serving count. */
+    fun mealSuggestPrompt(meal: String, servings: Int, filters: List<String>): String {
+        val filterLine =
+            if (filters.isEmpty()) "فیلتر خاصی نیست."
+            else "فیلترها: ${filters.joinToString("، ")}"
+        return """
+$COOKING_RULES
+
+وعده: $meal
+تعداد نفرات: $servings
+$filterLine
+
+دو پیشنهاد متفاوت برای این وعده بده. مقدار مواد را برای $servings نفر بنویس.
+""".trimIndent()
+    }
+
+    /** "What should I cook today?" — a couple of all-day ideas. */
+    fun todaySuggestPrompt(servings: Int, filters: List<String>): String {
+        val filterLine =
+            if (filters.isEmpty()) "فیلتر خاصی نیست."
+            else "فیلترها: ${filters.joinToString("، ")}"
+        return """
+$COOKING_RULES
+
+کاربر پرسیده «امروز چی بپزم؟». یک ناهار و یک شام معمولی و خانگی پیشنهاد بده.
+تعداد نفرات: $servings
+$filterLine
+مقدار مواد را برای $servings نفر بنویس.
+""".trimIndent()
+    }
+
+    /** Suggest dishes from what the user already has at home. */
+    fun pantrySuggestPrompt(ingredients: String, servings: Int): String = """
+$COOKING_RULES
+
+اینها مواد موجود کاربر است: $ingredients
+تعداد نفرات: $servings
+
+دو غذا پیشنهاد بده که بیشترین مقدار این مواد را استفاده کند. اگر غذایی به یک یا دو
+ماده جزئی نیاز دارد، در انتهای همان بلوک یک خط بنویس:
+کمبود: [فقط همان مواد جزئی]
+اگر مواد اصلی یک غذا موجود نیست، آن غذا را پیشنهاد نده. مقدار مواد را برای $servings نفر بنویس.
 """.trimIndent()
 
     /** Prompt used to expand a short edit instruction into a full image prompt. */

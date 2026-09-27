@@ -13,6 +13,7 @@ import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Health
 import com.dastyar.app.data.Profile
 import com.dastyar.app.data.SavedImage
+import com.dastyar.app.data.SavedRecipe
 import com.dastyar.app.data.SmartFact
 import com.dastyar.app.data.Task
 import com.dastyar.app.data.WeightEntry
@@ -629,6 +630,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         com.dastyar.app.util.GallerySaver.deleteFromApp(getApplication(), fileName)
         dao.deleteSavedImage(id)
     }
+
+    // ------------------------------------------------------ saved recipes
+
+    val savedRecipes: StateFlow<List<SavedRecipe>> = dao.savedRecipesFlow()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun saveRecipe(title: String, meal: String, body: String) = viewModelScope.launch(Dispatchers.IO) {
+        dao.addSavedRecipe(SavedRecipe(title = title, meal = meal, body = body))
+    }
+
+    fun deleteRecipe(id: Long) = viewModelScope.launch(Dispatchers.IO) { dao.deleteSavedRecipe(id) }
 
     // -------------------------------------------------------------- learning
 
