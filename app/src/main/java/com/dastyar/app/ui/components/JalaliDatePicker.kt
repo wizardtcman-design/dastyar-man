@@ -3,6 +3,8 @@ package com.dastyar.app.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -50,7 +52,14 @@ fun JalaliDatePicker(
         shape = RoundedCornerShape(26.dp),
         title = null,
         text = {
-            Column(Modifier.fillMaxWidth()) {
+            // Scrollable and height-capped so the picker never runs off the
+            // bottom of a short screen or a screen with the keyboard open.
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 430.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // header
                 Box(
                     Modifier

@@ -5,7 +5,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
@@ -74,9 +76,20 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background
                     ) {
                         when {
-                            !keyReady -> ConnectGate { keyReady = true }
+                            !keyReady -> {
+                                // Edge-to-edge: keep the first-run gate clear of the
+                                // status bar, navigation bar and any display cutout,
+                                // so no card is ever half cut.
+                                Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                                    ConnectGate { keyReady = true }
+                                }
+                            }
                             profile?.onboardingDone == true -> MainScaffold(vm)
-                            else -> OnboardingFlow(vm)
+                            else -> {
+                                Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                                    OnboardingFlow(vm)
+                                }
+                            }
                         }
                     }
                 }

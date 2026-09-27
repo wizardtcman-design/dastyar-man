@@ -408,6 +408,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
  * and cycle day live in their own separated pills so numbers and words never
  * run into each other in RTL.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GreetingCard(
     name: String,
@@ -459,8 +460,9 @@ private fun GreetingCard(
                 ) { Text("⚙️", fontSize = 20.sp) }
             }
             Spacer(Modifier.height(12.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            // FlowRow so the pills wrap instead of running off a narrow screen.
+            FlowRow(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 HeaderPill("📅", dateLabel)

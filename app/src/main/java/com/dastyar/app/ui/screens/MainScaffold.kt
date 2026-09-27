@@ -1,6 +1,7 @@
 package com.dastyar.app.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -49,6 +50,10 @@ fun MainScaffold(vm: MainViewModel) {
     }
 
     Scaffold(
+        // Edge-to-edge: we place the system-bar insets ourselves below, so the
+        // Scaffold must not also reserve them (that would double-pad the top and
+        // push the first card under the status bar).
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar(
@@ -91,7 +96,14 @@ fun MainScaffold(vm: MainViewModel) {
         Box(
             Modifier
                 .padding(pad)
-                .statusBarsPadding()
+                // Top + left/right safe insets (status bar, display cutout). The
+                // bottom is handled by the NavigationBar, and chat screens add
+                // the IME inset themselves.
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+                    )
+                )
         ) {
             when (tab) {
                 "home" -> HomeScreen(

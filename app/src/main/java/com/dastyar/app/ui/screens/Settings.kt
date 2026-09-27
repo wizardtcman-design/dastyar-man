@@ -875,7 +875,13 @@ private fun PersonalEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profil
     var age by remember { mutableStateOf(Dates.displayField(if (p.age == 0) "" else p.age.toString())) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(20.dp)
+        ) {
             Text("ویرایش اطلاعات شخصی", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(first, { first = it }, label = { Text("نام") },
@@ -917,6 +923,7 @@ private fun BodyEditSheet(p: Profile, onDismiss: () -> Unit, onSave: (Profile) -
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(20.dp)
         ) {
             Text("قد، وزن و شرایط پزشکی", fontWeight = FontWeight.Bold, fontSize = 18.sp)
