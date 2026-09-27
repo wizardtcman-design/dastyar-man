@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -94,6 +96,7 @@ fun AssistantScreen(vm: MainViewModel) {
 private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
     val profile by vm.profile.collectAsState()
     val today by vm.todayCheckIn.collectAsState()
+    var confirmClear by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         // ---- fixed, compact header: title + one row of three equal cards ----
@@ -104,7 +107,8 @@ private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
         ) {
             AssistantHeader(
                 title = "دستیار من",
-                subtitle = "یک موضوع را انتخاب کن یا هر سؤالی داری همین‌جا بپرس."
+                subtitle = "یک موضوع را انتخاب کن یا هر سؤالی داری همین‌جا بپرس.",
+                onClearChat = { confirmClear = true }
             )
             Spacer(Modifier.height(8.dp))
             Row(
@@ -131,6 +135,13 @@ private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
             modifier = Modifier.weight(1f)
         )
     }
+
+    if (confirmClear) {
+        ClearChatDialog(
+            onConfirm = { vm.clearChat(GENERAL_CHANNEL); confirmClear = false },
+            onDismiss = { confirmClear = false }
+        )
+    }
 }
 
 /**
@@ -139,7 +150,7 @@ private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
  * screen: a small icon, a title line and one short subtitle line.
  */
 @Composable
-private fun AssistantHeader(title: String, subtitle: String) {
+private fun AssistantHeader(title: String, subtitle: String, onClearChat: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -156,7 +167,7 @@ private fun AssistantHeader(title: String, subtitle: String) {
             contentAlignment = Alignment.Center
         ) { Text("🤖", fontSize = 16.sp) }
         Spacer(Modifier.width(10.dp))
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(
                 title,
                 color = Color.White,
@@ -172,7 +183,50 @@ private fun AssistantHeader(title: String, subtitle: String) {
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
         }
+        ChatMenuButton(onClearChat = onClearChat, tint = Color.White)
     }
+}
+
+/**
+ * The three-dot menu shown in every chat header. It holds a single, clearly
+ * labelled action: clearing this conversation. The confirmation lives in the
+ * caller (see [ClearChatDialog]) so the destructive step is always explicit.
+ */
+@Composable
+private fun ChatMenuButton(onClearChat: () -> Unit, tint: Color) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "گزینه‌ها", tint = tint)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("پاک کردن گفتگو", fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+                onClick = { open = false; onClearChat() }
+            )
+        }
+    }
+}
+
+/** Confirmation shown before a conversation is erased. */
+@Composable
+private fun ClearChatDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("پاک کردن گفتگو", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+        text = { Text("آیا مطمئنی می‌خواهی این گفتگو پاک شود؟", fontSize = 14.sp) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("پاک کردن", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("انصراف") }
+        }
+    )
 }
 
 /**
@@ -234,9 +288,11 @@ private fun AdvisorScreen(vm: MainViewModel, advisor: Advisor, onBack: () -> Uni
     }
     val localTip = localTip(advisor, profile, today)
 
+    var confirmClear by remember { mutableStateOf(false) }
+
     // Column: compact fixed header + compact collapsible info + chat fills rest.
     Column(Modifier.fillMaxSize()) {
-        AdvisorHeader(advisor, onBack)
+        AdvisorHeader(advisor, onBack = onBack, onClearChat = { confirmClear = true })
 
         // Compact info strip: collapsed by default so the chat owns the screen.
         CompactInfo(
@@ -257,6 +313,13 @@ private fun AdvisorScreen(vm: MainViewModel, advisor: Advisor, onBack: () -> Uni
             profile = profile,
             today = today,
             modifier = Modifier.weight(1f)
+        )
+    }
+
+    if (confirmClear) {
+        ClearChatDialog(
+            onConfirm = { vm.clearChat(advisor.key); confirmClear = false },
+            onDismiss = { confirmClear = false }
         )
     }
 }
@@ -358,7 +421,7 @@ private fun CompactInfo(
 }
 
 @Composable
-private fun AdvisorHeader(advisor: Advisor, onBack: () -> Unit) {
+private fun AdvisorHeader(advisor: Advisor, onBack: () -> Unit, onClearChat: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -380,7 +443,8 @@ private fun AdvisorHeader(advisor: Advisor, onBack: () -> Unit) {
             modifier = Modifier.weight(1f)
         )
         Text(advisor.emoji, fontSize = 17.sp)
-        Spacer(Modifier.width(6.dp))
+        ChatMenuButton(onClearChat = onClearChat, tint = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.width(2.dp))
     }
 }
 
@@ -502,8 +566,11 @@ private fun ChatPanel(
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = accent.copy(alpha = .12f),
-                        modifier = Modifier.clickable(enabled = !busy) {
-                            if (!busy) { busy = true; vm.chat(channel, s) }
+                        modifier = Modifier.clickable {
+                            // A suggestion is only a shortcut: it fills the input so
+                            // the user can edit it. Nothing is sent until they press
+                            // send, so no API request happens on tap.
+                            input = s
                         }
                     ) {
                         Text(
