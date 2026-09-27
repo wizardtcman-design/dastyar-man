@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,7 +29,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.Prompts
 import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.data.SavedRecipe
@@ -39,7 +39,6 @@ import com.dastyar.app.ui.theme.Cyan
 import com.dastyar.app.ui.theme.Green
 import com.dastyar.app.ui.theme.Purple
 import com.dastyar.app.ui.theme.Rose
-import kotlinx.coroutines.launch
 
 /**
  * The cooking tab.
@@ -88,14 +87,20 @@ private fun CookingHome(
     onOpenLunch: () -> Unit,
     onOpenDinner: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val saved by vm.savedRecipes.collectAsState()
 
     var servings by remember { mutableIntStateOf(4) }
     var pantryInput by remember { mutableStateOf("") }
-    var pantryResult by remember { mutableStateOf<List<Recipe>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+
+    val pantryText by vm.pantryText.collectAsState()
+    val busy by vm.pantryLoading.collectAsState()
+    val vmError by vm.pantryError.collectAsState()
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    val pantryResult = remember(pantryText) {
+        pantryText?.let { parseRecipes(it) } ?: emptyList()
+    }
+    val error = localError ?: vmError
 
     Column(
         Modifier
@@ -169,21 +174,10 @@ private fun CookingHome(
         GradientButton("🍳 پیشنهاد غذا", enabled = !busy) {
             val text = pantryInput.trim()
             if (text.isEmpty()) {
-                error = "اول مواد موجود در خانه را بنویس."
+                localError = "اول مواد موجود در خانه را بنویس."
             } else if (!busy) {
-                busy = true; error = null
-                scope.launch {
-                    val res = AiClient.chat(
-                        system = Prompts.base(),
-                        history = emptyList(),
-                        userMessage = Prompts.pantrySuggestPrompt(text, servings)
-                    ).map { parseRecipes(it) }
-                    busy = false
-                    res.onSuccess {
-                        pantryResult = it
-                        if (it.isEmpty()) error = "پیشنهادی پیدا نشد؛ دوباره امتحان کن."
-                    }.onFailure { error = it.message ?: "خطا در دریافت پیشنهاد" }
-                }
+                localError = null
+                vm.suggestFromPantry(text, servings)
             }
         }
 
@@ -212,6 +206,11 @@ private fun CookingHome(
                     onSave = { vm.saveRecipe(d.name, "خانگی", d.raw) }
                 )
                 Spacer(Modifier.height(10.dp))
+            }
+        } else if (pantryText != null && !busy && error == null) {
+            Spacer(Modifier.height(12.dp))
+            DastyarCard(accent = MaterialTheme.colorScheme.error) {
+                Text("⚠️ پیشنهادی پیدا نشد؛ دوباره امتحان کن.", fontSize = 13.sp)
             }
         }
 
@@ -317,6 +316,18 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
 
     // Clear busy as soon as the assistant's reply reaches the history.
     LaunchedEffect(messages.size) { if (busy) busy = false }
+
+    // The first time this meal page is opened with no history, ask for a
+    // suggestion automatically so the user sees a dish without pressing the
+    // button. It runs once per empty conversation: the flag is kept per channel,
+    // and an existing history is left untouched.
+    var autoAsked by rememberSaveable(meal.channel) { mutableStateOf(false) }
+    LaunchedEffect(meal.channel, messages.isEmpty()) {
+        if (!autoAsked && messages.isEmpty() && !busy) {
+            autoAsked = true
+            send(Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()))
+        }
+    }
 
     Column(
         Modifier

@@ -642,6 +642,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteRecipe(id: Long) = viewModelScope.launch(Dispatchers.IO) { dao.deleteSavedRecipe(id) }
 
+    // ---- pantry suggestion ("با چیزهایی که در خانه دارم") ----
+    //
+    // Runs the exact same request path as the working meal chat (same scope,
+    // same AiClient.chat, same model chain), so it cannot fail for reasons
+    // that only affect one screen. The screen observes these flows instead of
+    // launching its own coroutine, which also prevents duplicate requests.
+
+    private val _pantryText = MutableStateFlow<String?>(null)
+    val pantryText: StateFlow<String?> = _pantryText.asStateFlow()
+
+    private val _pantryLoading = MutableStateFlow(false)
+    val pantryLoading: StateFlow<Boolean> = _pantryLoading.asStateFlow()
+
+    private val _pantryError = MutableStateFlow<String?>(null)
+    val pantryError: StateFlow<String?> = _pantryError.asStateFlow()
+
+    private var pantryRunning = false
+
+    fun suggestFromPantry(ingredients: String, servings: Int) {
+        val text = ingredients.trim()
+        if (text.isEmpty() || pantryRunning) return
+        pantryRunning = true
+        _pantryLoading.value = true
+        _pantryError.value = null
+        viewModelScope.launch {
+            val res = AiClient.chat(
+                system = Prompts.base(),
+                history = emptyList(),
+                userMessage = Prompts.pantrySuggestPrompt(text, servings)
+            )
+            _pantryLoading.value = false
+            pantryRunning = false
+            res.onSuccess { _pantryText.value = it }
+                .onFailure { _pantryError.value = it.message ?: "خطا در دریافت پیشنهاد" }
+        }
+    }
+
+    fun clearPantry() {
+        _pantryText.value = null
+        _pantryError.value = null
+    }
+
     // -------------------------------------------------------------- learning
 
     /**
