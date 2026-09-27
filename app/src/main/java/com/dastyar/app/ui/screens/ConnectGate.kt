@@ -42,7 +42,10 @@ fun ConnectGate(onConnected: () -> Unit) {
     // recomposition so the "ادامه" button reflects the new connection at once.
     var connected by remember { mutableIntStateOf(0) }
 
-    var orKey by remember { mutableStateOf("") }
+    // Which text provider is selected, and the key typed for it. Kept in
+    // Compose state so switching providers or saving a key updates the UI at once.
+    var selectedProviderId by remember { mutableStateOf(ServiceKeys.textProviderId()) }
+    var keyInput by remember { mutableStateOf("") }
     var orStatus by remember { mutableStateOf<AiClient.ConnectResult?>(null) }
     var orBusy by remember { mutableStateOf(false) }
 
@@ -69,11 +72,14 @@ fun ConnectGate(onConnected: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // ---------------------------------------------------- OpenRouter
+        // ------------------------------------------------- text provider
+        // One card, two providers: the user picks which service handles text and
+        // enters the matching key. Whichever is chosen is used everywhere in the
+        // app, so there is a single place to decide this.
         DastyarCard(accent = Purple) {
-            SectionTitle("OpenRouter", "💬")
+            SectionTitle("سرویس متن (چت)", "💬")
             Spacer(Modifier.height(6.dp))
-            ServiceStatus(ServiceKeys.openRouterState().name)
+            ServiceStatus(ServiceKeys.textState().name)
             Spacer(Modifier.height(8.dp))
             Text(
                 "برای چت و همه قابلیت‌های متنی (پیشنهاد روزانه، چرخه، پوست، " +
@@ -82,11 +88,38 @@ fun ConnectGate(onConnected: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(10.dp))
+
+            ChoiceDropdown(
+                label = "انتخاب سرویس",
+                options = AiProviders.textProviders.map {
+                    DropdownOption(it.id, it.label)
+                },
+                selectedId = selectedProviderId,
+                modifier = Modifier.fillMaxWidth()
+            ) { id ->
+                ServiceKeys.setTextProvider(ctx, id)
+                selectedProviderId = id
+                orStatus = null
+                keyInput = ""
+                connected++
+            }
+
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
-                value = orKey,
-                onValueChange = { orKey = it.trim() },
-                label = { Text("OpenRouter API Key") },
-                placeholder = { Text("sk-or-v1-…") },
+                value = keyInput,
+                onValueChange = { keyInput = it.trim() },
+                label = {
+                    Text(
+                        if (selectedProviderId == AiProviders.codeCraft.id)
+                            "CodeCraft API Key" else "OpenRouter API Key"
+                    )
+                },
+                placeholder = {
+                    Text(
+                        if (selectedProviderId == AiProviders.codeCraft.id)
+                            "cc_…" else "sk-or-v1-…"
+                    )
+                },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true,
@@ -95,24 +128,35 @@ fun ConnectGate(onConnected: () -> Unit) {
                     imeAction = ImeAction.Done
                 )
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "کلید فعلی: " + gateMask(ServiceKeys.textKey()),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(10.dp))
             GradientButton(
                 text = if (orBusy) "در حال بررسی…" else "اتصال و بررسی",
-                enabled = !orBusy && orKey.isNotBlank()
+                enabled = !orBusy && keyInput.isNotBlank()
             ) {
                 if (orBusy) return@GradientButton
                 orBusy = true; orStatus = null
                 scope.launch {
-                    val (r, caps) = AiClient.testProvider(AiProviders.openRouter, orKey.trim())
+                    val provider = AiProviders.byId(selectedProviderId)
+                    val (r, caps) = AiClient.testProvider(provider, keyInput.trim())
                     orBusy = false; orStatus = r
                     if (r.ok) {
-                        ServiceKeys.saveOpenRouter(
-                            ctx, orKey.trim(),
-                            imageModel = caps?.imageModel ?: AiProviders.openRouter.imageModel,
-                            supportsImg = caps?.supportsImage ?: false,
-                            supportsEdit = caps?.supportsEdit ?: false
-                        )
-                        orKey = ""
+                        if (provider.id == AiProviders.codeCraft.id) {
+                            ServiceKeys.saveCodeCraft(ctx, keyInput.trim())
+                        } else {
+                            ServiceKeys.saveOpenRouter(
+                                ctx, keyInput.trim(),
+                                imageModel = caps?.imageModel ?: provider.imageModel,
+                                supportsImg = caps?.supportsImage ?: false,
+                                supportsEdit = caps?.supportsEdit ?: false
+                            )
+                        }
+                        keyInput = ""
                         connected++
                     }
                 }
@@ -256,6 +300,12 @@ fun ConnectGate(onConnected: () -> Unit) {
 
         Spacer(Modifier.height(30.dp))
     }
+}
+
+/** Shows only the head of a key, never the whole secret. */
+private fun gateMask(v: String?): String {
+    if (v.isNullOrBlank()) return "وارد نشده"
+    return if (v.length <= 10) "••••" else v.take(6) + "…" + v.takeLast(4)
 }
 
 @Composable

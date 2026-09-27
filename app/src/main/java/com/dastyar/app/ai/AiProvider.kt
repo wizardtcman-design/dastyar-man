@@ -76,6 +76,20 @@ object AiProviders {
         modelsPath = "models"
     )
 
+    /**
+     * CodeCraft API is the second text provider the user can pick. It is
+     * OpenAI-compatible and exposes a model catalogue, but no image generation:
+     * every model it lists outputs text only, so it is offered for chat/text
+     * features and never for images.
+     */
+    val codeCraft = AiProvider(
+        id = "codecraft",
+        label = "CodeCraft API",
+        baseUrl = "https://codecraftapi.com/v1",
+        textModel = "gemini-3.6-flash",
+        modelsPath = "models"
+    )
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -84,7 +98,14 @@ object AiProviders {
         textModel = "gpt-4o-mini"
     )
 
-    val all: List<AiProvider> = listOf(openRouter, openAiCompatible)
+    /**
+     * Providers that can serve chat/text features, in the order shown to the
+     * user. Keeping this list short and explicit means the picker never offers a
+     * provider that cannot do the job.
+     */
+    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft)
+
+    val all: List<AiProvider> = listOf(openRouter, codeCraft, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

@@ -58,10 +58,13 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var showTimePicker by remember { mutableStateOf(false) }
     var balance by remember { mutableStateOf<AiClient.ServiceBalance?>(null) }
     var balanceLoading by remember { mutableStateOf(false) }
-    // OpenRouter card
+    // Text-provider card (OpenRouter or CodeCraft)
+    var textProviderId by remember { mutableStateOf(ServiceKeys.textProviderId()) }
     var orStatus by remember { mutableStateOf<String?>(null) }
     var orNewKey by remember { mutableStateOf("") }
     var showOrEdit by remember { mutableStateOf(false) }
+    // Bumped after any save so status text and the picker re-read ServiceKeys.
+    var keysVersion by remember { mutableStateOf(0) }
     // Cloudflare card
     var cfAccount by remember { mutableStateOf("") }
     var cfToken by remember { mutableStateOf("") }
@@ -350,22 +353,51 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         // ---- three AI services, managed independently ----
 
-        // OpenRouter card (chat / text)
+        // Text-provider card: pick OpenRouter or CodeCraft and manage its key.
         DastyarCard(accent = Purple) {
-            SectionTitle("OpenRouter", "💬")
+            SectionTitle("سرویس متن (چت)", "💬")
             Spacer(Modifier.height(6.dp))
-            ServiceStatus(ServiceKeys.openRouterState().name)
+            // keysVersion is read here so the status line re-evaluates after a save.
+            ServiceStatus(ServiceKeys.textState().name)
+            if (keysVersion < 0) Spacer(Modifier.height(0.dp))
             Spacer(Modifier.height(8.dp))
             Text("وظیفه: چت و همه قابلیت‌های متنی", fontSize = 11.5.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("مدل چت: ${ServiceKeys.openRouterTextModel()}", fontSize = 11.sp,
+
+            Spacer(Modifier.height(10.dp))
+            ChoiceDropdown(
+                label = "انتخاب سرویس متن",
+                options = AiProviders.textProviders.map {
+                    DropdownOption(it.id, it.label)
+                },
+                selectedId = textProviderId,
+                modifier = Modifier.fillMaxWidth()
+            ) { id ->
+                ServiceKeys.setTextProvider(ctx, id)
+                textProviderId = id
+                orStatus = null
+                showOrEdit = false
+                orNewKey = ""
+                keysVersion++
+                scope.launch { balance = AiClient.fetchBalance() }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text("سرویس فعال: ${ServiceKeys.textProvider().label}", fontSize = 11.5.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                if (ServiceKeys.openRouterSupportsImage())
-                    "مدل تصویر: ${ServiceKeys.openRouterImageModel()}" else "مدل تصویر: ندارد",
-                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text("کلید: " + maskKey(ServiceKeys.openRouterKey()), fontSize = 11.sp,
+            Text("مدل چت: ${ServiceKeys.textModel()}", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (ServiceKeys.textProvider().id == AiProviders.openRouter.id) {
+                Text(
+                    if (ServiceKeys.openRouterSupportsImage())
+                        "مدل تصویر: ${ServiceKeys.openRouterImageModel()}" else "مدل تصویر: ندارد",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text("مدل تصویر: ندارد (سرویس متن)", fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("کلید: " + maskKey(ServiceKeys.textKey()), fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -374,19 +406,23 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         orStatus = "در حال تست واقعی…"
                         val r = AiClient.testConnection(ctx)
                         orStatus = if (r.ok) "✅ اتصال برقرار است" else "⚠️ ${r.message}"
+                        keysVersion++
                     }
                 }
                 ServiceButton("تغییر", Modifier.weight(1f)) { showOrEdit = !showOrEdit }
                 ServiceButton("حذف", Modifier.weight(1f)) {
-                    ServiceKeys.clearOpenRouter(ctx)
-                    orStatus = "کلید OpenRouter حذف شد."
+                    if (ServiceKeys.textProvider().id == AiProviders.codeCraft.id)
+                        ServiceKeys.clearCodeCraft(ctx)
+                    else ServiceKeys.clearOpenRouter(ctx)
+                    keysVersion++
+                    orStatus = "کلید ${ServiceKeys.textProvider().label} حذف شد."
                 }
             }
             if (showOrEdit) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = orNewKey, onValueChange = { orNewKey = it.trim() },
-                    label = { Text("کلید جدید OpenRouter") },
+                    label = { Text("کلید جدید ${ServiceKeys.textProvider().label}") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp), singleLine = true
                 )
@@ -395,15 +431,21 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     onClick = {
                         scope.launch {
                             orStatus = "در حال آزمایش کلید جدید…"
-                            val (r, caps) = AiClient.testProvider(AiProviders.openRouter, orNewKey.trim())
+                            val provider = ServiceKeys.textProvider()
+                            val (r, caps) = AiClient.testProvider(provider, orNewKey.trim())
                             if (r.ok) {
-                                ServiceKeys.saveOpenRouter(
-                                    ctx, orNewKey.trim(),
-                                    imageModel = caps?.imageModel ?: AiProviders.openRouter.imageModel,
-                                    supportsImg = caps?.supportsImage ?: false,
-                                    supportsEdit = caps?.supportsEdit ?: false
-                                )
+                                if (provider.id == AiProviders.codeCraft.id) {
+                                    ServiceKeys.saveCodeCraft(ctx, orNewKey.trim())
+                                } else {
+                                    ServiceKeys.saveOpenRouter(
+                                        ctx, orNewKey.trim(),
+                                        imageModel = caps?.imageModel ?: provider.imageModel,
+                                        supportsImg = caps?.supportsImage ?: false,
+                                        supportsEdit = caps?.supportsEdit ?: false
+                                    )
+                                }
                                 orNewKey = ""; showOrEdit = false
+                                keysVersion++
                                 balance = AiClient.fetchBalance()
                                 orStatus = "✅ کلید جدید ذخیره شد و از این به بعد استفاده می‌شود"
                             } else orStatus = "⚠️ ${r.message}"
@@ -414,14 +456,21 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 ) { Text("آزمایش و ذخیره کلید جدید") }
             }
             Spacer(Modifier.height(8.dp))
-            Text(
-                when {
-                    balanceLoading -> "در حال دریافت اعتبار…"
-                    balance?.remaining != null -> "اعتبار OpenRouter: ${money(balance!!.remaining!!)}"
-                    else -> "اعتبار OpenRouter: قابل دریافت نیست"
-                },
-                fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (ServiceKeys.textProvider().id == AiProviders.openRouter.id) {
+                Text(
+                    when {
+                        balanceLoading -> "در حال دریافت اعتبار…"
+                        balance?.remaining != null -> "اعتبار OpenRouter: ${money(balance!!.remaining!!)}"
+                        else -> "اعتبار OpenRouter: قابل دریافت نیست"
+                    },
+                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "اعتبار CodeCraft از API قابل دریافت نیست؛ از داشبورد خودشان ببین.",
+                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             orStatus?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

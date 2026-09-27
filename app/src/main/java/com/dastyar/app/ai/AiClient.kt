@@ -52,25 +52,25 @@ object AiClient {
     private const val IMAGE_MAX_TOKENS = 2000
 
     /**
-     * The provider actually used: a user-supplied provider wins when present,
-     * otherwise the built-in OpenRouter default. Screens never care which one,
-     * so a new provider only needs an [AiProviders] entry.
+     * The provider that currently serves chat/text. It is whichever the user
+     * picked (OpenRouter or CodeCraft); screens never care which one, so a new
+     * provider only needs an [AiProviders] entry.
      */
-    fun activeProvider(): AiProvider = AiProviders.openRouter
+    fun activeProvider(): AiProvider = ServiceKeys.textProvider()
 
     /**
-     * The key for OpenRouter. It comes only from the user's own entry, stored in
-     * the app's private preferences -- never from a compiled-in constant, the
-     * source tree or the APK.
+     * The key for the selected text provider. It comes only from the user's own
+     * entry, stored in the app's private preferences -- never from a compiled-in
+     * constant, the source tree or the APK.
      */
     private fun effectiveKey(): String =
-        ServiceKeys.openRouterKey()?.takeIf { it.isNotBlank() }.orEmpty()
+        ServiceKeys.textKey().takeIf { it.isNotBlank() }.orEmpty()
 
     /** True once the user has entered a key, so text AI features are usable. */
     val chatConfigured: Boolean get() = effectiveKey().isNotBlank()
 
-    /** True when OpenRouter is connected and verified. */
-    val ready: Boolean get() = ServiceKeys.openRouterReady()
+    /** True when the selected text provider is connected and verified. */
+    val ready: Boolean get() = ServiceKeys.textReady()
 
     /** The real reason a provider image attempt failed, for the image engine. */
     @Volatile
@@ -90,13 +90,20 @@ object AiClient {
     var lastBalance: ServiceBalance? = null
         private set
 
-    /** Whether OpenRouter itself can generate images (needs paid credit). */
-    val imageConfigured: Boolean get() = chatConfigured && ServiceKeys.openRouterSupportsImage()
+    /**
+     * Whether OpenRouter itself can generate images (needs paid credit). This is
+     * the tertiary image route and depends only on the OpenRouter key, not on
+     * which provider serves text.
+     */
+    val imageConfigured: Boolean
+        get() = !ServiceKeys.openRouterKey().isNullOrBlank() &&
+                ServiceKeys.openRouterSupportsImage()
 
     /** A short, Persian-friendly description of the active service. */
     fun activeServiceLabel(): String = activeProvider().label
 
-    private fun textModel(): String = ServiceKeys.openRouterTextModel()
+    private fun textModel(): String =
+        ServiceKeys.textModel().ifBlank { activeProvider().textModel }
 
     // -------------------------------------------------- model capabilities
 
@@ -182,7 +189,7 @@ object AiClient {
         val message: String
     )
 
-    /** Verifies the saved OpenRouter key with a tiny real chat request. */
+    /** Verifies the saved text-provider key with a tiny real chat request. */
     suspend fun testConnection(ctx: android.content.Context): ConnectResult =
         testKey(ctx, effectiveKey())
 
@@ -208,16 +215,23 @@ object AiClient {
                 if (r.ok) {
                     // The chain may have fallen back to a free model: remember
                     // which model actually answers so chat keeps working.
-                    if (candidate.model != ServiceKeys.openRouterTextModel()) {
-                        ServiceKeys.setOpenRouterTextModel(ctx, candidate.model)
+                    if (candidate.model != ServiceKeys.textModel()) {
+                        ServiceKeys.setTextModel(ctx, candidate.model)
                     }
-                    val caps = resolveImageModel(p, key)
-                    if (caps != null) {
-                        ServiceKeys.updateOpenRouterCaps(
-                            ctx, caps.id, supportsImg = true, supportsEdit = caps.imageInput
-                        )
+                    // Image capabilities are only meaningful for OpenRouter,
+                    // whose chat endpoint can also return images. CodeCraft has
+                    // no image models at all, so never probe it for one.
+                    if (p.supportsImages || p.id == AiProviders.openRouter.id) {
+                        val caps = resolveImageModel(p, key)
+                        if (caps != null && p.id == AiProviders.openRouter.id) {
+                            ServiceKeys.updateOpenRouterCaps(
+                                ctx, caps.id, supportsImg = true, supportsEdit = caps.imageInput
+                            )
+                        } else {
+                            ServiceKeys.setTextProviderState(ctx, ServiceKeys.State.CONNECTED)
+                        }
                     } else {
-                        ServiceKeys.setOpenRouterState(ctx, ServiceKeys.State.CONNECTED)
+                        ServiceKeys.setTextProviderState(ctx, ServiceKeys.State.CONNECTED)
                     }
                     lastFree = candidate.model
                     return@withContext ConnectResult(
@@ -231,7 +245,7 @@ object AiClient {
                 // A bad key or a network fault is not model-specific: stop.
                 if (r.kind == FailKind.BAD_KEY || r.kind == FailKind.NETWORK) break
             }
-            ServiceKeys.setOpenRouterState(ctx, orStateFor(lastResult.kind))
+            ServiceKeys.setTextProviderState(ctx, orStateFor(lastResult.kind))
             lastResult
         }
 
@@ -288,10 +302,10 @@ object AiClient {
 
         val report = StringBuilder()
         report.append("سرویس: ${p.label}\n")
-        report.append("مدل متن: ${ServiceKeys.openRouterTextModel()}\n\n")
+        report.append("مدل متن: ${textModel()}\n\n")
         try {
             val body = buildJsonObject {
-                put("model", ServiceKeys.openRouterTextModel())
+                put("model", textModel())
                 put("max_tokens", 8)
                 put("messages", buildJsonArray {
                     add(buildJsonObject { put("role", "user"); put("content", "سلام") })
@@ -376,16 +390,16 @@ object AiClient {
             false, FailKind.NO_KEY, "کلید خالی است."
         ) to null
 
-        // Try the model the user would actually use, then free models, so a
-        // valid free-account key is not rejected just because the default model
-        // is paid. The first model that answers is remembered.
+        // Try the model the user would actually use, then free models (OpenRouter
+        // only), so a valid free-account key is not rejected just because the
+        // default model is paid. The first model that answers is remembered.
         var last = ConnectResult(false, FailKind.PROVIDER, "اتصال برقرار نشد.")
-        var chosen = provider.textModel
         for (candidate in textModelChain(provider, key)) {
             val r = probeModelFor(provider, key, candidate.model)
             if (r.ok) {
-                chosen = candidate.model
-                val caps = resolveImageModel(provider, key)
+                // CodeCraft has no image models, so never probe it for one.
+                val caps = if (provider.id == AiProviders.openRouter.id)
+                    resolveImageModel(provider, key) else null
                 val dc = if (caps != null)
                     DiscoveredCaps(caps.id, supportsImage = true, supportsEdit = caps.imageInput)
                 else DiscoveredCaps("", supportsImage = false, supportsEdit = false)
@@ -589,7 +603,7 @@ object AiClient {
      * nothing to fall back to.
      */
     private fun candidateKeys(p: AiProvider): List<String> =
-        ServiceKeys.openRouterKey()?.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+        ServiceKeys.textKey().takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
 
     private suspend fun complete(
         system: String,
@@ -695,8 +709,12 @@ object AiClient {
      * whenever it is available.
      */
     private fun textModelChain(provider: AiProvider): List<ModelAttempt> {
-        val primary = ServiceKeys.openRouterTextModel().ifBlank { provider.textModel }
-        return buildChain(provider, primary, freeTextModels())
+        val primary = ServiceKeys.textModel().ifBlank { provider.textModel }
+        // The free-model fallback exists because OpenRouter free accounts cannot
+        // reach paid models. CodeCraft is a paid gateway with no free tier, so
+        // its configured model is the only one tried.
+        val free = if (provider.id == AiProviders.openRouter.id) freeTextModels() else emptyList()
+        return buildChain(provider, primary, free)
     }
 
     /**
@@ -705,7 +723,8 @@ object AiClient {
      * can really reach.
      */
     private fun textModelChain(provider: AiProvider, key: String): List<ModelAttempt> {
-        val free = freeTextModelsFor(provider, key)
+        val free = if (provider.id == AiProviders.openRouter.id)
+            freeTextModelsFor(provider, key) else emptyList()
         return buildChain(provider, provider.textModel, free)
     }
 

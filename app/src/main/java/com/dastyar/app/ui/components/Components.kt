@@ -4,9 +4,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -179,6 +186,68 @@ fun StatTile(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2
                 )
+            }
+        }
+    }
+}
+
+/** One entry in a [ChoiceDropdown]. */
+data class DropdownOption(val id: String, val label: String)
+
+/**
+ * Simple right-aligned dropdown used to pick which service handles a job. It is
+ * plain Material3 so it renders the same on every Android version the app
+ * supports, and RTL-safe because the whole tree is laid out RTL.
+ */
+@Composable
+fun ChoiceDropdown(
+    label: String,
+    options: List<DropdownOption>,
+    selectedId: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onSelect: (String) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    val current = options.firstOrNull { it.id == selectedId } ?: options.firstOrNull()
+
+    Column(modifier) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        Box {
+            OutlinedButton(
+                onClick = { open = true },
+                enabled = enabled,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(current?.label ?: "—", modifier = Modifier.weight(1f), fontSize = 14.sp)
+                Text("▾", fontSize = 14.sp)
+            }
+            DropdownMenu(
+                expanded = open,
+                onDismissRequest = { open = false }
+            ) {
+                options.forEach { opt ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (opt.id == selectedId) "✓ " else "") + opt.label,
+                                fontSize = 14.sp,
+                                fontWeight = if (opt.id == selectedId) FontWeight.Bold
+                                else FontWeight.Normal
+                            )
+                        },
+                        onClick = {
+                            open = false
+                            if (opt.id != selectedId) onSelect(opt.id)
+                        }
+                    )
+                }
             }
         }
     }
