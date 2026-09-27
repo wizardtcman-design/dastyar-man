@@ -118,6 +118,19 @@ interface DastyarDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveSuggestion(s: DailySuggestion)
 
+    // ---- Saved images ----
+    @Query("SELECT * FROM saved_images ORDER BY createdAt DESC")
+    fun savedImagesFlow(): Flow<List<SavedImage>>
+
+    @Query("SELECT * FROM saved_images ORDER BY createdAt DESC LIMIT :n")
+    suspend fun recentSavedImages(n: Int): List<SavedImage>
+
+    @Insert
+    suspend fun addSavedImage(img: SavedImage): Long
+
+    @Query("DELETE FROM saved_images WHERE id = :id")
+    suspend fun deleteSavedImage(id: Long)
+
     // ---- Data management ----
     @Query("DELETE FROM checkins")
     suspend fun clearCheckIns()

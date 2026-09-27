@@ -12,6 +12,7 @@ import com.dastyar.app.data.DastyarDatabase
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Health
 import com.dastyar.app.data.Profile
+import com.dastyar.app.data.SavedImage
 import com.dastyar.app.data.SmartFact
 import com.dastyar.app.data.Task
 import com.dastyar.app.data.WeightEntry
@@ -610,6 +611,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun chatFlow(channel: String) = dao.chatFlow(channel)
 
     fun clearChat(channel: String) = viewModelScope.launch(Dispatchers.IO) { dao.clearChat(channel) }
+
+    // ------------------------------------------------------- saved images
+
+    val savedImages: StateFlow<List<SavedImage>> = dao.savedImagesFlow()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Stores image bytes in the app and records them for "تصاویر من". */
+    fun saveImage(bytes: ByteArray, prompt: String, kind: String) = viewModelScope.launch(Dispatchers.IO) {
+        val name = com.dastyar.app.util.GallerySaver.saveToApp(getApplication(), bytes)
+        dao.addSavedImage(
+            SavedImage(fileName = name, prompt = prompt, kind = kind)
+        )
+    }
+
+    fun deleteImage(id: Long, fileName: String) = viewModelScope.launch(Dispatchers.IO) {
+        com.dastyar.app.util.GallerySaver.deleteFromApp(getApplication(), fileName)
+        dao.deleteSavedImage(id)
+    }
 
     // -------------------------------------------------------------- learning
 

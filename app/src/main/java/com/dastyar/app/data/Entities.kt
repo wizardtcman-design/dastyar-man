@@ -32,3 +32,17 @@ data class DailySuggestion(
     val waterGoal: Int = 8,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+/**
+ * An image produced or edited by the user, kept inside the app so it never has
+ * to be generated again. The PNG bytes live in the app's private files
+ * directory; the row stores the file name plus the prompt that made it.
+ */
+@Entity(tableName = "saved_images")
+data class SavedImage(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val fileName: String = "",          // relative to filesDir/images
+    val prompt: String = "",
+    val kind: String = "generate",      // generate / edit
+    val createdAt: Long = System.currentTimeMillis()
+)
