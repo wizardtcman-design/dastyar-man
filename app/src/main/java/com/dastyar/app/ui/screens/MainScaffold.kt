@@ -54,7 +54,11 @@ fun MainScaffold(vm: MainViewModel) {
             NavigationBar(
                 tonalElevation = 0.dp,
                 containerColor = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.height(68.dp)
+                // Edge-to-edge: keep the tab bar above the system navigation bar.
+                // Height is a minimum so the inset can be added on top of it.
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .heightIn(min = 68.dp)
             ) {
                 tabs.forEach { t ->
                     NavigationBarItem(
@@ -80,7 +84,15 @@ fun MainScaffold(vm: MainViewModel) {
             }
         }
     ) { pad ->
-        Box(Modifier.padding(pad)) {
+        // Edge-to-edge is on, so the Scaffold no longer reserves the system bars.
+        // Apply the status-bar inset at the top; the bottom bar inset is handled
+        // by the NavigationBar itself. Screens that host a chat composer add the
+        // IME inset on their own, so the keyboard never covers the input.
+        Box(
+            Modifier
+                .padding(pad)
+                .statusBarsPadding()
+        ) {
             when (tab) {
                 "home" -> HomeScreen(
                     vm = vm,

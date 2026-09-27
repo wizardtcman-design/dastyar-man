@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -40,6 +41,14 @@ class MainActivity : ComponentActivity() {
         applyPersianLocale()
 
         super.onCreate(savedInstanceState)
+
+        // Explicit, deterministic edge-to-edge. On targetSdk 34 the system does
+        // not reliably resize the window for the keyboard any more; with insets
+        // handed to Compose, the chat screens consume the IME inset themselves
+        // and the message list shrinks while the composer stays above the
+        // keyboard. The status bar stays excluded so headers are not overlapped.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         DailyReminder.reschedule(this)
         val openCheckIn = intent?.getBooleanExtra(EXTRA_OPEN_CHECKIN, false) == true
 
