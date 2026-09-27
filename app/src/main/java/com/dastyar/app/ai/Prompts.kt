@@ -134,10 +134,20 @@ object Prompts {
                         "پاک‌سازی، مرطوب‌سازی و محافظت از آفتاب راهنمایی کن."
                 "fatigue" -> "— نقش فعلی —\nتو در بخش «بی‌رمقی و انرژی» هستی. فقط درباره خواب، آب، " +
                         "تغذیه، فعالیت سبک و مدیریت استرس راهنمایی کن."
+                "lunch" -> "— نقش فعلی —\nتو در بخش «پیشنهاد ناهار» هستی. فقط دربارهٔ غذای ناهار " +
+                        "ایرانی و خانگی پیشنهاد بده و به سؤال‌های کاربر دربارهٔ همان غذاها جواب بده."
+                "dinner" -> "— نقش فعلی —\nتو در بخش «پیشنهاد شام» هستی. فقط دربارهٔ غذای شام " +
+                        "ایرانی و خانگی (سبک‌تر و ساده‌تر) پیشنهاد بده و به سؤال‌های کاربر جواب بده."
                 else -> "— نقش فعلی —\nتو دستیار عمومی کاربری. به هر موضوعی که پرسید کمک کن."
             }
         )
         sb.appendLine()
+        // The two cooking chats always answer as a recipe, using the same
+        // marker format the cooking screen parses into cards.
+        if (channel == "lunch" || channel == "dinner") {
+            sb.appendLine(COOKING_RULES)
+            sb.appendLine()
+        }
         sb.append(SAFETY)
         return sb.toString()
     }

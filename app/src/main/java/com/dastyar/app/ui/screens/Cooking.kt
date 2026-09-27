@@ -6,11 +6,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.Prompts
+import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.data.SavedRecipe
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
@@ -35,50 +42,60 @@ import com.dastyar.app.ui.theme.Rose
 import kotlinx.coroutines.launch
 
 /**
- * The cooking tab. Three ways to get real, home-cookable Iranian food:
- * a lunch/dinner suggestion, a "what should I cook today?" action, and a
- * suggestion built from whatever the user has at home. Every result is a
- * structured recipe the user can read and save.
+ * The cooking tab.
  *
- * This screen only reads from the existing AI client ([AiClient.chat]); it adds
- * no provider, key or endpoint of its own.
+ * The home screen stays clean: a compact header, two cards that open the
+ * dedicated lunch and dinner chats, and the "what's in my kitchen" suggestion
+ * whose results appear inline here. The lunch and dinner pages are two separate
+ * specialist chats — each with its own history, its own "new suggestion"
+ * button and a chat composer — so a suggestion never clutters the home screen.
+ *
+ * Everything runs on the existing chat API ([AiClient.chat] via `vm.chat`); no
+ * provider, key or endpoint is added.
  */
 @Composable
 fun CookingScreen(vm: MainViewModel) {
+    var page by remember { mutableStateOf("home") }   // home / lunch / dinner
+
+    when (page) {
+        "lunch" -> MealChatScreen(vm = vm, meal = Meal.LUNCH, onBack = { page = "home" })
+        "dinner" -> MealChatScreen(vm = vm, meal = Meal.DINNER, onBack = { page = "home" })
+        else -> CookingHome(
+            vm = vm,
+            onOpenLunch = { page = "lunch" },
+            onOpenDinner = { page = "dinner" }
+        )
+    }
+}
+
+/** The two meal chats, each with its own identity, colour and chat channel. */
+private enum class Meal(
+    val channel: String,
+    val emoji: String,
+    val title: String,
+    val accent: Color,
+    val newLabel: String
+) {
+    LUNCH("lunch", "🍲", "پیشنهاد ناهار", Amber, "🔄 پیشنهاد ناهار جدید"),
+    DINNER("dinner", "🌙", "پیشنهاد شام", Purple, "🔄 پیشنهاد شام جدید")
+}
+
+// ------------------------------------------------------------------- home
+
+@Composable
+private fun CookingHome(
+    vm: MainViewModel,
+    onOpenLunch: () -> Unit,
+    onOpenDinner: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     val saved by vm.savedRecipes.collectAsState()
 
     var servings by remember { mutableIntStateOf(4) }
-    var filters by remember { mutableStateOf(setOf<String>()) }
-
-    // Shared loading/error state, so no two requests can run at once.
+    var pantryInput by remember { mutableStateOf("") }
+    var pantryResult by remember { mutableStateOf<List<Recipe>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
-    // Each slot keeps its own dishes, so a new request replaces only that slot.
-    var lunch by remember { mutableStateOf<List<Recipe>>(emptyList()) }
-    var dinner by remember { mutableStateOf<List<Recipe>>(emptyList()) }
-    var pantryDishes by remember { mutableStateOf<List<Recipe>>(emptyList()) }
-
-    var pantryInput by remember { mutableStateOf("") }
-
-    suspend fun ask(prompt: String): Result<List<Recipe>> =
-        AiClient.chat(
-            system = Prompts.base(),
-            history = emptyList(),
-            userMessage = prompt
-        ).map { parseRecipes(it) }
-
-    fun run(block: suspend () -> Result<List<Recipe>>, onOk: (List<Recipe>) -> Unit) {
-        if (busy) return
-        busy = true; error = null
-        scope.launch {
-            val res = block()
-            busy = false
-            res.onSuccess { if (it.isEmpty()) error = "پیشنهادی پیدا نشد؛ دوباره امتحان کن." else onOk(it) }
-                .onFailure { error = it.message ?: "خطا در دریافت پیشنهاد" }
-        }
-    }
 
     Column(
         Modifier
@@ -87,153 +104,11 @@ fun CookingScreen(vm: MainViewModel) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        CookingHeader(filters = filters, onToggleFilter = { f ->
-            filters = if (f in filters) filters - f else filters + f
-        }, servings = servings, onServings = { servings = it })
-
-        Spacer(Modifier.height(14.dp))
-
-        // ---- lunch ----
-        MealSection(
-            emoji = "🍲",
-            title = "پیشنهاد هوشمند ناهار",
-            accent = Amber,
-            dishes = lunch,
-            busy = busy,
-            onNew = { run({ ask(Prompts.mealSuggestPrompt("ناهار", servings, filters.toList())) }) { lunch = it } },
-            onSave = { d -> vm.saveRecipe(d.name, "ناهار", d.raw) }
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // ---- dinner ----
-        MealSection(
-            emoji = "🌙",
-            title = "پیشنهاد هوشمند شام",
-            accent = Purple,
-            dishes = dinner,
-            busy = busy,
-            onNew = { run({ ask(Prompts.mealSuggestPrompt("شام", servings, filters.toList())) }) { dinner = it } },
-            onSave = { d -> vm.saveRecipe(d.name, "شام", d.raw) }
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // ---- what should I cook today ----
-        GradientButton("🍽 امروز چی بپزم؟", enabled = !busy) {
-            run({ ask(Prompts.todaySuggestPrompt(servings, filters.toList())) }) {
-                lunch = it.take(1)
-                dinner = it.drop(1)
-            }
-        }
-
-        error?.let {
-            Spacer(Modifier.height(14.dp))
-            DastyarCard(accent = MaterialTheme.colorScheme.error) {
-                Text("⚠️ $it", fontSize = 13.sp)
-            }
-        }
-
-        if (busy) {
-            Spacer(Modifier.height(14.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp))
-                Text("در حال پیدا کردن غذا برای تو…", fontSize = 13.sp)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // ---- pantry ----
-        PantrySection(
-            input = pantryInput,
-            onInput = { pantryInput = it },
-            busy = busy,
-            dishes = pantryDishes,
-            onSuggest = {
-                val text = pantryInput.trim()
-                if (text.isEmpty()) {
-                    error = "اول مواد موجود در خانه را بنویس."
-                } else {
-                    run({ ask(Prompts.pantrySuggestPrompt(text, servings)) }) { pantryDishes = it }
-                }
-            },
-            onSave = { d -> vm.saveRecipe(d.name, "خانگی", d.raw) }
-        )
-
-        // ---- saved recipes ----
-        if (saved.isNotEmpty()) {
-            Spacer(Modifier.height(22.dp))
-            SectionTitle("غذاهای ذخیره‌شده", "♡")
-            Spacer(Modifier.height(10.dp))
-            saved.forEach { r ->
-                SavedRecipeCard(r, onDelete = { vm.deleteRecipe(r.id) })
-                Spacer(Modifier.height(10.dp))
-            }
-        }
-
-        Spacer(Modifier.height(34.dp))
-    }
-}
-
-// ----------------------------------------------------------------- header
-
-@Composable
-private fun CookingHeader(
-    filters: Set<String>,
-    onToggleFilter: (String) -> Unit,
-    servings: Int,
-    onServings: (Int) -> Unit
-) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Brush.horizontalGradient(listOf(Amber, Rose)))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = .22f)),
-                contentAlignment = Alignment.Center
-            ) { Text("🍳", fontSize = 16.sp) }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("آشپزی", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1)
-                Text(
-                    "امروز چی بپزم؟",
-                    color = Color.White.copy(alpha = .85f),
-                    fontSize = 10.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
+        CookingHeader()
 
         Spacer(Modifier.height(10.dp))
 
-        // filters — one scrollable row, never wraps out of the screen
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("💰 اقتصادی", "⏱ سریع", "🏠 ساده و خانگی").forEach { f ->
-                SelectChip(label = f, selected = f in filters, accent = Green, compact = true) {
-                    onToggleFilter(f)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        // servings — compact chips, horizontally scrollable
+        // servings — applies to the pantry suggestion on this screen
         Text("تعداد نفرات", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         Row(
@@ -248,102 +123,392 @@ private fun CookingHeader(
                     selected = servings == n,
                     accent = Cyan,
                     compact = true
-                ) { onServings(n) }
+                ) { servings = n }
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // ---- the two entry cards ----
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            EntryCard(
+                emoji = Meal.LUNCH.emoji,
+                title = "پیشنهاد ناهار",
+                accent = Meal.LUNCH.accent,
+                modifier = Modifier.weight(1f),
+                onClick = onOpenLunch
+            )
+            EntryCard(
+                emoji = Meal.DINNER.emoji,
+                title = "پیشنهاد شام",
+                accent = Meal.DINNER.accent,
+                modifier = Modifier.weight(1f),
+                onClick = onOpenDinner
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        // ---- pantry: input + inline results ----
+        SectionTitle("با چیزهایی که در خانه دارم", "🧺")
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = pantryInput,
+            onValueChange = { pantryInput = it },
+            placeholder = { Text("مثلاً: سیب‌زمینی، تخم‌مرغ، پیاز و گوجه", fontSize = 13.sp) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            minLines = 3,
+            maxLines = 6,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Green.copy(alpha = .35f)
+            )
+        )
+        Spacer(Modifier.height(10.dp))
+        GradientButton("🍳 پیشنهاد غذا", enabled = !busy) {
+            val text = pantryInput.trim()
+            if (text.isEmpty()) {
+                error = "اول مواد موجود در خانه را بنویس."
+            } else if (!busy) {
+                busy = true; error = null
+                scope.launch {
+                    val res = AiClient.chat(
+                        system = Prompts.base(),
+                        history = emptyList(),
+                        userMessage = Prompts.pantrySuggestPrompt(text, servings)
+                    ).map { parseRecipes(it) }
+                    busy = false
+                    res.onSuccess {
+                        pantryResult = it
+                        if (it.isEmpty()) error = "پیشنهادی پیدا نشد؛ دوباره امتحان کن."
+                    }.onFailure { error = it.message ?: "خطا در دریافت پیشنهاد" }
+                }
+            }
+        }
+
+        if (busy) {
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("در حال پیدا کردن غذا برای تو…", fontSize = 13.sp)
+            }
+        }
+        error?.let {
+            Spacer(Modifier.height(12.dp))
+            DastyarCard(accent = MaterialTheme.colorScheme.error) {
+                Text("⚠️ $it", fontSize = 13.sp)
+            }
+        }
+
+        if (pantryResult.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            pantryResult.forEach { d ->
+                RecipeCard(
+                    r = d,
+                    accent = Green,
+                    busy = busy,
+                    onSave = { vm.saveRecipe(d.name, "خانگی", d.raw) }
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+
+        // ---- saved recipes ----
+        if (saved.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            SectionTitle("غذاهای ذخیره‌شده", "♡")
+            Spacer(Modifier.height(10.dp))
+            saved.forEach { r ->
+                SavedRecipeCard(r, onDelete = { vm.deleteRecipe(r.id) })
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
+    }
+}
+
+@Composable
+private fun CookingHeader() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.horizontalGradient(listOf(Amber, Rose)))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = .22f)),
+            contentAlignment = Alignment.Center
+        ) { Text("🍳", fontSize = 16.sp) }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("آشپزی", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1)
+            Text(
+                "امروز چی بپزم؟",
+                color = Color.White.copy(alpha = .85f),
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
-// ------------------------------------------------------------- meal block
-
+/** One large, equal entry card that opens a dedicated meal chat. */
 @Composable
-private fun MealSection(
+private fun EntryCard(
     emoji: String,
     title: String,
     accent: Color,
-    dishes: List<Recipe>,
-    busy: Boolean,
-    onNew: () -> Unit,
-    onSave: (Recipe) -> Unit
+    modifier: Modifier,
+    onClick: () -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        SectionTitle(title, emoji)
+    Column(
+        modifier
+            .height(96.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, accent.copy(alpha = .4f), RoundedCornerShape(18.dp))
+            .clickable { onClick() }
+            .padding(12.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(emoji, fontSize = 24.sp)
+        Spacer(Modifier.height(6.dp))
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, maxLines = 2)
+        Text(
+            "پیشنهاد",
+            fontSize = 10.5.sp,
+            color = accent,
+            maxLines = 1
+        )
     }
-    Spacer(Modifier.height(10.dp))
+}
 
-    if (dishes.isEmpty()) {
-        DastyarCard(accent = accent) {
+// ------------------------------------------------------------ meal chat
+
+/**
+ * A dedicated, self-contained suggestion chat for one meal. It keeps its own
+ * history (its own chat channel), so lunch and dinner never mix, and the
+ * history survives leaving and re-entering the page. "پیشنهاد ... جدید" is just
+ * another message in the same conversation, so the user can press it many times
+ * and also type their own questions.
+ */
+@Composable
+private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
+    val messages by vm.chatFlow(meal.channel).collectAsState(initial = emptyList())
+    var input by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
+
+    fun send(text: String) {
+        val t = text.trim()
+        if (t.isEmpty() || busy) return
+        busy = true
+        vm.chat(meal.channel, t)
+    }
+
+    // Clear busy as soon as the assistant's reply reaches the history.
+    LaunchedEffect(messages.size) { if (busy) busy = false }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .imePadding()
+    ) {
+        // fixed back header with the same overflow menu as the other chats
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(meal.accent.copy(alpha = .26f), Rose.copy(alpha = .18f))
+                    )
+                )
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "بازگشت", modifier = Modifier.size(20.dp))
+            }
             Text(
-                "برای گرفتن پیشنهاد، دکمهٔ «پیشنهاد جدید» را بزن.",
-                fontSize = 12.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                meal.title,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = onNew,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("پیشنهاد جدید")
+            Text(meal.emoji, fontSize = 17.sp)
+            ChatOverflowMenu(onClear = { confirmClear = true })
+            Spacer(Modifier.width(2.dp))
+        }
+
+        // message list — the only part that shrinks for the keyboard
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            state = rememberLazyListState(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 12.dp)
+        ) {
+            item(key = "hint") {
+                Text(
+                    "این‌جا می‌توانی با دکمهٔ «${meal.newLabel}» پیشنهاد بگیری یا خودت سؤالت را بنویسی. " +
+                            "مثلاً: «یک غذای بدون گوشت پیشنهاد بده» یا «برای ۴ نفر بگو».",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            items(messages, key = { it.id }) { m ->
+                if (m.role == "user") {
+                    UserBubble(m)
+                } else {
+                    val recipes = remember(m.id, m.content) { parseRecipes(m.content) }
+                    if (recipes.isEmpty()) {
+                        AssistantTextBubble(m.content, meal.accent)
+                    } else {
+                        recipes.forEach { d ->
+                            RecipeCard(
+                                r = d,
+                                accent = meal.accent,
+                                busy = busy,
+                                onSave = { vm.saveRecipe(d.name, meal.title, d.raw) }
+                            )
+                        }
+                    }
+                }
+            }
+            if (busy) {
+                item(key = "busy") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("در حال پیدا کردن غذا برای تو…", fontSize = 13.sp)
+                    }
+                }
             }
         }
-    } else {
-        dishes.forEach { d ->
-            RecipeCard(d, accent = accent, busy = busy, onNew = onNew, onSave = { onSave(d) })
-            Spacer(Modifier.height(10.dp))
-        }
-        OutlinedButton(
-            onClick = onNew,
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp)
+
+        // new-suggestion button, fixed above the composer
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+            GradientButton(meal.newLabel, enabled = !busy) {
+                send(Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()))
+            }
+        }
+
+        // composer — pinned above the keyboard
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("سؤالت را بنویس…", fontSize = 13.sp) },
+                shape = RoundedCornerShape(20.dp),
+                maxLines = 4
+            )
             Spacer(Modifier.width(8.dp))
-            Text("🔄 پیشنهاد جدید")
+            Box(
+                Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (input.isNotBlank() && !busy)
+                            Brush.linearGradient(listOf(Purple, meal.accent))
+                        else
+                            Brush.linearGradient(
+                                listOf(Color.Gray.copy(alpha = .35f), Color.Gray.copy(alpha = .35f))
+                            )
+                    )
+                    .clickable(enabled = input.isNotBlank() && !busy) {
+                        val t = input.trim()
+                        input = ""
+                        send(t)
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Send, contentDescription = "ارسال", tint = Color.White)
+            }
+        }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("پاک کردن گفتگو", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = { Text("آیا مطمئنی می‌خواهی گفتگوی «${meal.title}» پاک شود؟", fontSize = 14.sp) },
+            confirmButton = {
+                TextButton(onClick = { vm.clearChat(meal.channel); confirmClear = false }) {
+                    Text("پاک کردن", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } }
+        )
+    }
+}
+
+@Composable
+private fun ChatOverflowMenu(onClear: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "گزینه‌ها")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("پاک کردن گفتگو", fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+                onClick = { open = false; onClear() }
+            )
         }
     }
 }
 
-// --------------------------------------------------------------- pantry
+@Composable
+private fun UserBubble(m: ChatMessage) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Box(
+            Modifier
+                .widthIn(max = 290.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Purple.copy(alpha = .14f))
+                .border(1.dp, Purple.copy(alpha = .35f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Text(m.content, fontSize = 13.sp)
+        }
+    }
+}
 
 @Composable
-private fun PantrySection(
-    input: String,
-    onInput: (String) -> Unit,
-    busy: Boolean,
-    dishes: List<Recipe>,
-    onSuggest: () -> Unit,
-    onSave: (Recipe) -> Unit
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        SectionTitle("با چیزهایی که در خانه دارم", "🧺")
-    }
-    Spacer(Modifier.height(8.dp))
-    OutlinedTextField(
-        value = input,
-        onValueChange = onInput,
-        placeholder = { Text("مثلاً: سیب‌زمینی، تخم‌مرغ، پیاز، گوجه و کمی گوشت", fontSize = 13.sp) },
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        minLines = 3,
-        maxLines = 6,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Green,
-            unfocusedBorderColor = Green.copy(alpha = .35f)
-        )
-    )
-    Spacer(Modifier.height(10.dp))
-    GradientButton("🍳 پیشنهاد غذا", enabled = !busy) { onSuggest() }
-
-    if (dishes.isNotEmpty()) {
-        Spacer(Modifier.height(14.dp))
-        dishes.forEach { d ->
-            RecipeCard(d, accent = Green, busy = busy, onNew = onSuggest, onSave = { onSave(d) })
-            Spacer(Modifier.height(10.dp))
+private fun AssistantTextBubble(text: String, accent: Color) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Box(
+            Modifier
+                .widthIn(max = 300.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brush.linearGradient(listOf(Purple.copy(alpha = .85f), accent.copy(alpha = .7f))))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Text(text, fontSize = 13.sp, color = Color.White)
         }
     }
 }
@@ -356,13 +521,11 @@ private fun RecipeCard(
     r: Recipe,
     accent: Color,
     busy: Boolean,
-    onNew: () -> Unit,
     onSave: () -> Unit
 ) {
     DastyarCard(accent = accent) {
         Text(r.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 2)
 
-        // quick facts, as wrapping pills
         FlowRow(
             Modifier.padding(top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -418,24 +581,12 @@ private fun RecipeCard(
         }
 
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = onNew,
-                enabled = !busy,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("پیشنهاد جدید", fontSize = 12.5.sp)
-            }
-            OutlinedButton(
-                onClick = onSave,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Text("♡ ذخیره", fontSize = 12.5.sp)
-            }
+        OutlinedButton(
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text("♡ ذخیره", fontSize = 12.5.sp)
         }
     }
 }
@@ -568,7 +719,6 @@ private fun parseRecipes(text: String): List<Recipe> {
                                 if (clean.isNotEmpty()) steps += clean
                             }
                             else -> {
-                                // a leading dish line with no key, e.g. "🍽 قورمه سبزی"
                                 if (name.isBlank()) name = body.removePrefix("🍽").trim()
                             }
                         }
