@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,11 +47,12 @@ private enum class Advisor(
     val key: String,
     val emoji: String,
     val title: String,
+    val short: String,
     val accent: Color
 ) {
-    PERIOD("period", "🩸", "مشاوره پریود", Pink),
-    SKIN("skin", "✨", "مشاوره پوست", Amber),
-    ENERGY("fatigue", "⚡", "مشاوره بی‌رمقی", Rose)
+    PERIOD("period", "🩸", "مشاوره پریود", "پریود", Pink),
+    SKIN("skin", "✨", "مشاوره پوست", "پوست", Amber),
+    ENERGY("fatigue", "⚡", "مشاوره بی‌رمقی", "بی‌رمقی", Rose)
 }
 
 /** The general assistant chat, kept separate from the three advisors. */
@@ -83,10 +85,10 @@ fun AssistantScreen(vm: MainViewModel) {
 // ------------------------------------------------------------------ home
 
 /**
- * Home: a fixed, non-scrolling header block of three equal cards, then a full
- * general-assistant chat that fills the rest of the screen. The chat's composer
- * stays pinned at the bottom and rises with the keyboard, because the whole
- * screen is a Column whose middle row takes `weight(1f)`.
+ * Home: a compact, fixed header block (title + three equal cards side by side),
+ * then a full general-assistant chat that takes every remaining pixel. The chat
+ * composer stays pinned at the bottom and rises with the keyboard because the
+ * whole screen is a Column whose chat row takes `weight(1f)`.
  */
 @Composable
 private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
@@ -94,21 +96,25 @@ private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
     val today by vm.todayCheckIn.collectAsState()
 
     Column(Modifier.fillMaxSize()) {
-        // ---- fixed header: three identical cards, titles only ----
+        // ---- fixed, compact header: title + one row of three equal cards ----
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 14.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 8.dp)
         ) {
-            ScreenHeader(
-                emoji = "🤖",
+            AssistantHeader(
                 title = "دستیار من",
                 subtitle = "یک موضوع را انتخاب کن یا هر سؤالی داری همین‌جا بپرس."
             )
-            Spacer(Modifier.height(12.dp))
-            Advisor.entries.forEach { a ->
-                AdvisorCard(advisor = a, onClick = { onOpen(a) })
-                Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Advisor.entries.forEach { a ->
+                    AdvisorCard(advisor = a, onClick = { onOpen(a) },
+                        modifier = Modifier.weight(1f))
+                }
             }
         }
 
@@ -128,43 +134,77 @@ private fun AssistantHome(vm: MainViewModel, onOpen: (Advisor) -> Unit) {
 }
 
 /**
- * One advisor card. All three are exactly the same size and only show the
- * title, so long or missing data can never change the layout. The title is
- * allowed to wrap onto two lines inside the fixed height.
+ * A compact, fixed-height header for the assistant section. Deliberately much
+ * smaller than the shared `ScreenHeader` so it takes only a sliver of the
+ * screen: a small icon, a title line and one short subtitle line.
  */
 @Composable
-private fun AdvisorCard(advisor: Advisor, onClick: () -> Unit) {
-    Box(
+private fun AssistantHeader(title: String, subtitle: String) {
+    Row(
         Modifier
             .fillMaxWidth()
-            .height(72.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, advisor.accent.copy(alpha = .35f), RoundedCornerShape(20.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(BrandBrush)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(advisor.accent.copy(alpha = .16f)),
-                contentAlignment = Alignment.Center
-            ) { Text(advisor.emoji, fontSize = 22.sp) }
-            Spacer(Modifier.width(14.dp))
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = .22f)),
+            contentAlignment = Alignment.Center
+        ) { Text("🤖", fontSize = 16.sp) }
+        Spacer(Modifier.width(10.dp))
+        Column {
             Text(
-                advisor.title,
+                title,
+                color = Color.White,
                 fontWeight = FontWeight.Bold,
-                fontSize = 15.5.sp,
-                maxLines = 2,
-                modifier = Modifier.weight(1f)
+                fontSize = 15.sp,
+                maxLines = 1
             )
-            Text("‹", fontSize = 20.sp, color = advisor.accent)
+            Text(
+                subtitle,
+                color = Color.White.copy(alpha = .85f),
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
         }
+    }
+}
+
+/**
+ * One advisor card. The three sit side by side and are exactly the same width
+ * (each gets `weight(1f)`) and height (48.dp, never content-driven), so nothing
+ * can move or resize. Only the title is shown; the font and padding shrink a
+ * little so the row still fits three cards on a narrow phone.
+ */
+@Composable
+private fun AdvisorCard(advisor: Advisor, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, advisor.accent.copy(alpha = .35f), RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(advisor.emoji, fontSize = 15.sp)
+        Spacer(Modifier.width(4.dp))
+        Text(
+            advisor.short,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -194,58 +234,18 @@ private fun AdvisorScreen(vm: MainViewModel, advisor: Advisor, onBack: () -> Uni
     }
     val localTip = localTip(advisor, profile, today)
 
-    // Column: fixed header + scrollable content (weight 1) + fixed chat panel.
+    // Column: compact fixed header + compact collapsible info + chat fills rest.
     Column(Modifier.fillMaxSize()) {
         AdvisorHeader(advisor, onBack)
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            if (rows.isEmpty()) {
-                EmptyState(advisor) { vm.requestOpenCheckIn() }
-            } else {
-                SectionTitle("خلاصهٔ وضعیت امروز", advisor.emoji)
-                Spacer(Modifier.height(8.dp))
-                DastyarCard(accent = advisor.accent) {
-                    rows.forEachIndexed { i, (label, value) ->
-                        if (i > 0) Spacer(Modifier.height(8.dp))
-                        Row(Modifier.fillMaxWidth()) {
-                            Text(
-                                label,
-                                fontSize = 12.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.weight(1f))
-                            Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                SectionTitle("پیشنهاد هوشمند امروز", "💡")
-                Spacer(Modifier.height(8.dp))
-                DastyarCard(accent = Purple) {
-                    val shown = aiTip?.takeIf { it.isNotBlank() } ?: localTip
-                    if (shown.isNullOrBlank()) {
-                        Text(
-                            "در حال آماده‌سازی پیشنهاد بر اساس اطلاعات امروزت…",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        Text(shown, fontSize = 13.5.sp, lineHeight = 22.sp)
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "این پیشنهادها عمومی‌اند و جای نظر پزشک را نمی‌گیرند.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+
+        // Compact info strip: collapsed by default so the chat owns the screen.
+        CompactInfo(
+            advisor = advisor,
+            rows = rows,
+            aiTipText = aiTip?.takeIf { it.isNotBlank() } ?: localTip,
+            isEmpty = rows.isEmpty(),
+            onCheckIn = { vm.requestOpenCheckIn() }
+        )
 
         ChatPanel(
             vm = vm,
@@ -255,8 +255,105 @@ private fun AdvisorScreen(vm: MainViewModel, advisor: Advisor, onBack: () -> Uni
                     "درباره وضعیت خودت بپرس؛ اطلاعات ثبت‌شده‌ات را هم در نظر می‌گیرم.",
             suggestions = advisorSuggestions(advisor).plus(dynamicSuggestions(advisor, profile, today)),
             profile = profile,
-            today = today
+            today = today,
+            modifier = Modifier.weight(1f)
         )
+    }
+}
+
+/**
+ * A very short, one-line summary of the topic that can be expanded on tap. It
+ * is collapsed by default and only a single compact row tall, so the chat is
+ * always the largest area on the screen. The full details and the AI tip are
+ * revealed only when the user asks for them.
+ */
+@Composable
+private fun CompactInfo(
+    advisor: Advisor,
+    rows: List<Pair<String, String>>,
+    aiTipText: String?,
+    isEmpty: Boolean,
+    onCheckIn: () -> Unit
+) {
+    var expanded by rememberSaveable(advisor) { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    ) {
+        // Collapsed summary row — always exactly this tall.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(advisor.accent.copy(alpha = .10f))
+                .border(1.dp, advisor.accent.copy(alpha = .28f), RoundedCornerShape(14.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(advisor.emoji, fontSize = 14.sp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (isEmpty) "برای شروع، اطلاعات امروزت را ثبت کن"
+                else rows.take(2).joinToString(" • ") { "${it.first}: ${it.second}" },
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                if (expanded) "⌃" else "⌄",
+                fontSize = 14.sp,
+                color = advisor.accent
+            )
+        }
+
+        // Expanded details — only when explicitly opened, and itself bounded so
+        // it can never swallow the whole screen.
+        if (expanded) {
+            Spacer(Modifier.height(8.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                if (isEmpty) {
+                    EmptyState(advisor, onCheckIn)
+                } else {
+                    DastyarCard(accent = advisor.accent) {
+                        rows.forEachIndexed { i, (label, value) ->
+                            if (i > 0) Spacer(Modifier.height(6.dp))
+                            Row(Modifier.fillMaxWidth()) {
+                                Text(
+                                    label,
+                                    fontSize = 12.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    DastyarCard(accent = Purple) {
+                        val shown = aiTipText
+                        if (shown.isNullOrBlank()) {
+                            Text(
+                                "در حال آماده‌سازی پیشنهاد بر اساس اطلاعات امروزت…",
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(shown, fontSize = 12.5.sp, lineHeight = 21.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -270,19 +367,20 @@ private fun AdvisorHeader(advisor: Advisor, onBack: () -> Unit) {
                     listOf(advisor.accent.copy(alpha = .28f), Purple.copy(alpha = .20f))
                 )
             )
-            .padding(horizontal = 8.dp, vertical = 10.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = "بازگشت")
+        IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.ArrowBack, contentDescription = "بازگشت", modifier = Modifier.size(20.dp))
         }
         Text(
             "دستیار ${advisor.title}",
             fontWeight = FontWeight.Bold,
-            fontSize = 17.sp,
+            fontSize = 15.sp,
             modifier = Modifier.weight(1f)
         )
-        Text(advisor.emoji, fontSize = 20.sp)
+        Text(advisor.emoji, fontSize = 17.sp)
+        Spacer(Modifier.width(6.dp))
     }
 }
 
