@@ -421,16 +421,16 @@ private fun EditSection(
 ) {
     // Standard Android photo picker — no storage permission is needed for this
     // route on any supported Android version.
+    val ctx = LocalContext.current
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
             runCatching {
-                LocalContext.current.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             }.getOrNull()?.let { onBase(it) }
         }
     }
-    val ctx = LocalContext.current
 
     val base = baseBytes
     if (base == null) {
