@@ -265,6 +265,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Requests that the UI jump to the daily check-in screen. */
     fun requestOpenCheckIn() { _openCheckIn.value = _openCheckIn.value + 1 }
 
+    // ---- deep-link: a task notification tap asks the UI to open that task ----
+    private val _openTask = MutableStateFlow(0L)
+    val openTask: StateFlow<Long> = _openTask.asStateFlow()
+
+    /** Requests that the UI open the tasks tab and focus this task. */
+    fun requestOpenTask(id: Long) { _openTask.value = id }
+
+    fun clearOpenTask() { _openTask.value = 0L }
+
     init {
         viewModelScope.launch {
             refreshToday()
@@ -750,15 +759,71 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- tasks
 
+    // The AI extraction of a task sentence runs from the ViewModel so it is not
+    // tied to the screen: leaving the tasks tab (or turning the phone) never
+    // cancels the request or duplicates it.
+    private val _taskExtract = MutableStateFlow<Task?>(null)
+    val taskExtract: StateFlow<Task?> = _taskExtract.asStateFlow()
+
+    private val _taskExtractLoading = MutableStateFlow(false)
+    val taskExtractLoading: StateFlow<Boolean> = _taskExtractLoading.asStateFlow()
+
+    private val _taskExtractError = MutableStateFlow<String?>(null)
+    val taskExtractError: StateFlow<String?> = _taskExtractError.asStateFlow()
+
+    private var taskExtractRunning = false
+
+    fun clearTaskExtract() {
+        _taskExtract.value = null
+        _taskExtractError.value = null
+    }
+
+    /**
+     * Extracts task fields from a natural sentence using the current AI. The
+     * result is only a preview; nothing is saved here. The screen shows it for
+     * confirmation, and the manual parser is used when the AI is unavailable.
+     */
+    fun extractTask(sentence: String) {
+        val text = sentence.trim()
+        if (text.isEmpty() || taskExtractRunning) return
+        taskExtractRunning = true
+        _taskExtractLoading.value = true
+        _taskExtractError.value = null
+        _taskExtract.value = null
+        viewModelScope.launch {
+            val res = com.dastyar.app.ai.TaskAi.extract(text)
+            _taskExtractLoading.value = false
+            taskExtractRunning = false
+            res.onSuccess { _taskExtract.value = it }
+                .onFailure { _taskExtractError.value = it.message ?: "خطا در پردازش جمله" }
+        }
+    }
+
+    /**
+     * Saves a task and schedules/cancels its reminder in one place. A task that
+     * already existed has its old alarm cancelled first, so changing the time or
+     * date never leaves the previous notification behind.
+     */
     fun saveTask(t: Task) = viewModelScope.launch(Dispatchers.IO) {
-        val id = dao.saveTask(t)
         val app = getApplication<Application>()
+        if (t.id != 0L) {
+            dao.task(t.id)?.let { com.dastyar.app.notifications.ReminderScheduler.cancel(app, it) }
+        }
+        val id = dao.saveTask(t)
         val saved = t.copy(id = if (t.id == 0L) id else t.id)
         com.dastyar.app.notifications.ReminderScheduler.schedule(app, saved)
     }
 
+    /** Marks a task done (or active again) and schedules/cancels its reminder. */
     fun toggleTask(t: Task) = viewModelScope.launch(Dispatchers.IO) {
-        dao.updateTask(t.copy(done = !t.done))
+        val app = getApplication<Application>()
+        val updated = t.copy(done = !t.done)
+        dao.updateTask(updated)
+        if (updated.done) {
+            com.dastyar.app.notifications.ReminderScheduler.cancel(app, updated)
+        } else {
+            com.dastyar.app.notifications.ReminderScheduler.schedule(app, updated)
+        }
     }
 
     fun deleteTask(t: Task) = viewModelScope.launch(Dispatchers.IO) {

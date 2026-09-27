@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SavedImage::class,
         SavedRecipe::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class DastyarDatabase : RoomDatabase() {
@@ -57,13 +57,24 @@ abstract class DastyarDatabase : RoomDatabase() {
             }
         }
 
+        // v4 -> v5 adds the task priority column. Existing tasks keep every
+        // field they had and simply get the safe default "normal".
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `tasks` ADD COLUMN `priority` TEXT NOT NULL DEFAULT 'normal'"
+                )
+            }
+        }
+
         fun get(context: Context): DastyarDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     DastyarDatabase::class.java,
                     "dastyar.db"
-                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4).fallbackToDestructiveMigration()
+                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }
     }

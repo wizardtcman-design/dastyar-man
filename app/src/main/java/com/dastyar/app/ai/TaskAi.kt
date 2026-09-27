@@ -1,0 +1,342 @@
+package com.dastyar.app.ai
+
+import com.dastyar.app.data.Dates
+import com.dastyar.app.data.Task
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.LocalTime
+
+/**
+ * Turns one colloquial Persian sentence into a [Task] with the current AI
+ * provider — the same provider, key and free-model fallback the rest of the app
+ * uses; no new provider or key is introduced. It never invents a date or time:
+ * fields the user did not mention come back empty and the caller can ask for
+ * them. A local [TaskParser] handles the same text without AI, so the section
+ * still works when the AI is unreachable.
+ *
+ * This is the only place AI is used in the tasks section.
+ */
+object TaskAi {
+
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    /** The weekday name in Persian, derived from the real device clock. */
+    private fun persianWeekday(d: LocalDate): String = when (d.dayOfWeek) {
+        DayOfWeek.SATURDAY -> "شنبه"
+        DayOfWeek.SUNDAY -> "یکشنبه"
+        DayOfWeek.MONDAY -> "دوشنبه"
+        DayOfWeek.TUESDAY -> "سه‌شنبه"
+        DayOfWeek.WEDNESDAY -> "چهارشنبه"
+        DayOfWeek.THURSDAY -> "پنجشنبه"
+        DayOfWeek.FRIDAY -> "جمعه"
+    }
+
+    /**
+     * Runs the extraction. Returns a [Task] whose [Task.id] is 0 (not saved) and
+     * with empty date/time whatever the sentence did not contain.
+     */
+    suspend fun extract(sentence: String): Result<Task> {
+        val now = LocalTime.now()
+        val pad = "%02d:%02d".format(now.hour, now.minute)
+        val todayIso = LocalDate.now().toString()
+        val prompt = Prompts.taskExtractPrompt(
+            sentence = sentence.trim(),
+            todayIso = todayIso,
+            todayPretty = Dates.pretty(todayIso),
+            weekday = persianWeekday(LocalDate.now()),
+            nowTime = pad
+        )
+        return AiClient.chat(
+            system = Prompts.base(),
+            history = emptyList(),
+            userMessage = prompt
+        ).mapCatching { reply ->
+            val block = extractJsonObject(reply)
+                ?: throw IllegalStateException("پاسخ هوش مصنوعی قابل‌خواندن نبود.")
+            guardAgainstInvented(sentence, parseBlock(block))
+        }
+    }
+
+    /**
+     * The model is told not to invent a time, but models drift. This checks its
+     * answer against the same sentence read offline: if the sentence contains no
+     * date word at all, the date is cleared; if it contains no clock word, the
+     * time is cleared. So a date or hour can never appear that the user did not
+     * say. The reminder flag follows suit.
+     */
+    private fun guardAgainstInvented(sentence: String, task: Task): Task {
+        val offline = TaskParser.parse(sentence)
+        val s = sentence
+        val hasDateWord = listOf(
+            "امروز", "فردا", "پس‌فردا", "پس فردا", "امشب", "شنبه", "یکشنبه",
+            "دوشنبه", "سه‌شنبه", "سه شنبه", "چهارشنبه", "پنجشنبه", "پنج‌شنبه",
+            "جمعه", "هفته بعد", "هفتهٔ بعد", "هفته دیگه", "آخر هفته",
+            "آخر این هفته", "ماه آینده", "ماه بعد"
+        ).any { s.contains(it) } || Regex("""\d{4}-\d{2}-\d{2}""").containsMatchIn(s)
+
+        val hasTimeWord = Regex("""ساعت|عصر|صبح|ظهر|شب|بعدازظهر|بعد از ظهر""").containsMatchIn(s) ||
+                Regex("""[0-9۰-۹]{1,2}[:.]\s*[0-9۰-۹]{1,2}""").containsMatchIn(s)
+
+        val date = if (hasDateWord) task.date.ifBlank { offline.date } else ""
+        val time = if (hasTimeWord) task.time.ifBlank { offline.time } else ""
+        // A free model sometimes answers in English or repeats the whole
+        // sentence. When its title is not Persian but the offline reader found a
+        // clean Persian title, the offline one is used so the preview stays in
+        // the user's language and looks like a task name.
+        val persian = Regex("""[\u0600-\u06FF]""")
+        val title = if (persian.containsMatchIn(task.title)) task.title
+        else offline.title.ifBlank { task.title }
+        return task.copy(
+            title = title,
+            description = task.description,
+            date = date,
+            time = time,
+            reminderEnabled = task.reminderEnabled && date.isNotBlank() && time.isNotBlank()
+        )
+    }
+
+    /**
+     * Reads the model's JSON answer. If the model wrapped it in prose or code
+     * fences, the first {...} block is used. Any missing field becomes a safe
+     * default, never a guessed value.
+     */
+    fun parse(reply: String): Task {
+        val block = extractJsonObject(reply) ?: return Task()
+        return parseBlock(block)
+    }
+
+    /** Reads the fields from one JSON object string into a [Task]. */
+    private fun parseBlock(block: String): Task {
+        val obj = runCatching { json.parseToJsonElement(block).jsonObject }.getOrNull()
+            ?: return Task()
+        // Every field is read defensively: a missing key, a JSON null, or a
+        // non-text value (the model sometimes answers null) must never throw.
+        fun str(key: String): String = runCatching {
+            obj[key]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        }.getOrDefault("")
+        fun bool(key: String): Boolean = runCatching {
+            val v = obj[key]?.jsonPrimitive?.contentOrNull
+            v != null && (v.equals("true", true) || v == "1" || v.contains("یادآوری"))
+        }.getOrDefault(false)
+        val repeat = when (str("repeat").lowercase()) {
+            "daily", "روزانه" -> "daily"
+            "weekly", "هفتگی" -> "weekly"
+            "monthly", "ماهانه" -> "monthly"
+            else -> "none"
+        }
+        val priority = when (str("priority").lowercase()) {
+            "high", "زیاد", "بالا" -> "high"
+            "low", "کم", "پایین" -> "low"
+            else -> "normal"
+        }
+        val date = normalizeDate(str("date"))
+        val time = normalizeTime(str("time"))
+        val reminder = bool("reminder")
+        return Task(
+            title = str("title").ifBlank { "کار جدید" },
+            description = str("description"),
+            date = date,
+            time = time,
+            repeat = repeat,
+            priority = priority,
+            reminderEnabled = reminder && date.isNotBlank()
+        )
+    }
+
+    private fun extractJsonObject(text: String): String? {
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (start < 0 || end <= start) return null
+        return text.substring(start, end + 1)
+    }
+
+    /** Keeps only a real yyyy-MM-dd date; anything else becomes empty. */
+    private fun normalizeDate(raw: String): String {
+        val s = raw.trim()
+        if (s.isBlank()) return ""
+        val direct = runCatching { LocalDate.parse(s.take(10)) }.getOrNull()
+        if (direct != null) return direct.toString()
+        return ""
+    }
+
+    /** Keeps only a real HH:mm time; "17:0" or "5" is repaired when possible. */
+    private fun normalizeTime(raw: String): String {
+        val s = raw.trim()
+        if (s.isBlank()) return ""
+        val m = Regex("""(\d{1,2})[:.\u066B\u066C](\d{1,2})""").find(s)
+        if (m != null) {
+            val h = m.groupValues[1].toIntOrNull() ?: return ""
+            val mi = m.groupValues[2].toIntOrNull() ?: 0
+            if (h in 0..23 && mi in 0..59) return "%02d:%02d".format(h, mi)
+            return ""
+        }
+        val h = s.filter { it.isDigit() }.toIntOrNull() ?: return ""
+        if (h in 0..23) return "%02d:%02d".format(h, 0)
+        return ""
+    }
+}
+
+/**
+ * A local, offline reader for the same natural Persian task sentences. It is
+ * the fallback used when the AI is unavailable, and it also powers a preview
+ * the moment the user types, so the app never depends on the network to add a
+ * task. It understands the relative words and clock expressions listed in the
+ * spec and resolves them against the real device date and time.
+ */
+object TaskParser {
+
+    private data class Parsed(
+        val title: String,
+        val date: String,
+        val time: String,
+        val repeat: String
+    )
+
+    fun parse(sentence: String): Task {
+        val p = parse2(sentence)
+        return Task(
+            title = p.title.ifBlank { sentence.trim().ifBlank { "کار جدید" } },
+            description = "",
+            date = p.date,
+            time = p.time,
+            repeat = p.repeat,
+            priority = priorityOf(sentence),
+            reminderEnabled = p.date.isNotBlank() && p.time.isNotBlank()
+        )
+    }
+
+    private fun priorityOf(s: String): String = when {
+        listOf("مهم", "فوری", "حتماً", "حتما", "ضروری").any { s.contains(it) } -> "high"
+        listOf("بی‌اهمیت", "بی اهمیت", "فرقی نداره", "فرقی نداره", "هر وقت شد").any { s.contains(it) } -> "low"
+        else -> "normal"
+    }
+
+    private fun parse2(sentence: String): Parsed {
+        val s = sentence
+
+        // ---- repeat ----
+        val repeat = when {
+            s.contains("هر روز") || s.contains("روزانه") || s.contains("همه روز") -> "daily"
+            s.contains("هر هفته") || s.contains("هفتگی") -> "weekly"
+            s.contains("هر ماه") || s.contains("ماهانه") || s.contains("ماهی یک بار") -> "monthly"
+            else -> "none"
+        }
+
+        // ---- date ----
+        val today = LocalDate.now()
+        val date = when {
+            s.contains("پس‌فردا") || s.contains("پس فردا") -> today.plusDays(2)
+            s.contains("فردا") -> today.plusDays(1)
+            s.contains("امشب") || s.contains("امروز") -> today
+            s.contains("هفته بعد") || s.contains("هفتهٔ بعد") || s.contains("هفته دیگه") -> today.plusDays(7)
+            s.contains("آخر هفته") || s.contains("آخر این هفته") -> nextWeekday(today, DayOfWeek.THURSDAY)
+            s.contains("ماه آینده") || s.contains("ماه بعد") -> today.plusMonths(1)
+            else -> weekdayIn(s)?.let { nextWeekday(today, it) }
+        }?.toString().orEmpty()
+
+        // ---- time ----
+        val time = timeOf(s)
+
+        // ---- title ----
+        var title = s
+        val strips = listOf(
+            "پس‌فردا", "پس فردا", "فردا", "امشب", "امروز", "هفته بعد", "هفتهٔ بعد",
+            "هفته دیگه", "آخر هفته", "آخر این هفته", "ماه آینده", "ماه بعد",
+            "هر روز", "روزانه", "همه روز", "هر هفته", "هفتگی", "هر ماه", "ماهانه",
+            "شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "سه شنبه", "چهارشنبه", "پنجشنبه",
+            "پنج‌شنبه", "جمعه", "صبح", "ظهر", "عصر", "شب", "بعدازظهر", "بعد از ظهر",
+            "یادم بنداز", "یادم بیار", "یادآوری کن", "یادآوری", "رو یادم بنداز"
+        )
+        strips.forEach { title = title.replace(it, " ") }
+        title = Regex("""ساعت\s*[0-9۰-۹]+\s*(و\s*[0-9۰-۹]+\s*دقیقه)?""").replace(title, " ")
+        title = Regex("""[0-9۰-۹]+\s*(عصر|شب|صبح|ظهر)""").replace(title, " ")
+        title = title.replace(Regex("""\s+"""), " ").trim()
+        title = title.trim('،', ',', '.', '!', '؟', '?', ' ', '-').trim()
+
+        return Parsed(title = title, date = date, time = time, repeat = repeat)
+    }
+
+    private fun weekdayIn(s: String): DayOfWeek? = when {
+        s.contains("شنبه") && !s.contains("یکشنبه") && !s.contains("دوشنبه") &&
+                !s.contains("سه‌شنبه") && !s.contains("سه شنبه") && !s.contains("چهارشنبه") &&
+                !s.contains("پنجشنبه") && !s.contains("پنج‌شنبه") -> DayOfWeek.SATURDAY
+        s.contains("یکشنبه") -> DayOfWeek.SUNDAY
+        s.contains("دوشنبه") -> DayOfWeek.MONDAY
+        s.contains("سه‌شنبه") || s.contains("سه شنبه") -> DayOfWeek.TUESDAY
+        s.contains("چهارشنبه") -> DayOfWeek.WEDNESDAY
+        s.contains("پنجشنبه") || s.contains("پنج‌شنبه") -> DayOfWeek.THURSDAY
+        s.contains("جمعه") -> DayOfWeek.FRIDAY
+        else -> null
+    }
+
+    /** The nearest future occurrence of [day]; today if it is that day. */
+    private fun nextWeekday(from: LocalDate, day: DayOfWeek): LocalDate {
+        var d = from
+        var guard = 0
+        while (d.dayOfWeek != day && guard < 8) {
+            d = d.plusDays(1); guard++
+        }
+        return d
+    }
+
+    /**
+     * Reads a clock expression. Anything with no explicit clock stays empty, so
+     * a random time is never created.
+     */
+    private fun timeOf(s: String): String {
+        val fa = mapOf(
+            '۰' to '0', '۱' to '1', '۲' to '2', '۳' to '3', '۴' to '4',
+            '۵' to '5', '۶' to '6', '۷' to '7', '۸' to '8', '۹' to '9'
+        )
+        fun toEn(x: String) = x.map { fa[it] ?: it }.joinToString("")
+
+        val hm = Regex("""ساعت\s*([0-9۰-۹]{1,2})\s*(?:[:.]\s*([0-9۰-۹]{1,2}))?""").find(s)
+        val bareHour = Regex("""([0-9۰-۹]{1,2})\s*(عصر|شب|صبح|ظهر|بعدازظهر|بعد از ظهر)""").find(s)
+        val wordHour = wordNumberTime(s)
+
+        var hour: Int? = null
+        var minute = 0
+        when {
+            hm != null -> {
+                hour = toEn(hm.groupValues[1]).toIntOrNull()
+                minute = hm.groupValues[2].takeIf { it.isNotBlank() }?.let { toEn(it).toIntOrNull() } ?: 0
+            }
+            bareHour != null -> hour = toEn(bareHour.groupValues[1]).toIntOrNull()
+            wordHour != null -> hour = wordHour
+        }
+        if (hour == null || hour !in 0..23) return ""
+        if (minute !in 0..59) minute = 0
+
+        val part = when {
+            s.contains("بعدازظهر") || s.contains("بعد از ظهر") -> "pm"
+            s.contains("عصر") || s.contains("شب") -> "pm"
+            s.contains("صبح") || s.contains("ظهر") -> "am"
+            else -> ""
+        }
+        hour = when {
+            part == "pm" && hour < 12 -> hour + 12
+            part == "am" && hour == 12 -> 0
+            else -> hour
+        }
+        return "%02d:%02d".format(hour, minute)
+    }
+
+    /** Spoken clock hours: «پنج عصر», «هشت صبح», «ساعت پنج». */
+    private fun wordNumberTime(s: String): Int? {
+        val words = mapOf(
+            "یک" to 1, "دو" to 2, "سه" to 3, "چهار" to 4, "پنج" to 5,
+            "شش" to 6, "هفت" to 7, "هشت" to 8, "نه" to 9, "ده" to 10,
+            "یازده" to 11, "دوازده" to 12
+        )
+        if (!s.contains("ساعت") && !s.contains("عصر") && !s.contains("صبح") &&
+            !s.contains("شب") && !s.contains("ظهر")) return null
+        for ((w, v) in words) {
+            if (s.contains(w)) return v
+        }
+        return null
+    }
+}

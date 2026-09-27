@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_CHECKIN = "open_checkin"
+        const val EXTRA_OPEN_TASK = "open_task"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
 
         DailyReminder.reschedule(this)
         val openCheckIn = intent?.getBooleanExtra(EXTRA_OPEN_CHECKIN, false) == true
+        val openTask = intent?.getLongExtra(EXTRA_OPEN_TASK, 0L) ?: 0L
 
         setContent {
             DastyarTheme {
@@ -64,6 +66,9 @@ class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(openCheckIn) {
                         if (openCheckIn && profile?.onboardingDone == true) vm.requestOpenCheckIn()
+                    }
+                    LaunchedEffect(openTask) {
+                        if (openTask > 0L && profile?.onboardingDone == true) vm.requestOpenTask(openTask)
                     }
 
                     // First run: the app has no built-in key, so the user

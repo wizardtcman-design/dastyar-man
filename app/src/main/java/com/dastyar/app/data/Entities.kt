@@ -13,8 +13,21 @@ data class Task(
     val repeat: String = "none",        // none / daily / weekly / monthly
     val done: Boolean = false,
     val reminderEnabled: Boolean = false,
+    val priority: String = "normal",    // low / normal / high
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    /**
+     * A stable key for the notification/alarm of this task, derived only from
+     * the row id. It never changes, so cancelling and re-scheduling always hits
+     * the exact same alarm and can never leave a duplicate behind.
+     */
+    val notifyId: Int get() = NOTIFY_BASE + (id % NOTIFY_SPAN).toInt()
+
+    companion object {
+        private const val NOTIFY_BASE = 10000
+        private const val NOTIFY_SPAN = 1_000_000
+    }
+}
 
 @Entity(tableName = "chat_messages")
 data class ChatMessage(

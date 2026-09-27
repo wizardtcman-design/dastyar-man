@@ -27,6 +27,12 @@ fun MainScaffold(vm: MainViewModel) {
         if (openCheckIn > 0) tab = "checkin"
     }
 
+    // A task reminder tap opens the tasks tab on that exact task.
+    val openTask by vm.openTask.collectAsState()
+    LaunchedEffect(openTask) {
+        if (openTask > 0L) tab = "tasks"
+    }
+
     // The daily check-in is only offered once the user finished onboarding and
     // only when today's row does not exist yet. On the onboarding day the
     // questionnaire already became the day-one record, so it is never asked twice.

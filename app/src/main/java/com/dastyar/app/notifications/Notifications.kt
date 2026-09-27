@@ -63,11 +63,13 @@ object NotificationHelper {
         title: String,
         body: String,
         channel: String = CHANNEL_REMINDERS,
-        openCheckIn: Boolean = false
+        openCheckIn: Boolean = false,
+        openTaskId: Long = -1L
     ) {
         val intent = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (openCheckIn) putExtra(MainActivity.EXTRA_OPEN_CHECKIN, true)
+            if (openTaskId > 0) putExtra(MainActivity.EXTRA_OPEN_TASK, openTaskId)
         }
         val pi = PendingIntent.getActivity(
             ctx, id, intent,
@@ -115,10 +117,43 @@ class DailyReminderReceiver : BroadcastReceiver() {
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val taskId = intent.getLongExtra("taskId", -1L)
         val title = intent.getStringExtra("title") ?: "یادآوری"
         val body = intent.getStringExtra("body") ?: ""
-        val id = intent.getIntExtra("id", 1)
-        NotificationHelper.show(context, id, title, body)
+        val repeat = intent.getStringExtra("repeat") ?: "none"
+        val date = intent.getStringExtra("date") ?: ""
+        val time = intent.getStringExtra("time") ?: ""
+
+        if (NotificationHelper.canPost(context)) {
+            NotificationHelper.show(
+                context,
+                com.dastyar.app.data.Task(id = if (taskId > 0) taskId else 1L).notifyId,
+                title,
+                body,
+                NotificationHelper.CHANNEL_REMINDERS,
+                openTaskId = taskId
+            )
+        }
+
+        // Re-arm a repeating task for its next occurrence, straight from the
+        // alarm so the chain continues with the app closed and after a reboot.
+        if (repeat != "none" && repeat.isNotBlank()) {
+            val task = com.dastyar.app.data.Task(
+                id = if (taskId > 0) taskId else 0L,
+                title = title, description = body,
+                date = date, time = time, repeat = repeat, reminderEnabled = true
+            )
+            val from = try {
+                java.time.LocalDateTime.of(
+                    java.time.LocalDate.parse(date),
+                    java.time.LocalTime.parse(time)
+                ).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+            val next = ReminderScheduler.rollForward(task, from, System.currentTimeMillis())
+            if (next != null) ReminderScheduler.scheduleAt(context, task, next)
+        }
     }
 }
 

@@ -221,19 +221,49 @@ object PeriodReminder {
     }
 }
 
-/** Schedules real system alarms for task reminders. */
+/**
+ * Schedules real system alarms for task reminders.
+ *
+ * Every task has one stable alarm and one stable notification id derived from
+ * its row id, so re-scheduling always replaces the previous alarm instead of
+ * piling up duplicates, and cancelling always hits the right one. A repeating
+ * task is re-armed by [ReminderReceiver] for its next occurrence the moment it
+ * fires, so the chain survives with the app closed.
+ *
+ * The alarms use `setExactAndAllowWhileIdle` so they fire with the app closed,
+ * in the background, with the screen off and the phone locked. Where Android
+ * refuses exact alarms (the user revoked the special permission), it falls back
+ * to an inexact `setAndAllowWhileIdle`, which still fires but may be a few
+ * minutes late.
+ */
 object ReminderScheduler {
 
-    fun schedule(ctx: Context, task: com.dastyar.app.data.Task) {
-        if (!task.reminderEnabled || task.date.isBlank() || task.time.isBlank()) return
-        val trigger = triggerMillis(task.date, task.time) ?: return
-        if (trigger <= System.currentTimeMillis()) return
+    /** True when this Android version lets the app schedule exact alarms. */
+    fun canScheduleExact(ctx: Context): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return true
+        return ctx.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+    }
 
+    fun schedule(ctx: Context, task: com.dastyar.app.data.Task) {
+        if (!task.reminderEnabled || task.done) return
+        if (task.date.isBlank()) return
+        scheduleAt(ctx, task, nextTrigger(task) ?: return)
+    }
+
+    /** Fires at [trigger]; used both for the first time and for repeats. */
+    fun scheduleAt(ctx: Context, task: com.dastyar.app.data.Task, trigger: Long) {
+        if (trigger <= System.currentTimeMillis()) return
         val alarm = ctx.getSystemService(AlarmManager::class.java)
         val pi = pendingIntent(ctx, task)
         try {
-            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
+            if (canScheduleExact(ctx)) {
+                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
+            } else {
+                alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
+            }
         } catch (_: SecurityException) {
+            // Exact permission was revoked between the check and the call: keep
+            // the reminder alive the inexact way rather than dropping it.
             alarm.set(AlarmManager.RTC_WAKEUP, trigger, pi)
         }
     }
@@ -250,14 +280,54 @@ object ReminderScheduler {
         }
     }
 
+    /**
+     * The next moment a task should fire. A repeating task that already passed
+     * today rolls forward to its next occurrence instead of being dropped, so a
+     * daily reminder created this morning still fires tonight.
+     */
+    fun nextTrigger(task: com.dastyar.app.data.Task): Long? {
+        val base = triggerMillis(task.date, task.time) ?: return null
+        val now = System.currentTimeMillis()
+        if (base > now) return base
+        return rollForward(task, base, now)
+    }
+
+    /**
+     * Advances a repeating task past [now], keeping its original time of day.
+     * Unknown/`none` repeats return null because a one-off in the past should
+     * not fire late.
+     */
+    fun rollForward(task: com.dastyar.app.data.Task, from: Long, now: Long): Long? {
+        val stepDays = when (task.repeat) {
+            "daily" -> 1L
+            "weekly" -> 7L
+            "monthly" -> 30L
+            else -> return null
+        }
+        val zone = ZoneId.systemDefault()
+        var d = java.time.Instant.ofEpochMilli(from).atZone(zone).toLocalDate()
+        val time = java.time.Instant.ofEpochMilli(from).atZone(zone).toLocalTime()
+        var guard = 0
+        while (guard < 500) {
+            d = d.plusDays(stepDays)
+            val candidate = d.atTime(time).atZone(zone).toInstant().toEpochMilli()
+            if (candidate > now) return candidate
+            guard++
+        }
+        return null
+    }
+
     private fun pendingIntent(ctx: Context, task: com.dastyar.app.data.Task): PendingIntent {
         val i = Intent(ctx, ReminderReceiver::class.java).apply {
+            putExtra("taskId", task.id)
             putExtra("title", task.title)
             putExtra("body", task.description.ifBlank { "وقت یادآوری این کاره ✅" })
-            putExtra("id", task.id.toInt())
+            putExtra("repeat", task.repeat)
+            putExtra("date", task.date)
+            putExtra("time", task.time)
         }
         return PendingIntent.getBroadcast(
-            ctx, task.id.toInt(), i,
+            ctx, task.notifyId, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

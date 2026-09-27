@@ -80,6 +80,9 @@ interface DastyarDao {
     @Query("SELECT * FROM tasks WHERE reminderEnabled = 1 AND done = 0")
     suspend fun pendingReminders(): List<Task>
 
+    @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
+    suspend fun task(id: Long): Task?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveTask(t: Task): Long
 
