@@ -827,22 +827,30 @@ private fun parseRecipes(text: String): List<Recipe> {
 
 /**
  * Removes any leaked internal instruction from a model answer before it can be
- * shown. A model occasionally repeats part of its own rules; the user must only
- * ever see food, never the prompt. Lines that belong to the instruction format
- * are dropped, and common rule sentences are removed.
+ * shown. A model occasionally repeats part of its own rules, or answers with its
+ * English "thinking" instead of the recipe. The user must only ever see the
+ * food, never the prompt or the model's reasoning. Lines that belong to the
+ * instruction format, and any line with almost no Persian, are dropped.
  */
 private fun sanitizeReply(text: String): String {
     val ruleStarts = listOf(
         "قواعد", "قالب", "برای هر غذا", "بین غذاها", "فقط غذای", "مواد اولیه باید",
         "پیشنهادها متنوع", "بدون ادعای", "تو یک آشپز", "هدف:", "فارسی، کوتاه",
-        "هیچ توضیحی", "- فقط غذا", "نکات:", "جایگزین:", "معرفی:", "###"
+        "هیچ توضیحی", "- فقط غذا", "here's", "here is", "analyze", "user wants",
+        "output must", "format:", "thinking", "step ", "we need", "the user",
+        "###"
     )
+    val persian = Regex("""[\u0600-\u06FF]""")
     val kept = text.lines().filter { raw ->
         val line = raw.trim()
         if (line.isEmpty()) return@filter false
-        if (ruleStarts.any { line.startsWith(it) }) return@filter false
-        // A raw field line with a literal placeholder is instruction, not food.
+        val lower = line.lowercase()
+        if (ruleStarts.any { lower.startsWith(it) }) return@filter false
+        // A field line with a literal placeholder is instruction, not food.
         if (line.contains("[") && line.contains("]")) return@filter false
+        // Drop lines that are essentially not Persian (model reasoning in English).
+        val persianChars = persian.findAll(line).count()
+        if (persianChars < 2) return@filter false
         true
     }
     return kept.joinToString("\n").trim()

@@ -745,13 +745,13 @@ object AiClient {
      * still has to succeed in a real request to be used.
      */
     private val PREFERRED_FREE = listOf(
-        "openrouter/free",
-        "stealth/space-bunny-alpha",
-        "inclusionai/ling-3.0-flash-sante:free",
         "cohere/north-mini-code:free",
+        "inclusionai/ling-3.0-flash-sante:free",
+        "stealth/space-bunny-alpha",
+        "nvidia/nemotron-3-super-120b-a12b:free",
         "nvidia/nemotron-3-ultra-550b-a55b:free",
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-        "nvidia/nemotron-3-super-120b-a12b:free"
+        "openrouter/free"
     )
 
     private fun buildChain(
