@@ -42,11 +42,15 @@ object TaskAi {
     suspend fun extract(sentence: String): Result<Task> {
         val now = LocalTime.now()
         val pad = "%02d:%02d".format(now.hour, now.minute)
-        val todayIso = LocalDate.now().toString()
+        // The app stores task dates as JALALI ISO, exactly like the manual
+        // picker. The model is given the Jalali date as "today" and must answer
+        // with a Jalali date too, so an AI-created task and a manually-created
+        // one are stored the same way and display the same correct Persian date.
+        val todayJalali = Dates.today()
         val prompt = Prompts.taskExtractPrompt(
             sentence = sentence.trim(),
-            todayIso = todayIso,
-            todayPretty = Dates.pretty(todayIso),
+            todayIso = todayJalali,
+            todayPretty = Dates.pretty(todayJalali),
             weekday = persianWeekday(LocalDate.now()),
             nowTime = pad
         )
@@ -82,6 +86,12 @@ object TaskAi {
                 Regex("""[0-9۰-۹]{1,2}[:.]\s*[0-9۰-۹]{1,2}""").containsMatchIn(s)
 
         val date = if (hasDateWord) task.date.ifBlank { offline.date } else ""
+        // A model may ignore the instruction and answer with a Gregorian date
+        // (year ~2026). Stored as if it were Jalali that would display a wildly
+        // wrong Persian date, so a non-Jalali year is discarded in favour of the
+        // offline parser's Jalali result (which is empty when the sentence has
+        // no date word).
+        val fixedDate = if (isJalaliIso(date)) date else offline.date
         val time = if (hasTimeWord) task.time.ifBlank { offline.time } else ""
         // A free model sometimes answers in English or repeats the whole
         // sentence. When its title is not Persian but the offline reader found a
@@ -93,10 +103,21 @@ object TaskAi {
         return task.copy(
             title = title,
             description = task.description,
-            date = date,
+            date = fixedDate,
             time = time,
-            reminderEnabled = task.reminderEnabled && date.isNotBlank() && time.isNotBlank()
+            reminderEnabled = task.reminderEnabled && fixedDate.isNotBlank() && time.isNotBlank()
         )
+    }
+
+    /**
+     * True when [iso] parses as a Jalali date whose year is plausible for the
+     * Solar Hijri calendar (roughly this century). A Gregorian year such as
+     * 2026 is rejected, because the app stores Jalali years (~1400s).
+     */
+    private fun isJalaliIso(iso: String): Boolean {
+        if (iso.isBlank()) return true
+        val j = com.dastyar.app.data.Jalali.parse(iso) ?: return false
+        return j.year in 1300..1500
     }
 
     /**
@@ -227,6 +248,9 @@ object TaskParser {
         }
 
         // ---- date ----
+        // Weekday arithmetic is done on real Gregorian days, then the result is
+        // stored as a JALALI ISO string -- the same format the manual picker
+        // writes -- so display and reminder scheduling always agree.
         val today = LocalDate.now()
         val date = when {
             s.contains("پس‌فردا") || s.contains("پس فردا") -> today.plusDays(2)
@@ -236,7 +260,7 @@ object TaskParser {
             s.contains("آخر هفته") || s.contains("آخر این هفته") -> nextWeekday(today, DayOfWeek.THURSDAY)
             s.contains("ماه آینده") || s.contains("ماه بعد") -> today.plusMonths(1)
             else -> weekdayIn(s)?.let { nextWeekday(today, it) }
-        }?.toString().orEmpty()
+        }?.let { com.dastyar.app.data.Jalali.fromGregorian(it).iso() }.orEmpty()
 
         // ---- time ----
         val time = timeOf(s)

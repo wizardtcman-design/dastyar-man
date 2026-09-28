@@ -332,11 +332,16 @@ object ReminderScheduler {
         )
     }
 
-    private fun triggerMillis(date: String, time: String): Long? = try {
-        val d = LocalDate.parse(date)
-        val t = LocalTime.parse(time)
-        LocalDateTime.of(d, t).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-    } catch (_: Exception) {
-        null
+    private fun triggerMillis(date: String, time: String): Long? {
+        return try {
+            // task.date is a JALALI ISO string, so it must be converted to a real
+            // Gregorian day before building the instant -- parsing it as Gregorian
+            // would fire the reminder on a completely wrong day.
+            val d = com.dastyar.app.data.Jalali.toGregorian(date) ?: return null
+            val t = LocalTime.parse(time)
+            LocalDateTime.of(d, t).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        } catch (_: Exception) {
+            null
+        }
     }
 }

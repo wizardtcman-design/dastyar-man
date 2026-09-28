@@ -99,6 +99,12 @@ object Jalali {
 
     fun fromGregorian(date: LocalDate): JDate = d2j(g2d(date.year, date.monthValue, date.dayOfMonth))
 
+    /** Inverse of [fromGregorian]: a Jalali date back to a real Gregorian date. */
+    fun toGregorian(j: JDate): LocalDate = LocalDate.ofEpochDay(toDayNumber(j).toLong())
+
+    /** Parses a stored Jalali ISO string straight to a Gregorian [LocalDate]. */
+    fun toGregorian(iso: String): LocalDate? = parse(iso)?.let { toGregorian(it) }
+
     fun toDayNumber(j: JDate): Int = j2d(j.year, j.month, j.day)
 
     fun today(): JDate = fromGregorian(LocalDate.now())

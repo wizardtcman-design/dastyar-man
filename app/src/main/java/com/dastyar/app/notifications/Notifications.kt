@@ -144,8 +144,12 @@ class ReminderReceiver : BroadcastReceiver() {
                 date = date, time = time, repeat = repeat, reminderEnabled = true
             )
             val from = try {
+                // date is a Jalali ISO string: convert to a real Gregorian day
+                // before building the instant for the repeat roll-forward.
+                val d = com.dastyar.app.data.Jalali.toGregorian(date)
+                    ?: throw IllegalArgumentException("bad jalali date")
                 java.time.LocalDateTime.of(
-                    java.time.LocalDate.parse(date),
+                    d,
                     java.time.LocalTime.parse(time)
                 ).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
             } catch (_: Exception) {

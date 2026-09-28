@@ -52,6 +52,14 @@ object ImageEngine {
         )
         val reasons = mutableListOf<String>()
 
+        // Both image backends (Cloudflare flux and Pollinations flux) only
+        // understand English: sending Persian makes the model invent a random
+        // scene, or worse, try to draw the Persian letters. So the prompt is
+        // translated ONCE here and the exact same English text is sent to
+        // whichever provider runs -- never translated twice and never altered
+        // beyond a faithful translation.
+        val englishPrompt = toEnglishPrompt(prompt)
+
         // 1) Cloudflare, only when connected and not already out of quota today.
         val cfModel = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
             ?: CloudflareClient.DEFAULT_MODEL
@@ -61,7 +69,7 @@ object ImageEngine {
                 accountId = ServiceKeys.cloudflareAccount(),
                 token = ServiceKeys.cloudflareToken(),
                 model = cfModel,
-                prompt = prompt
+                prompt = englishPrompt
             )
             UsageLog.record(
                 ctx, UsageLog.Provider.CLOUDFLARE, cfModel.id, UsageLog.Kind.GENERATE,
@@ -84,11 +92,10 @@ object ImageEngine {
             reasons += "Cloudflare: متصل نشده است"
         }
 
-        // 2) Pollinations fallback. The endpoint only understands English, so a
-        // Persian prompt is translated first with the chat model.
-        val english = toEnglishPrompt(prompt)
+        // 2) Pollinations fallback. Reuses the same English prompt computed above
+        // (Pollinations' endpoint only understands English too).
         val pt0 = System.currentTimeMillis()
-        val p = PollinationsClient.image(english, width, height, seed, ServiceKeys.pollinationsKey())
+        val p = PollinationsClient.image(englishPrompt, width, height, seed, ServiceKeys.pollinationsKey())
         UsageLog.record(
             ctx, UsageLog.Provider.POLLINATIONS, "flux", UsageLog.Kind.GENERATE,
             p.ok, if (p.ok) 200 else 0, System.currentTimeMillis() - pt0, null, p.message
@@ -142,6 +149,11 @@ object ImageEngine {
         )
         val reasons = mutableListOf<String>()
 
+        // Same as generate(): the edit instruction is translated ONCE so the
+        // exact same English reaches whichever provider runs. A raw Persian
+        // instruction makes the model ignore the edit and render something else.
+        val englishPrompt = toEnglishPrompt(prompt)
+
         val model = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
         if (ServiceKeys.cloudflareReady() && !QuotaGuard.cloudflareExhaustedToday(ctx)) {
             val editModel = when {
@@ -154,7 +166,7 @@ object ImageEngine {
                     accountId = ServiceKeys.cloudflareAccount(),
                     token = ServiceKeys.cloudflareToken(),
                     model = editModel,
-                    prompt = prompt,
+                    prompt = englishPrompt,
                     sourceBase64 = sourceBase64
                 )
                 UsageLog.record(
@@ -184,10 +196,10 @@ object ImageEngine {
         }
 
         // Pollinations fallback: it takes a text prompt, so the edit request is
-        // folded into a full description and rendered fresh.
-        val english = toEnglishPrompt(prompt)
+        // folded into a full description and rendered fresh. Reuses the same
+        // English instruction computed above.
         val pt0 = System.currentTimeMillis()
-        val p = PollinationsClient.image(english, 768, 1024, seed, ServiceKeys.pollinationsKey())
+        val p = PollinationsClient.image(englishPrompt, 768, 1024, seed, ServiceKeys.pollinationsKey())
         UsageLog.record(
             ctx, UsageLog.Provider.POLLINATIONS, "flux", UsageLog.Kind.EDIT,
             p.ok, if (p.ok) 200 else 0, System.currentTimeMillis() - pt0, null, p.message
@@ -206,19 +218,45 @@ object ImageEngine {
         Result.failure(AiException(Failure(reasons).summary()))
     }
 
-    /** Turns a Persian prompt into English for the Pollinations endpoint. */
+    /**
+     * Faithfully translates a Persian prompt into English for the image models,
+     * which only understand English. The translation is deliberately literal:
+     * the system message forbids adding, removing, or reimagining anything, so
+     * "a snowy mountain with a blue sky" stays that and does not become a
+     * different scene.
+     *
+     * The same call is used for both Cloudflare and Pollinations, so a prompt
+     * is translated exactly once per request and both providers receive the
+     * identical English text.
+     */
     private suspend fun toEnglishPrompt(prompt: String): String {
         val hasPersian = prompt.any { it in '\u0600'..'\u06FF' }
         if (!hasPersian) return prompt
-        return try {
+        val cleaned = try {
             AiClient.chat(
-                system = "You translate image descriptions to English. " +
-                        "Output only the English description, nothing else.",
+                system = "You are a literal translator of image-generation prompts into English. " +
+                        "Translate the user's text into natural English word for word in meaning. " +
+                        "Do NOT add, remove, summarize, embellish, or reinterpret any subject, " +
+                        "place, object, color, or style. Do NOT answer or describe anything else. " +
+                        "Output ONLY the English translation, no quotes, no notes, one line.",
                 history = emptyList(),
                 userMessage = prompt
-            ).getOrNull()?.trim()?.takeIf { it.isNotBlank() && it.length < 400 } ?: prompt
+            ).getOrNull()
+                ?.trim()
+                ?.removeSurrounding("\"")
+                ?.lineSequence()?.firstOrNull()?.trim()
+                ?.takeIf { it.isNotBlank() && it.length < 400 }
         } catch (e: Exception) {
-            prompt
+            null
         }
+        // Only accept a result that is genuinely English: if the model echoed
+        // Persian back, or answered in another script, sending it would make the
+        // image model invent something random. In that case keep the original
+        // (the very large English-trained models still prefer this to a wrong
+        // translation), and never silently swap in a different scene.
+        val c = cleaned
+        val looksEnglish = c != null && c.none { it in '\u0600'..'\u06FF' } &&
+                c.count { it.isLetter() && it.code < 128 } >= 3
+        return if (looksEnglish) c!! else prompt
     }
 }
