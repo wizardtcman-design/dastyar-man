@@ -145,6 +145,18 @@ fun MainScaffold(vm: MainViewModel) {
         }
     }
 
+    // ------------------------------------------------- welcome note
+    //
+    // On every app open a short loving note appears first (for exactly five
+    // seconds, then removes itself). It is pure UI: it is never stored in the
+    // chat history, the user memory or the check-in data. Plain `remember` (not
+    // saveable) means a fresh open always shows it again, with a new random line.
+    var welcomeDone by remember { mutableStateOf(false) }
+    if (!welcomeDone) {
+        com.dastyar.app.ui.components.WelcomeMessage(onFinished = { welcomeDone = true })
+        return
+    }
+
     // ------------------------------------------------- daily questionnaire
     //
     // The short daily questions appear on their own the first time the app is
