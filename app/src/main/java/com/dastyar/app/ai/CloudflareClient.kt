@@ -232,6 +232,12 @@ object CloudflareClient {
                     put("prompt", prompt)
                     put("image", intArrayOfNode(masked.image))
                     put("mask", intArrayOfNode(masked.mask))
+                    // The inpainting model accepts up to 20 steps and a negative
+                    // prompt; at the maximum step count the requested change is
+                    // actually applied instead of leaving the photo nearly
+                    // untouched.
+                    put("num_steps", 20)
+                    put("negative_prompt", "blurry, low quality, unchanged, identical")
                 }.toString(),
                 model
             )
