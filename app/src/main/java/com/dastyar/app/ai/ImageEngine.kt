@@ -114,7 +114,7 @@ object ImageEngine {
         if (AiClient.chatConfigured && ServiceKeys.openRouterSupportsImage() &&
             ServiceKeys.openRouterState() == ServiceKeys.State.CONNECTED
         ) {
-            val o = AiClient.providerImage(prompt, seed)
+            val o = AiClient.providerImage(englishPrompt, seed)
             if (o != null) {
                 UsageLog.record(
                     ctx, UsageLog.Provider.OPENROUTER, AiClient.discoveredImageModel,
@@ -202,14 +202,29 @@ object ImageEngine {
             reasons += "Cloudflare: متصل نشده است"
         }
 
-        // No real image-to-image fallback exists here. Pollinations' image
-        // endpoint only does text-to-image, so using it would ignore the user's
-        // photo and return a completely different picture -- exactly the bug we
-        // are fixing. Rather than show an unrelated image, report honestly that
-        // editing needs Cloudflare, which is the only connected engine that can
-        // keep the original picture.
-        reasons += "ویرایش تصویر فقط با Cloudflare ممکن است و سهمیهٔ آن در دسترس نیست"
+        // Second provider: OpenRouter's image model, when it accepts an input
+        // image. It receives the SAME translated English instruction and the
+        // user's ORIGINAL photo, so the edit is applied to that photo and not a
+        // picture generated from scratch.
+        if (AiClient.chatConfigured && ServiceKeys.openRouterSupportsImage() &&
+            ServiceKeys.openRouterState() == ServiceKeys.State.CONNECTED
+        ) {
+            val o = AiClient.providerImageEdit(englishPrompt, sourceBase64, mime, seed)
+            if (o != null) {
+                UsageLog.record(
+                    ctx, UsageLog.Provider.OPENROUTER, AiClient.discoveredImageModel,
+                    UsageLog.Kind.EDIT, true, 200, 0, null, ""
+                )
+                return@withContext Result.success(
+                    ImageOutcome(o, Source.OPENROUTER, "ویرایش تصویر با OpenRouter انجام شد.")
+                )
+            }
+            reasons += "OpenRouter: ${AiClient.lastImageError.ifBlank { "در دسترس نیست" }}"
+        }
 
+        // Pollinations' image endpoint only does text-to-image, so it is not
+        // used for edits: it would ignore the user's photo and return a
+        // completely different picture, which is exactly the bug being fixed.
         Result.failure(AiException(Failure(reasons).summary()))
     }
 

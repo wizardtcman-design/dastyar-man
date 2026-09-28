@@ -347,17 +347,20 @@ private fun GenerateSection(
     loading: Boolean,
     onGenerate: () -> Unit
 ) {
+    // Order matters here: the ready-made prompts sit directly above the chat
+    // box, and the box sits directly above the generate button, so a tap on a
+    // suggestion fills the box the user is looking at.
+    SectionTitle("پرامپت‌های آماده", "✨")
+    Spacer(Modifier.height(10.dp))
+    PromptGroups(groups = generateGroups) { onPrompt(expandedPrompt(it)) }
+
+    Spacer(Modifier.height(14.dp))
     PromptBox(
         value = prompt,
         onValue = onPrompt,
         placeholder = "توضیح بده چه تصویری می‌خواهی بسازم...",
         accent = Purple
     )
-
-    Spacer(Modifier.height(14.dp))
-    SectionTitle("پرامپت‌های آماده", "✨")
-    Spacer(Modifier.height(10.dp))
-    PromptGroups(groups = generateGroups) { onPrompt(expandedPrompt(it)) }
 
     Spacer(Modifier.height(14.dp))
     GradientButton(text = if (loading) "…" else "ساخت تصویر 🎨", enabled = !loading, onClick = onGenerate)

@@ -875,6 +875,42 @@ object AiClient {
         private set
 
     /**
+     * Image -> image on OpenRouter (the second image provider). The prompt is
+     * assumed already translated to English by the caller, and the user's real
+     * photo is sent as the source image so the model edits it instead of
+     * rendering a new scene. Only used when the resolved model accepts an input
+     * image.
+     */
+    suspend fun providerImageEdit(
+        prompt: String,
+        sourceBase64: String,
+        sourceMime: String = "image/png",
+        seed: Int = (1..999_999).random()
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        lastImageError = ""
+        val key = effectiveKey()
+        if (key.isBlank()) {
+            lastImageError = "کلید OpenRouter تنظیم نشده است."
+            return@withContext null
+        }
+        val p = activeProvider()
+        val caps = resolveImageModel(p, key)
+        if (caps == null || !caps.imageInput) {
+            lastImageError = "مدل تصویری فعلی از ورودی عکس پشتیبانی نمی‌کند."
+            return@withContext null
+        }
+        discoveredImageModel = caps.id
+        discoveredImageInput = caps.imageInput
+        val r = callImage(p, key, caps.id, prompt, sourceBase64, sourceMime)
+        val out = if (r.ok) r.value else {
+            lastImageError = r.message
+            null
+        }
+        refreshBalanceQuietly()
+        out
+    }
+
+    /**
      * Real image request to OpenRouter. Returns the bytes and the provider's own
      * reason on failure. [sourceBase64] is set for image-to-image.
      */
