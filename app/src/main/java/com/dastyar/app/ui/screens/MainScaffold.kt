@@ -6,6 +6,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -143,8 +145,33 @@ fun MainScaffold(vm: MainViewModel) {
         }
     }
 
-    // When the app opens a new day, jump straight into the short check-in.
-    LaunchedEffect(needsCheckIn) {
-        if (needsCheckIn) tab = "checkin"
+    // ------------------------------------------------- daily questionnaire
+    //
+    // The short daily questions appear on their own the first time the app is
+    // opened on a new day, as a full-screen overlay the user answers and closes.
+    // There is deliberately no permanent card or panel for it in the dashboard.
+    // Once today's row is saved, `shouldAskCheckIn` is false, so it appears only
+    // once per day no matter how many times the app is opened.
+    var dismissed by rememberSaveable { mutableStateOf(false) }
+    if (needsCheckIn && !dismissed) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                CheckInScreen(vm, onDone = { dismissed = true })
+                // A small, safe way out if the user is busy right now; the
+                // questions return the next time the app is opened today.
+                TextButton(
+                    onClick = { dismissed = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 8.dp)
+                ) {
+                    Text("بعداً", fontSize = 13.sp)
+                }
+            }
+        }
     }
 }

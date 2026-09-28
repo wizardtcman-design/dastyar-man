@@ -84,6 +84,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         /** Persisted key for the last successfully generated condition card. */
         const val FACT_CONDITION_CARD = "کارت شرایط پزشکی"
         const val FACT_SUGGESTION_AI = "پیشنهاد هوشمند امروز"
+
+        /**
+         * A stored marker, not user-facing text: the cooking screen renders it
+         * as the "reply was not complete" card and never shows raw model output.
+         */
+        const val MEAL_INVALID_REPLY = "[[meal_invalid]]"
     }
 
     // ---- smart tip for the current cycle day ----
@@ -634,7 +640,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             userMessage = text
         )
         res.onSuccess { reply ->
-            dao.addMessage(ChatMessage(channel = channel, role = "assistant", content = reply))
+            // The meal chats must only ever show a structured recipe. If the
+            // model replied with prose, an echo of its own instructions, or
+            // English reasoning, that text is discarded here so it can never be
+            // stored or rendered. A clean marker makes the UI show a retry.
+            val isMeal = channel == "lunch" || channel == "dinner"
+            val looksLikeRecipe = reply.contains("###") ||
+                    reply.contains("نام:") || reply.contains("مواد:")
+            val content = if (isMeal && !looksLikeRecipe) MEAL_INVALID_REPLY else reply
+            dao.addMessage(ChatMessage(channel = channel, role = "assistant", content = content))
         }.onFailure { e ->
             dao.addMessage(
                 ChatMessage(channel = channel, role = "assistant", content = "⚠️ ${e.message}")

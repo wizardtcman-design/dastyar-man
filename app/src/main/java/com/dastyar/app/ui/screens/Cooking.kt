@@ -382,6 +382,10 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                 if (m.role == "user") {
                     UserBubble(m)
                 } else {
+                    // In the meal chats only the structured recipe is ever
+                    // rendered. A model reply that is not a parseable recipe
+                    // (prose, an echo of the instructions, English reasoning) is
+                    // NEVER shown as text: the user sees a retry notice instead.
                     val recipes = remember(m.id, m.content) { parseRecipes(m.content) }
                     if (recipes.isNotEmpty()) {
                         recipes.forEach { d ->
@@ -393,20 +397,12 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                             )
                         }
                     } else {
-                        // The model answered in plain talk (or echoed its own
-                        // rules). Only cleaned, user-facing text is ever shown;
-                        // a breadcrumb of instructions is never displayed.
-                        val clean = remember(m.content) { sanitizeReply(m.content) }
-                        if (clean.isNotBlank()) {
-                            AssistantTextBubble(clean, meal.accent)
-                        } else {
-                            Card {
-                                Text(
-                                    "⚠️ پیشنهاد کامل دریافت نشد؛ «${meal.newLabel}» را دوباره بزن.",
-                                    fontSize = 12.5.sp,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
+                        Card {
+                            Text(
+                                "⚠️ پیشنهاد غذا کامل دریافت نشد؛ «${meal.newLabel}» را دوباره بزن.",
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }
@@ -523,20 +519,6 @@ private fun UserBubble(m: ChatMessage) {
     }
 }
 
-@Composable
-private fun AssistantTextBubble(text: String, accent: Color) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Box(
-            Modifier
-                .widthIn(max = 300.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Brush.linearGradient(listOf(Purple.copy(alpha = .85f), accent.copy(alpha = .7f))))
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            Text(text, fontSize = 13.sp, color = Color.White)
-        }
-    }
-}
 
 // ---------------------------------------------------------------- cards
 
@@ -825,33 +807,3 @@ private fun parseRecipes(text: String): List<Recipe> {
     return out
 }
 
-/**
- * Removes any leaked internal instruction from a model answer before it can be
- * shown. A model occasionally repeats part of its own rules, or answers with its
- * English "thinking" instead of the recipe. The user must only ever see the
- * food, never the prompt or the model's reasoning. Lines that belong to the
- * instruction format, and any line with almost no Persian, are dropped.
- */
-private fun sanitizeReply(text: String): String {
-    val ruleStarts = listOf(
-        "قواعد", "قالب", "برای هر غذا", "بین غذاها", "فقط غذای", "مواد اولیه باید",
-        "پیشنهادها متنوع", "بدون ادعای", "تو یک آشپز", "هدف:", "فارسی، کوتاه",
-        "هیچ توضیحی", "- فقط غذا", "here's", "here is", "analyze", "user wants",
-        "output must", "format:", "thinking", "step ", "we need", "the user",
-        "###"
-    )
-    val persian = Regex("""[\u0600-\u06FF]""")
-    val kept = text.lines().filter { raw ->
-        val line = raw.trim()
-        if (line.isEmpty()) return@filter false
-        val lower = line.lowercase()
-        if (ruleStarts.any { lower.startsWith(it) }) return@filter false
-        // A field line with a literal placeholder is instruction, not food.
-        if (line.contains("[") && line.contains("]")) return@filter false
-        // Drop lines that are essentially not Persian (model reasoning in English).
-        val persianChars = persian.findAll(line).count()
-        if (persianChars < 2) return@filter false
-        true
-    }
-    return kept.joinToString("\n").trim()
-}

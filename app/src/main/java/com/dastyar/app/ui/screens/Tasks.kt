@@ -106,23 +106,28 @@ fun TasksScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(14.dp))
 
-        // Responsive status filters: FlowRow wraps to a second line on narrow
-        // screens, so no chip ever runs off the edge.
+        // All four status filters sit in one responsive row (see FilterRow).
         FilterRow(filter, groups) { filter = it }
 
         Spacer(Modifier.height(14.dp))
 
-        GradientButton(if (showAddForm) "✖ بستن" else "➕ افزودن کار") {
+        GradientButton(if (showAddForm) "✖ بستن فرم دستی" else "➕ افزودن کار") {
             showAddForm = !showAddForm
         }
 
         if (showAddForm) {
             Spacer(Modifier.height(12.dp))
-            InlineAddPanel(
+            ManualAddCard(
                 vm = vm,
                 onSaved = { showAddForm = false }
             )
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        // A completely separate section: writing one sentence and letting the AI
+        // fill the fields. It is not part of the manual form above.
+        AiQuickAddCard(vm = vm)
 
         Spacer(Modifier.height(16.dp))
 
@@ -204,32 +209,32 @@ private data class Quadruple(
 )
 
 /**
- * The status filters. A FlowRow wraps the chips onto a second line on narrow
- * phones, so every chip stays fully inside the screen and its Persian label is
- * never clipped. Tapping a chip filters the list; tapping it again clears.
+ * The status filters. All four sit in ONE row at equal width: each is
+ * `weight(1f)`, so they share the available space and always stay inside the
+ * screen on any phone width. The label font and padding are kept small enough
+ * that "انجام‌شده" and "عقب‌افتاده" still fit on one line, and the label is
+ * allowed to shrink instead of moving to a second row.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FilterRow(
     selected: String,
     g: Quadruple,
     onSelect: (String) -> Unit
 ) {
-    FlowRow(
+    Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        FilterChipItem("🔴 عقب‌افتاده", g.overdue.size, RED, selected == "overdue") {
+        FilterChipItem("عقب‌افتاده", "🔴", g.overdue.size, RED, selected == "overdue", Modifier.weight(1f)) {
             onSelect(if (selected == "overdue") "" else "overdue")
         }
-        FilterChipItem("🟠 امروز", g.today.size, ORANGE, selected == "today") {
+        FilterChipItem("امروز", "🟠", g.today.size, ORANGE, selected == "today", Modifier.weight(1f)) {
             onSelect(if (selected == "today") "" else "today")
         }
-        FilterChipItem("🔵 آینده", g.future.size, BLUE, selected == "future") {
+        FilterChipItem("آینده", "🔵", g.future.size, BLUE, selected == "future", Modifier.weight(1f)) {
             onSelect(if (selected == "future") "" else "future")
         }
-        FilterChipItem("✅ انجام‌شده", g.done.size, Green, selected == "done") {
+        FilterChipItem("انجام‌شده", "✅", g.done.size, Green, selected == "done", Modifier.weight(1f)) {
             onSelect(if (selected == "done") "" else "done")
         }
     }
@@ -238,30 +243,46 @@ private fun FilterRow(
 @Composable
 private fun FilterChipItem(
     label: String,
+    emoji: String,
     count: Int,
     color: Color,
     active: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(14.dp))
+    Column(
+        modifier
+            .clip(RoundedCornerShape(13.dp))
             .background(if (active) color.copy(alpha = .30f) else color.copy(alpha = .15f))
             .border(
                 width = if (active) 1.5.dp else 1.dp,
                 color = if (active) color else color.copy(alpha = .30f),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(13.dp)
             )
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 4.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "$label  ${Dates.fa(count)}",
-            fontSize = 12.5.sp,
+            emoji,
+            fontSize = 12.sp,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(1.dp))
+        Text(
+            label,
+            fontSize = 11.5.sp,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
             color = color,
             maxLines = 1,
             softWrap = false
+        )
+        Text(
+            Dates.fa(count),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            maxLines = 1
         )
     }
 }
@@ -342,17 +363,18 @@ private fun repeatLabel(r: String) = when (r) {
 // ------------------------------------------------------------------ add flow
 
 /**
- * The inline "add a task" panel, shown directly on the tasks screen (no new
- * page). It contains the manual form on top and the AI quick-add box below it,
- * exactly in the order the tasks screen should read. Everything here is inside
- * the same vertical scroll as the list, so a long form never hides anything.
+ * Section 1 — the manual add form, shown inline on the tasks screen. The user
+ * fills the fields themselves (title, date, time, repeat, priority, reminder,
+ * description) and presses «✅ ثبت کار». It is fully independent of the AI
+ * section below it.
  */
 @Composable
-private fun InlineAddPanel(
+private fun ManualAddCard(
     vm: MainViewModel,
     onSaved: () -> Unit
 ) {
     var title by remember { mutableStateOf("") }
+    var desc by remember { mutableStateOf("") }
     var date by remember { mutableStateOf("") }
     var time by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("none") }
@@ -364,23 +386,6 @@ private fun InlineAddPanel(
     val notifPerm = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-
-    // ---- AI quick-add state ----
-    var sentence by remember { mutableStateOf("") }
-    var preview by remember { mutableStateOf<Task?>(null) }
-    val extracting by vm.taskExtractLoading.collectAsState()
-    val ai by vm.taskExtract.collectAsState()
-    val aiError by vm.taskExtractError.collectAsState()
-    var aiError2 by remember { mutableStateOf(false) }
-
-    LaunchedEffect(ai) { ai?.let { preview = it } }
-    // If the AI is unavailable, the same sentence is read offline at once.
-    LaunchedEffect(aiError, sentence) {
-        if (aiError != null && preview == null && sentence.isNotBlank() && !extracting) {
-            preview = com.dastyar.app.ai.TaskParser.parse(sentence)
-            aiError2 = true
-        }
-    }
 
     fun ensurePermissions() {
         if (Build.VERSION.SDK_INT >= 33 && !NotificationHelper.canPost(context)) {
@@ -394,8 +399,7 @@ private fun InlineAddPanel(
     }
 
     DastyarCard(accent = Purple) {
-        // ---------------------------------------------- manual form (top)
-        Text("افزودن کار", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("➕ افزودن کار", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = title,
@@ -427,6 +431,15 @@ private fun InlineAddPanel(
                 placeholder = { Text("۱۷:۰۰", fontSize = 12.sp) }
             )
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = desc,
+            onValueChange = { desc = it },
+            label = { Text("توضیحات (اختیاری)", fontSize = 12.5.sp) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            minLines = 2
+        )
         Spacer(Modifier.height(10.dp))
         Text("تکرار", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
@@ -460,6 +473,7 @@ private fun InlineAddPanel(
             vm.saveTask(
                 Task(
                     title = title.trim(),
+                    description = desc.trim(),
                     date = date.trim(),
                     time = time.trim(),
                     repeat = repeat,
@@ -469,30 +483,79 @@ private fun InlineAddPanel(
             )
             onSaved()
         }
+    }
 
-        // ------------------------------------------- AI quick-add (bottom)
-        Spacer(Modifier.height(18.dp))
-        Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-        Spacer(Modifier.height(14.dp))
-        Text("✨ ثبت سریع با هوش مصنوعی", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+    if (showDatePicker) {
+        JalaliDatePicker(
+            initialIso = date.ifBlank { Dates.today() },
+            onDismiss = { showDatePicker = false },
+            onPicked = { date = it; showDatePicker = false }
+        )
+    }
+}
+
+/**
+ * Section 2 — quick add with AI, a separate section from the manual form. The
+ * user writes one ordinary sentence, the AI extracts the fields, a preview is
+ * shown, and only pressing «✅ تأیید و ثبت» saves it. Nothing is saved on its
+ * own. If the AI is unavailable, the same sentence is read offline.
+ */
+@Composable
+private fun AiQuickAddCard(vm: MainViewModel) {
+    var sentence by remember { mutableStateOf("") }
+    var preview by remember { mutableStateOf<Task?>(null) }
+    var offline by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    val extracting by vm.taskExtractLoading.collectAsState()
+    val ai by vm.taskExtract.collectAsState()
+    val aiError by vm.taskExtractError.collectAsState()
+
+    val notifPerm = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
+    fun ensurePermissions() {
+        if (Build.VERSION.SDK_INT >= 33 && !NotificationHelper.canPost(context)) {
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !ReminderScheduler.canScheduleExact(context)
+        ) {
+            runCatching { context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)) }
+        }
+    }
+
+    LaunchedEffect(ai) { ai?.let { preview = it } }
+    LaunchedEffect(aiError, sentence) {
+        if (aiError != null && preview == null && sentence.isNotBlank() && !extracting) {
+            preview = com.dastyar.app.ai.TaskParser.parse(sentence)
+            offline = true
+        }
+    }
+
+    DastyarCard(accent = Cyan) {
+        Text("✨ ثبت سریع با هوش مصنوعی", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = sentence,
-            onValueChange = { sentence = it; aiError2 = false },
+            onValueChange = { sentence = it; offline = false },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            minLines = 2,
-            maxLines = 5,
-            placeholder = { Text("مثلاً بنویس: فردا ساعت ۵ عصر قبض برق رو پرداخت کنم", fontSize = 12.5.sp) }
+            minLines = 3,
+            maxLines = 6,
+            placeholder = {
+                Text("مثلاً بنویس: «فردا ساعت ۵ عصر قبض برق رو پرداخت کنم»", fontSize = 12.5.sp)
+            }
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "مثل همیشه و خودمانی بنویس؛ هوش مصنوعی تاریخ، ساعت و جزئیات کار را برایت مشخص می‌کند.",
+            "لازم نیست فرم پر کنی؛ جمله‌ات را خودمانی بنویس تا تاریخ، ساعت و جزئیات کار را مشخص کنم.",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(10.dp))
-        GradientButton("🤖 تبدیل به کار", enabled = sentence.isNotBlank() && !extracting) {
+        GradientButton("✨ تبدیل به کار", enabled = sentence.isNotBlank() && !extracting) {
             vm.extractTask(sentence)
         }
 
@@ -505,7 +568,7 @@ private fun InlineAddPanel(
             }
         }
 
-        if (aiError2 && preview != null) {
+        if (offline && preview != null) {
             Spacer(Modifier.height(10.dp))
             Text(
                 "هوش مصنوعی الان در دسترس نبود؛ همین جمله را خودم خواندم.",
@@ -524,43 +587,26 @@ private fun InlineAddPanel(
                 vm.clearTaskExtract()
                 preview = null
                 sentence = ""
-                onSaved()
             }
             Spacer(Modifier.height(6.dp))
             OutlinedButton(
                 onClick = {
-                    // Keep the extracted values, let the user fix them in the
-                    // manual form above.
-                    title = p.title
-                    date = p.date
-                    time = p.time
-                    repeat = p.repeat
-                    priority = p.priority
-                    reminder = p.reminderEnabled
-                    vm.clearTaskExtract()
                     preview = null
+                    vm.clearTaskExtract()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("✏️ ویرایش در فرم بالا")
+                Text("انصراف")
             }
             if (p.date.isBlank() || p.time.isBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "📅 تاریخ یا ساعت را نگفتی، پس یادآوری فعال نشد؛ می‌توانی در فرم بالا مشخص کنی.",
+                    "📅 تاریخ یا ساعت را نگفتی، پس یادآوری فعال نشد.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-    }
-
-    if (showDatePicker) {
-        JalaliDatePicker(
-            initialIso = date.ifBlank { Dates.today() },
-            onDismiss = { showDatePicker = false },
-            onPicked = { date = it; showDatePicker = false }
-        )
     }
 }
 
