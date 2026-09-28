@@ -722,8 +722,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _pantryLoading.value = false
             pantryRunning = false
             res.onSuccess { _pantryText.value = it }
-                .onFailure { _pantryError.value = it.message ?: "خطا در دریافت پیشنهاد" }
-        }
+                .onFailure { _pantryError.value = it.message ?: "خطا در دریافت پیشنهاد" }        }
     }
 
     fun clearPantry() {

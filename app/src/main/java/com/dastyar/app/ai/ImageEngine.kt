@@ -154,10 +154,16 @@ object ImageEngine {
         // instruction makes the model ignore the edit and render something else.
         val englishPrompt = toEnglishPrompt(prompt)
 
+        // Which slice of the picture the instruction is about, so the inpainting
+        // model changes only that part and leaves the rest untouched.
+        val region = editRegion(prompt)
+
         val model = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
         if (ServiceKeys.cloudflareReady() && !QuotaGuard.cloudflareExhaustedToday(ctx)) {
+            // A real edit needs a model that accepts the source image; prefer the
+            // true inpainting model so unmentioned parts are preserved.
             val editModel = when {
-                model != null && model.imageInput -> model
+                model != null && model.inpaint -> model
                 else -> CloudflareClient.editModel()
             }
             if (editModel != null && editModel.imageInput) {
@@ -167,7 +173,8 @@ object ImageEngine {
                     token = ServiceKeys.cloudflareToken(),
                     model = editModel,
                     prompt = englishPrompt,
-                    sourceBase64 = sourceBase64
+                    sourceBase64 = sourceBase64,
+                    region = region
                 )
                 UsageLog.record(
                     ctx, UsageLog.Provider.CLOUDFLARE, editModel.id, UsageLog.Kind.EDIT,
@@ -195,27 +202,32 @@ object ImageEngine {
             reasons += "Cloudflare: متصل نشده است"
         }
 
-        // Pollinations fallback: it takes a text prompt, so the edit request is
-        // folded into a full description and rendered fresh. Reuses the same
-        // English instruction computed above.
-        val pt0 = System.currentTimeMillis()
-        val p = PollinationsClient.image(englishPrompt, 768, 1024, seed, ServiceKeys.pollinationsKey())
-        UsageLog.record(
-            ctx, UsageLog.Provider.POLLINATIONS, "flux", UsageLog.Kind.EDIT,
-            p.ok, if (p.ok) 200 else 0, System.currentTimeMillis() - pt0, null, p.message
-        )
-        if (p.ok && p.value != null) {
-            return@withContext Result.success(
-                ImageOutcome(
-                    p.value,
-                    Source.POLLINATIONS,
-                    "Cloudflare ویرایش نکرد — تصویر با Pollinations تولید شد."
-                )
-            )
-        }
-        reasons += "Pollinations: ${p.message}"
+        // No real image-to-image fallback exists here. Pollinations' image
+        // endpoint only does text-to-image, so using it would ignore the user's
+        // photo and return a completely different picture -- exactly the bug we
+        // are fixing. Rather than show an unrelated image, report honestly that
+        // editing needs Cloudflare, which is the only connected engine that can
+        // keep the original picture.
+        reasons += "ویرایش تصویر فقط با Cloudflare ممکن است و سهمیهٔ آن در دسترس نیست"
 
         Result.failure(AiException(Failure(reasons).summary()))
+    }
+
+    /**
+     * Reads the user's instruction to decide which part of the picture the edit
+     * is allowed to touch. "Only change the sky" must not repaint the ground;
+     * "change the background" must keep the subject. Anything that names no
+     * region is treated as a whole-image edit.
+     */
+    private fun editRegion(prompt: String): CloudflareClient.EditRegion {
+        val p = prompt.lowercase()
+        val sky = listOf("آسمان", "اسمون", "sky", "cloud", "ابر")
+        val bg = listOf("پس‌زمینه", "پس زمینه", "زمینه", "background", "backdrop")
+        return when {
+            sky.any { p.contains(it) } -> CloudflareClient.EditRegion.SKY
+            bg.any { p.contains(it) } -> CloudflareClient.EditRegion.BACKGROUND
+            else -> CloudflareClient.EditRegion.WHOLE
+        }
     }
 
     /**

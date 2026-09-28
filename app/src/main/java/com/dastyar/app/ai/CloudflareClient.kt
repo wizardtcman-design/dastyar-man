@@ -51,6 +51,13 @@ object CloudflareClient {
         val imageInput: Boolean = false,
         val returnsJson: Boolean = false,
         /**
+         * True for real inpainting models: they take the source image plus a
+         * mask and only regenerate the masked region, so everything the user
+         * did not ask to change is preserved. This is the only honest
+         * image-to-image path on Cloudflare.
+         */
+        val inpaint: Boolean = false,
+        /**
          * Documented relative consumption. Cloudflare publishes per-model
          * Neuron rates in its pricing docs; when a rate is not published for a
          * model this stays null and the UI shows no number for it. It is never
@@ -77,6 +84,13 @@ object CloudflareClient {
             neuronHint = null
         ),
         CfModel(
+            id = "@cf/runwayml/stable-diffusion-v1-5-inpainting",
+            label = "ویرایش تصویر (Inpainting)",
+            imageInput = true,
+            inpaint = true,
+            neuronHint = "برای ویرایش تصویر؛ فقط ناحیهٔ خواسته‌شده را عوض می‌کند"
+        ),
+        CfModel(
             id = "@cf/leonardo/phoenix-1.0",
             label = "Leonardo Phoenix (ویرایش تصویر)",
             imageInput = true,
@@ -87,8 +101,13 @@ object CloudflareClient {
     /** The model used for text-to-image when the user has not chosen one. */
     val DEFAULT_MODEL: CfModel = MODELS.first()
 
-    /** A text-to-image model that can also edit when none else is available. */
-    fun editModel(): CfModel? = MODELS.firstOrNull { it.imageInput }
+    /**
+     * The model used for real image editing. Prefers a true inpainting model,
+     * because that is the only Cloudflare path that keeps the parts of the
+     * picture the user did not ask to change.
+     */
+    fun editModel(): CfModel? =
+        MODELS.firstOrNull { it.inpaint } ?: MODELS.firstOrNull { it.imageInput }
 
     fun modelById(id: String?): CfModel? = MODELS.firstOrNull { it.id == id }
 
@@ -184,17 +203,39 @@ object CloudflareClient {
     /**
      * Image -> image (edit). Only models that accept an input image are used;
      * the caller checks [CfModel.imageInput] first. Returns the edited bytes.
+     *
+     * For a true inpainting model the source image and a generated mask are
+     * sent, so only the masked region is regenerated and the rest of the
+     * picture is preserved.
      */
     suspend fun imageToImage(
         accountId: String,
         token: String,
         model: CfModel,
         prompt: String,
-        sourceBase64: String
+        sourceBase64: String,
+        region: EditRegion = EditRegion.WHOLE
     ): CfResult<ByteArray> = withContext(Dispatchers.IO) {
         if (!model.imageInput) return@withContext CfResult(
             false, CfFail.MODEL, "مدل «${model.label}» قابلیت ویرایش تصویر ندارد."
         )
+        // Real inpainting: decode the source, build a mask for the region the
+        // user asked to change, and send both as byte arrays.
+        if (model.inpaint) {
+            val src = try { Base64.getDecoder().decode(sourceBase64) } catch (_: Exception) { null }
+                ?: return@withContext CfResult(false, CfFail.MODEL, "تصویر پایه خوانده نشد.")
+            val masked = ImageMasker.build(src, region)
+                ?: return@withContext CfResult(false, CfFail.MODEL, "ساخت ماسک ویرایش ناموفق بود.")
+            return@withContext call(
+                accountId, token, runUrl(accountId, model.id),
+                buildJsonObject {
+                    put("prompt", prompt)
+                    put("image", intArrayOfNode(masked.image))
+                    put("mask", intArrayOfNode(masked.mask))
+                }.toString(),
+                model
+            )
+        }
         call(accountId, token,
             runUrl(accountId, model.id),
             buildJsonObject {
@@ -204,6 +245,18 @@ object CloudflareClient {
             model
         )
     }
+
+    /** Which part of the picture the edit is allowed to touch. */
+    enum class EditRegion { SKY, BACKGROUND, WHOLE }
+
+    /**
+     * Cloudflare's inpainting endpoint takes the image and mask as a JSON array
+     * of byte values, not as base64.
+     */
+    private fun intArrayOfNode(bytes: ByteArray): kotlinx.serialization.json.JsonArray =
+        kotlinx.serialization.json.JsonArray(
+            bytes.map { kotlinx.serialization.json.JsonPrimitive(it.toInt() and 0xFF) }
+        )
 
     private fun call(
         accountId: String,

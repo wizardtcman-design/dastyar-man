@@ -746,11 +746,13 @@ private fun parseRecipes(text: String): List<Recipe> {
         var alternatives = ""
         var shortage: String? = null
         var section = ""   // "ing" while reading ingredients, "steps" while reading steps
+        var sawName = false
 
         block.lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach { line ->
             when {
-                line.startsWith("نام:") || line.startsWith("نام :") ->
-                    name = line.substringAfter(":").trim()
+                line.startsWith("نام:") || line.startsWith("نام :") -> {
+                    name = line.substringAfter(":").trim(); sawName = true
+                }
                 line.startsWith("معرفی:") -> intro = line.substringAfter(":").trim()
                 line.startsWith("نفرات:") -> servings = line.substringAfter(":").trim()
                 line.startsWith("آماده‌سازی:") || line.startsWith("آماده سازی:") ->
@@ -780,7 +782,12 @@ private fun parseRecipes(text: String): List<Recipe> {
                                 if (clean.isNotEmpty()) steps += clean
                             }
                             else -> {
-                                if (name.isBlank()) name = body.removePrefix("🍽").trim()
+                                // No section marker yet. This is only trustworthy
+                                // when the block opened with an explicit «نام:».
+                                // Otherwise it is model prose (an echoed prompt or
+                                // an "I am a chef..." preamble) and must be
+                                // ignored, never turned into a dish name.
+                                if (name.isBlank() && sawName) name = body.removePrefix("🍽").trim()
                             }
                         }
                     }
@@ -788,7 +795,13 @@ private fun parseRecipes(text: String): List<Recipe> {
             }
         }
 
-        if (name.isNotBlank() || ings.isNotEmpty() || steps.isNotEmpty()) {
+        // Only a well-formed recipe is accepted: it must name the dish AND list
+        // either ingredients or steps. Placeholder echoes such as «نام: ...»
+        // from the model repeating the template are rejected too, so no prompt
+        // text can ever reach the UI.
+        val placeholder = name.replace(".", "").replace("…", "").trim().length < 2 ||
+                name == "..." || name == "…"
+        if (sawName && name.isNotBlank() && !placeholder && (ings.isNotEmpty() || steps.isNotEmpty())) {
             out += Recipe(
                 name = name.ifBlank { "غذای پیشنهادی" },
                 intro = intro,
