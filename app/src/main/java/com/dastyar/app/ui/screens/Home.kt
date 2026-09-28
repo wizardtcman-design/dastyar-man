@@ -117,28 +117,35 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         }
 
         // ------------------------------------------------- check-in reminder
-        if (needsCheckIn) {
-            item {
-                DastyarCard(onClick = onOpenCheckIn, accent = Amber) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(15.dp))
-                                .background(Amber.copy(alpha = .16f)),
-                            contentAlignment = Alignment.Center
-                        ) { Text("📝", fontSize = 21.sp) }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("وضعیت امروزت ثبت نشده", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text(
-                                "چند سؤال کوتاه — کمتر از یک دقیقه",
-                                fontSize = 11.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Tag("ثبت کن", Amber)
+        // The daily questions are always reachable: before they are answered the
+        // card asks for them, and after they are answered it offers to review
+        // today's record. This keeps the feature visible on every app opening.
+        item {
+            DastyarCard(onClick = onOpenCheckIn, accent = Amber) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(Amber.copy(alpha = .16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Text(if (needsCheckIn) "📝" else "✅", fontSize = 21.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (needsCheckIn) "وضعیت امروزت ثبت نشده"
+                            else "وضعیت امروزت ثبت شد",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        Text(
+                            if (needsCheckIn) "چند سؤال کوتاه — کمتر از یک دقیقه"
+                            else "برای ویرایش، همین‌جا بزن",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
+                    Tag(if (needsCheckIn) "ثبت کن" else "مشاهده", Amber)
                 }
             }
         }

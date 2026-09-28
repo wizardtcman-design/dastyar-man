@@ -383,9 +383,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                     UserBubble(m)
                 } else {
                     val recipes = remember(m.id, m.content) { parseRecipes(m.content) }
-                    if (recipes.isEmpty()) {
-                        AssistantTextBubble(m.content, meal.accent)
-                    } else {
+                    if (recipes.isNotEmpty()) {
                         recipes.forEach { d ->
                             RecipeCard(
                                 r = d,
@@ -393,6 +391,22 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                                 busy = busy,
                                 onSave = { vm.saveRecipe(d.name, meal.title, d.raw) }
                             )
+                        }
+                    } else {
+                        // The model answered in plain talk (or echoed its own
+                        // rules). Only cleaned, user-facing text is ever shown;
+                        // a breadcrumb of instructions is never displayed.
+                        val clean = remember(m.content) { sanitizeReply(m.content) }
+                        if (clean.isNotBlank()) {
+                            AssistantTextBubble(clean, meal.accent)
+                        } else {
+                            Card {
+                                Text(
+                                    "⚠️ پیشنهاد کامل دریافت نشد؛ «${meal.newLabel}» را دوباره بزن.",
+                                    fontSize = 12.5.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
                 }
@@ -535,7 +549,16 @@ private fun RecipeCard(
     onSave: () -> Unit
 ) {
     DastyarCard(accent = accent) {
-        Text(r.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 2)
+        Text("🍲 ${r.name}", fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 3)
+
+        if (r.intro.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                r.intro,
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         FlowRow(
             Modifier.padding(top = 6.dp),
@@ -588,6 +611,38 @@ private fun RecipeCard(
                     .padding(10.dp)
             ) {
                 Text("🧂 کمبود: $it", fontSize = 12.sp)
+            }
+        }
+
+        if (r.notes.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text("💡 نکات مهم", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(r.notes, fontSize = 13.sp)
+        }
+
+        if (r.alternatives.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text("🔁 جایگزین مواد", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(r.alternatives, fontSize = 13.sp)
+        }
+
+        // A recipe that lost its ingredients or steps is never shown as if it
+        // were whole: the user is told and can ask for it again.
+        if (!r.isComplete) {
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = .45f))
+                    .padding(10.dp)
+            ) {
+                Text(
+                    "⚠️ این پیشنهاد کامل دریافت نشد. لطفاً «پیشنهاد جدید» را بزن.",
+                    fontSize = 12.sp
+                )
             }
         }
 
@@ -671,14 +726,20 @@ private fun SavedRecipeCard(r: SavedRecipe, onDelete: () -> Unit) {
 /** One parsed recipe block from the model's structured answer. */
 private data class Recipe(
     val name: String,
+    val intro: String = "",
     val servings: String = "",
     val prep: String = "",
     val cook: String = "",
     val ingredients: List<Pair<String, String>> = emptyList(),
     val steps: List<String> = emptyList(),
+    val notes: String = "",
+    val alternatives: String = "",
     val shortage: String? = null,
     val raw: String = ""
-)
+) {
+    /** A recipe is shown as complete only when it has ingredients and steps. */
+    val isComplete: Boolean get() = ingredients.isNotEmpty() && steps.isNotEmpty()
+}
 
 /**
  * Parses the marker-based answer into recipe blocks. It is tolerant: anything
@@ -693,11 +754,14 @@ private fun parseRecipes(text: String): List<Recipe> {
     val out = mutableListOf<Recipe>()
     blocks.forEach { block ->
         var name = ""
+        var intro = ""
         var servings = ""
         var prep = ""
         var cook = ""
         val ings = mutableListOf<Pair<String, String>>()
         val steps = mutableListOf<String>()
+        var notes = ""
+        var alternatives = ""
         var shortage: String? = null
         var section = ""   // "ing" while reading ingredients, "steps" while reading steps
 
@@ -705,11 +769,15 @@ private fun parseRecipes(text: String): List<Recipe> {
             when {
                 line.startsWith("نام:") || line.startsWith("نام :") ->
                     name = line.substringAfter(":").trim()
+                line.startsWith("معرفی:") -> intro = line.substringAfter(":").trim()
                 line.startsWith("نفرات:") -> servings = line.substringAfter(":").trim()
                 line.startsWith("آماده‌سازی:") || line.startsWith("آماده سازی:") ->
                     prep = line.substringAfter(":").trim()
                 line.startsWith("پخت:") -> cook = line.substringAfter(":").trim()
                 line.startsWith("کمبود:") -> shortage = line.substringAfter(":").trim()
+                line.startsWith("نکات:") || line.startsWith("نکته:") ->
+                    notes = line.substringAfter(":").trim()
+                line.startsWith("جایگزین:") -> alternatives = line.substringAfter(":").trim()
                 line.startsWith("مواد:") -> section = "ing"
                 line.startsWith("مراحل:") -> section = "steps"
                 else -> {
@@ -741,15 +809,41 @@ private fun parseRecipes(text: String): List<Recipe> {
         if (name.isNotBlank() || ings.isNotEmpty() || steps.isNotEmpty()) {
             out += Recipe(
                 name = name.ifBlank { "غذای پیشنهادی" },
+                intro = intro,
                 servings = servings,
                 prep = prep,
                 cook = cook,
                 ingredients = ings,
                 steps = steps,
+                notes = notes,
+                alternatives = alternatives,
                 shortage = shortage,
                 raw = block
             )
         }
     }
     return out
+}
+
+/**
+ * Removes any leaked internal instruction from a model answer before it can be
+ * shown. A model occasionally repeats part of its own rules; the user must only
+ * ever see food, never the prompt. Lines that belong to the instruction format
+ * are dropped, and common rule sentences are removed.
+ */
+private fun sanitizeReply(text: String): String {
+    val ruleStarts = listOf(
+        "قواعد", "قالب", "برای هر غذا", "بین غذاها", "فقط غذای", "مواد اولیه باید",
+        "پیشنهادها متنوع", "بدون ادعای", "تو یک آشپز", "هدف:", "فارسی، کوتاه",
+        "هیچ توضیحی", "- فقط غذا", "نکات:", "جایگزین:", "معرفی:", "###"
+    )
+    val kept = text.lines().filter { raw ->
+        val line = raw.trim()
+        if (line.isEmpty()) return@filter false
+        if (ruleStarts.any { line.startsWith(it) }) return@filter false
+        // A raw field line with a literal placeholder is instruction, not food.
+        if (line.contains("[") && line.contains("]")) return@filter false
+        true
+    }
+    return kept.joinToString("\n").trim()
 }

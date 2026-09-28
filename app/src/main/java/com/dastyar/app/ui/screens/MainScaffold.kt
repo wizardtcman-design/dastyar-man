@@ -9,9 +9,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.dastyar.app.ui.MainViewModel
 
 private data class TabItem(val route: String, val label: String, val icon: ImageVector)
@@ -20,6 +23,20 @@ private data class TabItem(val route: String, val label: String, val icon: Image
 fun MainScaffold(vm: MainViewModel) {
     var tab by remember { mutableStateOf("home") }
     val todayCheckIn by vm.todayCheckIn.collectAsState()
+
+    // Detect a new day while the app stays open or is brought back from the
+    // background: on every resume, reload today's check-in. If the date rolled
+    // over, today's row is missing again and the daily questions re-appear.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                vm.onAppResumed()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // A notification tap deep-links straight into the check-in screen.
     val openCheckIn by vm.openCheckIn.collectAsState()

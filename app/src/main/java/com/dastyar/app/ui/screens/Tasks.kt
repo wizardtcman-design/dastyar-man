@@ -7,17 +7,13 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.data.Dates
@@ -63,7 +60,9 @@ fun TasksScreen(vm: MainViewModel) {
     val tasks by vm.tasks.collectAsState()
     val context = LocalContext.current
 
-    var adding by remember { mutableStateOf(false) }
+    // filters: "" = all, else overdue/today/future/done
+    var filter by remember { mutableStateOf("") }
+    var showAddForm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Task?>(null) }
 
     // A notification tap asks the app to open this exact task for editing.
@@ -75,8 +74,6 @@ fun TasksScreen(vm: MainViewModel) {
         }
     }
 
-    // Notification permission (Android 13+) is requested the first time the
-    // tasks screen is shown, so a real reminder can actually be delivered.
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
@@ -86,59 +83,74 @@ fun TasksScreen(vm: MainViewModel) {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            ScreenHeader(
-                emoji = "✅",
-                title = "کارهای من",
-                subtitle = "کارت را بنویس، یادآوری واقعی بگیر."
-            )
-
-            Spacer(Modifier.height(14.dp))
-
-            GradientButton("➕ افزودن کار") {
-                editing = null
-                adding = true
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            TaskSummary(tasks)
-
-            Spacer(Modifier.height(16.dp))
-
-            if (tasks.isEmpty()) {
-                DastyarCard {
-                    Text(
-                        "هنوز کاری ثبت نکردی. با «➕ افزودن کار» شروع کن؛ می‌توانی فقط " +
-                                "یک جمله بنویسی و بقیه‌اش را به من بسپاری.",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                val (overdue, today, future, done) = groupTasks(tasks)
-                TaskGroup("🔴 عقب‌افتاده", RED, overdue, vm) { editing = it }
-                TaskGroup("🟠 امروز", ORANGE, today, vm) { editing = it }
-                TaskGroup("🔵 آینده", BLUE, future, vm) { editing = it }
-                TaskGroup("✅ انجام‌شده", Green, done, vm) { editing = it }
-            }
-
-            Spacer(Modifier.height(30.dp))
-        }
+    val groups = remember(tasks) { groupTasks(tasks) }
+    val shown: List<Task> = when (filter) {
+        "overdue" -> groups.overdue
+        "today" -> groups.today
+        "future" -> groups.future
+        "done" -> groups.done
+        else -> tasks.sortedWith(compareBy({ it.done }, { it.date.ifBlank { "9999" } }, { it.time }))
     }
 
-    if (adding) {
-        AddTaskFlow(
-            vm = vm,
-            onDismiss = { adding = false; vm.clearTaskExtract() },
-            onSave = { vm.saveTask(it); adding = false; vm.clearTaskExtract() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        ScreenHeader(
+            emoji = "✅",
+            title = "کارهای من",
+            subtitle = "کارت را بنویس، یادآوری واقعی بگیر."
         )
+
+        Spacer(Modifier.height(14.dp))
+
+        // Responsive status filters: FlowRow wraps to a second line on narrow
+        // screens, so no chip ever runs off the edge.
+        FilterRow(filter, groups) { filter = it }
+
+        Spacer(Modifier.height(14.dp))
+
+        GradientButton(if (showAddForm) "✖ بستن" else "➕ افزودن کار") {
+            showAddForm = !showAddForm
+        }
+
+        if (showAddForm) {
+            Spacer(Modifier.height(12.dp))
+            InlineAddPanel(
+                vm = vm,
+                onSaved = { showAddForm = false }
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        if (tasks.isEmpty()) {
+            DastyarCard {
+                Text(
+                    "هنوز کاری ثبت نکردی. با «➕ افزودن کار» شروع کن؛ می‌توانی فقط " +
+                            "یک جمله بنویسی و بقیه‌اش را به من بسپاری.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else if (shown.isEmpty()) {
+            DastyarCard {
+                Text(
+                    "در این دسته کاری نیست.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            shown.forEach { t ->
+                TaskCard(t, accentFor(t, groups), vm) { editing = t }
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
     }
 
     editing?.let { task ->
@@ -149,6 +161,15 @@ fun TasksScreen(vm: MainViewModel) {
             onDelete = { vm.deleteTask(it); editing = null }
         )
     }
+}
+
+/** Colour of a task's card based on which group it belongs to. */
+private fun accentFor(t: Task, g: Quadruple): Color = when {
+    t.done -> Green
+    t.date.isBlank() -> BLUE
+    t.date < Dates.today() -> RED
+    t.date == Dates.today() -> ORANGE
+    else -> BLUE
 }
 
 // ------------------------------------------------------------------ summary
@@ -182,58 +203,70 @@ private data class Quadruple(
     val done: List<Task>
 )
 
+/**
+ * The status filters. A FlowRow wraps the chips onto a second line on narrow
+ * phones, so every chip stays fully inside the screen and its Persian label is
+ * never clipped. Tapping a chip filters the list; tapping it again clears.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TaskSummary(tasks: List<Task>) {
-    val (overdue, today, future, done) = groupTasks(tasks)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+private fun FilterRow(
+    selected: String,
+    g: Quadruple,
+    onSelect: (String) -> Unit
+) {
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        SummaryPill("🔴 عقب‌افتاده", overdue.size, RED)
-        SummaryPill("🟠 امروز", today.size, ORANGE)
-        SummaryPill("🔵 آینده", future.size, BLUE)
-        SummaryPill("✅ انجام‌شده", done.size, Green)
+        FilterChipItem("🔴 عقب‌افتاده", g.overdue.size, RED, selected == "overdue") {
+            onSelect(if (selected == "overdue") "" else "overdue")
+        }
+        FilterChipItem("🟠 امروز", g.today.size, ORANGE, selected == "today") {
+            onSelect(if (selected == "today") "" else "today")
+        }
+        FilterChipItem("🔵 آینده", g.future.size, BLUE, selected == "future") {
+            onSelect(if (selected == "future") "" else "future")
+        }
+        FilterChipItem("✅ انجام‌شده", g.done.size, Green, selected == "done") {
+            onSelect(if (selected == "done") "" else "done")
+        }
     }
 }
 
 @Composable
-private fun SummaryPill(label: String, count: Int, color: Color) {
+private fun FilterChipItem(
+    label: String,
+    count: Int,
+    color: Color,
+    active: Boolean,
+    onClick: () -> Unit
+) {
     Box(
         Modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(color.copy(alpha = .16f))
+            .background(if (active) color.copy(alpha = .30f) else color.copy(alpha = .15f))
+            .border(
+                width = if (active) 1.5.dp else 1.dp,
+                color = if (active) color else color.copy(alpha = .30f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Text(
             "$label  ${Dates.fa(count)}",
             fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            color = color
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+            color = color,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
 
 // --------------------------------------------------------------------- list
-
-@Composable
-private fun TaskGroup(
-    title: String,
-    color: Color,
-    items: List<Task>,
-    vm: MainViewModel,
-    onEdit: (Task) -> Unit
-) {
-    if (items.isEmpty()) return
-    SectionTitle(title, "")
-    Spacer(Modifier.height(8.dp))
-    items.forEach { t ->
-        TaskCard(t, color, vm) { onEdit(t) }
-        Spacer(Modifier.height(10.dp))
-    }
-    Spacer(Modifier.height(6.dp))
-}
 
 @Composable
 private fun TaskCard(t: Task, accent: Color, vm: MainViewModel, onEdit: () -> Unit) {
@@ -309,170 +342,232 @@ private fun repeatLabel(r: String) = when (r) {
 // ------------------------------------------------------------------ add flow
 
 /**
- * The "add a task" panel. It shows one big writing box with always-visible
- * guidance, asks the AI to read the sentence, and shows a preview the user must
- * confirm. If the AI fails, the same sentence is read by the offline parser and
- * the preview still appears; the manual form is always one tap away.
+ * The inline "add a task" panel, shown directly on the tasks screen (no new
+ * page). It contains the manual form on top and the AI quick-add box below it,
+ * exactly in the order the tasks screen should read. Everything here is inside
+ * the same vertical scroll as the list, so a long form never hides anything.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddTaskFlow(
+private fun InlineAddPanel(
     vm: MainViewModel,
-    onDismiss: () -> Unit,
-    onSave: (Task) -> Unit
+    onSaved: () -> Unit
 ) {
+    var title by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf("") }
+    var time by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("none") }
+    var priority by remember { mutableStateOf("normal") }
+    var reminder by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    val notifPerm = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
+    // ---- AI quick-add state ----
     var sentence by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Task?>(null) }
-    var manual by remember { mutableStateOf(false) }
-
     val extracting by vm.taskExtractLoading.collectAsState()
     val ai by vm.taskExtract.collectAsState()
     val aiError by vm.taskExtractError.collectAsState()
-    var localError by remember { mutableStateOf<String?>(null) }
+    var aiError2 by remember { mutableStateOf(false) }
 
-    // The AI answer becomes the preview when it arrives.
     LaunchedEffect(ai) { ai?.let { preview = it } }
-
-    // If the AI could not answer, the same sentence is read offline right away,
-    // so the user still gets a preview instead of a dead end.
+    // If the AI is unavailable, the same sentence is read offline at once.
     LaunchedEffect(aiError, sentence) {
         if (aiError != null && preview == null && sentence.isNotBlank() && !extracting) {
             preview = com.dastyar.app.ai.TaskParser.parse(sentence)
+            aiError2 = true
         }
     }
 
-    if (manual) {
-        ManualTaskSheet(
-            initial = preview,
-            onDismiss = onDismiss,
-            onSave = onSave,
-            onDelete = null
-        )
-        return
-    }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .imePadding()
-                .padding(20.dp)
+    fun ensurePermissions() {
+        if (Build.VERSION.SDK_INT >= 33 && !NotificationHelper.canPost(context)) {
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !ReminderScheduler.canScheduleExact(context)
         ) {
-            Text("کار جدید", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Spacer(Modifier.height(14.dp))
-
-            Text(
-                "✍️ چه کاری داری؟",
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = sentence,
-                onValueChange = { sentence = it; localError = null },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                minLines = 3,
-                maxLines = 6,
-                placeholder = {
-                    Text("فردا ساعت ۵ عصر قبض برق رو پرداخت کنم", fontSize = 13.sp)
-                }
-            )
-
-            Spacer(Modifier.height(10.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = .08f))
-                    .padding(12.dp)
-            ) {
-                Column {
-                    Text("مثلاً بنویس:", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "«فردا ساعت ۵ عصر قبض برق رو پرداخت کنم»",
-                        fontSize = 12.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "لازم نیست فرم پر کنی؛ فقط مثل همیشه جمله‌ات رو بنویس. " +
-                                "من تاریخ، ساعت و جزئیات کار رو برات مشخص می‌کنم.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-            GradientButton("🤖 استخراج اطلاعات", enabled = sentence.isNotBlank() && !extracting) {
-                if (sentence.isBlank()) localError = "اول جمله‌ات را بنویس."
-                else vm.extractTask(sentence)
-            }
-
-            if (extracting) {
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text("دارم جمله‌ات را می‌خوانم…", fontSize = 13.sp)
-                }
-            }
-
-            // If the AI could not answer, the sentence was read offline instead.
-            if (aiError != null && preview != null) {
-                Spacer(Modifier.height(12.dp))
-                DastyarCard(accent = Amber) {
-                    Text(
-                        "هوش مصنوعی الان در دسترس نیست؛ همین جمله را خودم خواندم. " +
-                                "لازم شد می‌توانی با «ویرایش» اصلاح کنی.",
-                        fontSize = 12.5.sp
-                    )
-                }
-            }
-
-            localError?.let {
-                Spacer(Modifier.height(10.dp))
-                Text("⚠️ $it", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.error)
-            }
-
-            preview?.let { p ->
-                Spacer(Modifier.height(16.dp))
-                PreviewCard(p)
-                Spacer(Modifier.height(12.dp))
-                GradientButton("✅ تأیید و ثبت") { onSave(p) }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { manual = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("✏️ ویرایش")
-                }
-                if (p.date.isBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "📅 تاریخ را نگفتی. با «ویرایش» می‌توانی زمان یادآوری را مشخص کنی.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-            TextButton(onClick = { manual = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("فرم دستی (بدون هوش مصنوعی)", fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(20.dp))
+            runCatching { context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)) }
         }
+    }
+
+    DastyarCard(accent = Purple) {
+        // ---------------------------------------------- manual form (top)
+        Text("افزودن کار", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            label = { Text("عنوان کار") },
+            placeholder = { Text("پرداخت قبض برق", fontSize = 12.5.sp) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { showDatePicker = true },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    if (date.isBlank()) "📅 تاریخ" else "📅 ${Dates.pretty(date)}",
+                    fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+            OutlinedTextField(
+                value = if (time.isBlank()) "" else Dates.faTime(time),
+                onValueChange = { v -> time = Dates.timeInput(v) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true,
+                label = { Text("ساعت", fontSize = 12.sp) },
+                placeholder = { Text("۱۷:۰۰", fontSize = 12.sp) }
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("تکرار", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
+        ChoiceChips(repeats, repeatLabel(repeat)) { label ->
+            repeat = when (label) {
+                "روزانه" -> "daily"
+                "هفتگی" -> "weekly"
+                "ماهانه" -> "monthly"
+                else -> "none"
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("اولویت", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
+        ChoiceChips(priorities, priorityLabel(priority), accent = Amber) { label ->
+            priority = when (label) {
+                "بالا" -> "high"
+                "کم" -> "low"
+                else -> "normal"
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = reminder, onCheckedChange = { reminder = it })
+            Spacer(Modifier.width(10.dp))
+            Text("یادآوری با اعلان گوشی", fontSize = 13.5.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        GradientButton("✅ ثبت کار", enabled = title.isNotBlank()) {
+            if (reminder) ensurePermissions()
+            vm.saveTask(
+                Task(
+                    title = title.trim(),
+                    date = date.trim(),
+                    time = time.trim(),
+                    repeat = repeat,
+                    priority = priority,
+                    reminderEnabled = reminder && date.isNotBlank()
+                )
+            )
+            onSaved()
+        }
+
+        // ------------------------------------------- AI quick-add (bottom)
+        Spacer(Modifier.height(18.dp))
+        Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+        Spacer(Modifier.height(14.dp))
+        Text("✨ ثبت سریع با هوش مصنوعی", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = sentence,
+            onValueChange = { sentence = it; aiError2 = false },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            minLines = 2,
+            maxLines = 5,
+            placeholder = { Text("مثلاً بنویس: فردا ساعت ۵ عصر قبض برق رو پرداخت کنم", fontSize = 12.5.sp) }
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "مثل همیشه و خودمانی بنویس؛ هوش مصنوعی تاریخ، ساعت و جزئیات کار را برایت مشخص می‌کند.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        GradientButton("🤖 تبدیل به کار", enabled = sentence.isNotBlank() && !extracting) {
+            vm.extractTask(sentence)
+        }
+
+        if (extracting) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("دارم جمله‌ات را می‌خوانم…", fontSize = 13.sp)
+            }
+        }
+
+        if (aiError2 && preview != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "هوش مصنوعی الان در دسترس نبود؛ همین جمله را خودم خواندم.",
+                fontSize = 12.sp,
+                color = Amber
+            )
+        }
+
+        preview?.let { p ->
+            Spacer(Modifier.height(14.dp))
+            PreviewCard(p)
+            Spacer(Modifier.height(10.dp))
+            GradientButton("✅ تأیید و ثبت") {
+                if (p.reminderEnabled) ensurePermissions()
+                vm.saveTask(p)
+                vm.clearTaskExtract()
+                preview = null
+                sentence = ""
+                onSaved()
+            }
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = {
+                    // Keep the extracted values, let the user fix them in the
+                    // manual form above.
+                    title = p.title
+                    date = p.date
+                    time = p.time
+                    repeat = p.repeat
+                    priority = p.priority
+                    reminder = p.reminderEnabled
+                    vm.clearTaskExtract()
+                    preview = null
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("✏️ ویرایش در فرم بالا")
+            }
+            if (p.date.isBlank() || p.time.isBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "📅 تاریخ یا ساعت را نگفتی، پس یادآوری فعال نشد؛ می‌توانی در فرم بالا مشخص کنی.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        JalaliDatePicker(
+            initialIso = date.ifBlank { Dates.today() },
+            onDismiss = { showDatePicker = false },
+            onPicked = { date = it; showDatePicker = false }
+        )
     }
 }
 
 @Composable
 private fun PreviewCard(p: Task) {
     DastyarCard(accent = Purple) {
-        Text("کار جدید", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("پیش‌نمایش کار", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
         Text(p.title.ifBlank { "کار بدون عنوان" }, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         if (p.description.isNotBlank()) {

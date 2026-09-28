@@ -288,6 +288,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _suggestion.value = dao.suggestion(t)
     }
 
+    /**
+     * Called whenever the app comes back to the foreground. If the calendar day
+     * changed while the app was open or in the background, today's check-in is
+     * reloaded (it no longer exists for the new date), so the short daily
+     * questions appear again exactly once on the new day.
+     */
+    fun onAppResumed() = viewModelScope.launch {
+        val today = Dates.today()
+        if (_lastSeenDay == null) _lastSeenDay = today
+        if (_lastSeenDay != today) {
+            _lastSeenDay = today
+            refreshToday()
+            // Yesterday's suggestion and skin tip no longer apply.
+            _suggestion.value = null
+            _skinTip.value = null
+            skinTipLoadedFor = null
+        } else {
+            // Same day: make sure a row saved elsewhere is not missed.
+            refreshToday()
+        }
+    }
+
+    private var _lastSeenDay: String? = null
+
     // ------------------------------------------------------------- profile
 
     /**

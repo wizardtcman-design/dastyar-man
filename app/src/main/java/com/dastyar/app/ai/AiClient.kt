@@ -41,7 +41,10 @@ object AiClient {
         .build()
 
     /** Replies are short Persian text; this is plenty and keeps cost tiny. */
-    private const val CHAT_MAX_TOKENS = 900
+    // Enough for two full cooking recipes (intro, ingredients, steps, notes and
+    // alternatives) so a reply is never cut off mid-recipe, while staying small
+    // enough to work on a free account.
+    private const val CHAT_MAX_TOKENS = 1800
 
     /**
      * Image generation reserves a large output budget by default, which a
@@ -658,25 +661,32 @@ object AiClient {
                         http.newCall(req).execute().use { resp ->
                             val text = resp.body?.string().orEmpty()
                             if (resp.isSuccessful) {
-                                val msg = json.parseToJsonElement(text)
+                                val choice = json.parseToJsonElement(text)
                                     .jsonObject["choices"]?.jsonArray
                                     ?.firstOrNull()?.jsonObject
-                                    ?.get("message")?.jsonObject
+                                val msg = choice?.get("message")?.jsonObject
                                 val content = msg?.get("content")?.jsonPrimitive?.contentOrNull
+                                // "length" means the model ran out of tokens, so
+                                // the answer is cut off. It must never be shown
+                                // as a complete reply.
+                                val truncated =
+                                    choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull == "length"
                                 // A model that returns an image replies with a
                                 // null content and the picture under
                                 // `message.images`; reading only `content`
                                 // would wrongly look empty.
                                 val hasImage = !msg?.get("images")?.jsonArray.isNullOrEmpty()
-                                if (!content.isNullOrBlank()) {
+                                if (!content.isNullOrBlank() && !truncated) {
                                     if (candidate.model != model) usedFreeFallback = true
                                     activeTextModel = candidate.model
                                     refreshBalanceQuietly()
                                     return@withContext Result.success(content.trim())
                                 }
-                                lastError = if (hasImage)
-                                    "پاسخ تصویری از سرویس دریافت شد."
-                                else "پاسخ خالی از سرور دریافت شد."
+                                lastError = when {
+                                    truncated -> "پاسخ ناقص از سرویس دریافت شد؛ دوباره تلاش کن."
+                                    hasImage -> "پاسخ تصویری از سرویس دریافت شد."
+                                    else -> "پاسخ خالی از سرور دریافت شد."
+                                }
                             } else {
                                 lastError = describeError(resp.code, text)
                                 // A 402/401/403 is model- or key-specific: stop
