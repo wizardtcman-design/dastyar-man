@@ -26,6 +26,8 @@ import com.dastyar.app.ai.QuotaGuard
 import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.ai.UsageLog
 import com.dastyar.app.data.Health
+import com.dastyar.app.security.AppLock
+import com.dastyar.app.security.LockScreen
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Profile
 import com.dastyar.app.notifications.DailyReminder
@@ -36,6 +38,7 @@ import com.dastyar.app.ui.theme.Amber
 import com.dastyar.app.ui.theme.Cyan
 import com.dastyar.app.ui.theme.Green
 import com.dastyar.app.ui.theme.Purple
+import com.dastyar.app.ui.theme.Rose
 import kotlinx.coroutines.launch
 
 @Composable
@@ -77,11 +80,43 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var poStatus by remember { mutableStateOf<String?>(null) }
     var showPoEdit by remember { mutableStateOf(false) }
 
+    // App lock (PIN / pattern / fingerprint)
+    var lockEnabled by remember { mutableStateOf(AppLock.isEnabled(ctx)) }
+    var lockMode by remember { mutableStateOf(AppLock.mode(ctx)) }
+    var lockBiometric by remember { mutableStateOf(AppLock.biometricEnabled(ctx)) }
+    var lockSetup by remember { mutableStateOf<String?>(null) }   // null | "pin" | "pattern"
+    var lockSetupError by remember { mutableStateOf<String?>(null) }
+
     // Refresh the real provider balance as soon as Settings opens.
     LaunchedEffect(Unit) {
         balanceLoading = true
         balance = AiClient.fetchBalance()
         balanceLoading = false
+    }
+
+    // Setting/changing the lock code: take over the whole screen with the same
+    // pad the unlock gate uses, then store the code.
+    val setupMode = lockSetup
+    if (setupMode != null) {
+        LockScreen(
+            title = if (lockEnabled) "رمز جدید را وارد کن" else "برای فعال‌سازی قفل، رمز را وارد کن",
+            subtitle = if (setupMode == AppLock.MODE_PATTERN)
+                "الگو را روی نقطه‌ها بکش (حداقل ۴ نقطه)"
+            else
+                "رمز عددی خود را وارد کن (حداقل ۴ رقم)",
+            mode = setupMode,
+            allowBiometric = false,
+            error = lockSetupError,
+            onCode = { code ->
+                AppLock.setCode(ctx, setupMode, code)
+                lockMode = setupMode
+                lockEnabled = true
+                lockSetup = null
+                lockSetupError = null
+            },
+            onCancel = { lockSetup = null; lockSetupError = null }
+        )
+        return
     }
 
     Column(
@@ -104,6 +139,82 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // ---- app lock ----
+        DastyarCard(accent = Rose) {
+            SectionTitle("قفل برنامه", "🔒")
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (lockEnabled)
+                    "قفل فعال است. با هر بار باز کردن برنامه، رمز " +
+                            (if (lockMode == AppLock.MODE_PATTERN) "الگو" else "عدد") +
+                            " خواسته می‌شود."
+                else
+                    "با فعال‌سازی قفل، ورود به برنامه فقط با رمز عددی، الگو یا اثر انگشت ممکن است.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            if (!lockEnabled) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { lockSetup = AppLock.MODE_PIN; lockSetupError = null },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("رمز عددی", fontSize = 13.sp) }
+                    Button(
+                        onClick = { lockSetup = AppLock.MODE_PATTERN; lockSetupError = null },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black)
+                    ) { Text("الگوی نقطه‌ای", fontSize = 13.sp) }
+                }
+            } else {
+                Text(
+                    "روش فعلی: " + (if (lockMode == AppLock.MODE_PATTERN) "الگوی نقطه‌ای" else "رمز عددی"),
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = lockBiometric,
+                        onCheckedChange = {
+                            lockBiometric = it
+                            AppLock.setBiometricEnabled(ctx, it)
+                        }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("ورود با اثر انگشت", fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (biometricAvailable(ctx))
+                        "اثر انگشت روی این گوشی در دسترس است."
+                    else
+                        "این گوشی اثر انگشت ندارد یا هنوز اثر انگشت روی آن ثبت نشده است.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { lockSetup = lockMode; lockSetupError = null },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("تغییر رمز", fontSize = 13.sp) }
+                    OutlinedButton(
+                        onClick = {
+                            AppLock.disable(ctx)
+                            lockEnabled = false
+                            lockBiometric = false
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("غیرفعال کردن", fontSize = 13.sp) }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
         // ---- personal info ----
         DastyarCard(accent = MaterialTheme.colorScheme.primary) {
             SectionTitle("اطلاعات شخصی", "👤")
@@ -1029,4 +1140,12 @@ private fun ServiceButton(
     OutlinedButton(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(12.dp)) {
         Text(text, fontSize = 12.sp)
     }
+}
+
+/** True when the phone has a usable fingerprint/face sensor configured. */
+private fun biometricAvailable(ctx: android.content.Context): Boolean {
+    val manager = androidx.biometric.BiometricManager.from(ctx)
+    val auth = androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+    return manager.canAuthenticate(auth) == androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS
 }

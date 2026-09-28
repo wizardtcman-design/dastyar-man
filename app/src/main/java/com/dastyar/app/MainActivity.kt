@@ -2,8 +2,8 @@ package com.dastyar.app
 
 import android.content.res.Configuration
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.fragment.app.FragmentActivity
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +25,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dastyar.app.notifications.DailyReminder
 import com.dastyar.app.ai.ServiceKeys
+import com.dastyar.app.security.AppLock
+import com.dastyar.app.security.LockScreen
+import com.dastyar.app.security.showBiometricPrompt
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.screens.ConnectGate
 import com.dastyar.app.ui.screens.MainScaffold
@@ -32,7 +35,7 @@ import com.dastyar.app.ui.screens.OnboardingFlow
 import com.dastyar.app.ui.theme.DastyarTheme
 import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_OPEN_CHECKIN = "open_checkin"
@@ -76,11 +79,44 @@ class MainActivity : ComponentActivity() {
                     // in state so a successful test moves straight on.
                     var keyReady by remember { mutableStateOf(ServiceKeys.anyConnected()) }
 
+                    // App lock: when the user has set a PIN/pattern, nothing is
+                    // shown until they unlock. "locked" is plain remember, so the
+                    // lock re-arms every time the activity is created (cold start).
+                    val ctx = LocalContext.current
+                    var locked by remember { mutableStateOf(AppLock.isEnabled(ctx)) }
+                    var lockError by remember { mutableStateOf<String?>(null) }
+
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
                         when {
+                            locked -> {
+                                LockScreen(
+                                    title = "دستیار من قفل است",
+                                    subtitle = "برای ورود، رمز یا الگوی خود را وارد کن",
+                                    mode = AppLock.mode(ctx),
+                                    allowBiometric = AppLock.biometricEnabled(ctx),
+                                    error = lockError,
+                                    onBiometricRequested = {
+                                        showBiometricPrompt(
+                                            activity = this@MainActivity,
+                                            title = "ورود با اثر انگشت"
+                                        ) { ok ->
+                                            if (ok) { lockError = null; locked = false }
+                                            else lockError = "اثر انگشت تأیید نشد"
+                                        }
+                                    },
+                                    onCode = { code ->
+                                        if (AppLock.verify(ctx, code)) {
+                                            lockError = null
+                                            locked = false
+                                        } else {
+                                            lockError = "رمز اشتباه است"
+                                        }
+                                    }
+                                )
+                            }
                             !keyReady -> {
                                 // Edge-to-edge: keep the first-run gate clear of the
                                 // status bar, navigation bar and any display cutout,

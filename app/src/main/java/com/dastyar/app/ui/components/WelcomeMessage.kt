@@ -103,11 +103,11 @@ fun WelcomeMessage(onFinished: () -> Unit) {
     // open, and reopening the app creates a new composition.
     val message = remember { WELCOME_MESSAGES[Random.nextInt(WELCOME_MESSAGES.size)] }
 
-    // Exact five-second lifetime, then a quick fade-out and auto-dismiss with no
+    // Exact three-second lifetime, then a quick fade-out and auto-dismiss with no
     // tap required.
     var visible by remember { mutableStateOf(true) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        delay(5_000)
+        delay(3_000)
         visible = false
         delay(350)          // let the fade-out finish before the overlay unmounts
         onFinished()
