@@ -133,6 +133,41 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             }
         }
 
+        // --------------------------------------- body weight & fatigue (2 cards)
+        // Directly under the energy/sleep row. Equal width and height, RTL
+        // order: قد و وزن on the right, بی‌رمقی on the left.
+        item {
+            val bmi = Health.bmi(profile)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)
+            ) {
+                MiniStat(
+                    emoji = "⚖️",
+                    label = "قد و وزن",
+                    value = if (bmi != null) Dates.fa("%.1f".format(bmi)) else "—",
+                    sub = when {
+                        bmi == null -> "ثبت نشده"
+                        Health.bmiAdultBandsApply(profile) && Health.bmiCategory(profile) != null ->
+                            Health.bmiCategory(profile)!!
+                        else -> "شاخص توده بدنی"
+                    },
+                    accent = Green,
+                    onClick = { showWeightDialog = true },
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                MiniStat(
+                    emoji = "🥱",
+                    label = "وضعیت بی‌رمقی",
+                    value = today?.fatigueSeverity?.ifBlank { profileHintFatigue(profile) }
+                        ?: profileHintFatigue(profile),
+                    sub = fatigueHint(today),
+                    accent = Rose,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+            }
+        }
+
         item {
             WaterCard(
                 water = water,
@@ -175,41 +210,6 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                 loading = loadingSkinTip,
                 onRefresh = { vm.loadSkinTip(force = true) }
             )
-        }
-
-        // --------------------------------------- body weight & fatigue (2 cards)
-        // قد و وزن sits here, next to وضعیت بی‌رمقی. Equal width and height, RTL
-        // order: قد و وزن on the right, بی‌رمقی on the left.
-        item {
-            val bmi = Health.bmi(profile)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                MiniStat(
-                    emoji = "⚖️",
-                    label = "قد و وزن",
-                    value = if (bmi != null) Dates.fa("%.1f".format(bmi)) else "—",
-                    sub = when {
-                        bmi == null -> "ثبت نشده"
-                        Health.bmiAdultBandsApply(profile) && Health.bmiCategory(profile) != null ->
-                            Health.bmiCategory(profile)!!
-                        else -> "شاخص توده بدنی"
-                    },
-                    accent = Green,
-                    onClick = { showWeightDialog = true },
-                    modifier = Modifier.weight(1f)
-                )
-                MiniStat(
-                    emoji = "🥱",
-                    label = "وضعیت بی‌رمقی",
-                    value = today?.fatigueSeverity?.ifBlank { profileHintFatigue(profile) }
-                        ?: profileHintFatigue(profile),
-                    sub = fatigueHint(today),
-                    accent = Rose,
-                    modifier = Modifier.weight(1f)
-                )
-            }
         }
 
         // ---------------------------------------------------- today's plan
@@ -876,7 +876,7 @@ private fun MiniStat(
 ) {
     Column(
         modifier
-            .height(130.dp)
+            .heightIn(min = 130.dp)
             .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
@@ -904,12 +904,13 @@ private fun MiniStat(
         Spacer(Modifier.height(4.dp))
         Text(value, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         Spacer(Modifier.height(2.dp))
+        // No line cap: the short description always shows in full, so the card
+        // simply grows a little instead of cutting the text off.
         Text(
             sub,
             fontSize = 10.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 3,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            lineHeight = 15.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
