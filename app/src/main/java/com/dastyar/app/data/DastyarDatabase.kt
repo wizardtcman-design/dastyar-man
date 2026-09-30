@@ -17,9 +17,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WeightEntry::class,
         SmartFact::class,
         SavedImage::class,
-        SavedRecipe::class
+        SavedRecipe::class,
+        PeriodEvent::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class DastyarDatabase : RoomDatabase() {
@@ -67,13 +68,33 @@ abstract class DastyarDatabase : RoomDatabase() {
             }
         }
 
+        // v5 -> v6 adds the period-history table, which the cycle ring uses to
+        // learn the user's real cycle over time. Nothing else is touched, and
+        // the current-cycle anchor on the profile is left exactly as it was.
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `period_events` (" +
+                            "`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                            "`startIso` TEXT NOT NULL, " +
+                            "`endIso` TEXT NOT NULL, " +
+                            "`source` TEXT NOT NULL, " +
+                            "`createdAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                            "`index_period_events_startIso` ON `period_events` (`startIso`)"
+                )
+            }
+        }
+
         fun get(context: Context): DastyarDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     DastyarDatabase::class.java,
                     "dastyar.db"
-                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }

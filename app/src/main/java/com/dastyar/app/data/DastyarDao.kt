@@ -144,6 +144,28 @@ interface DastyarDao {
     @Query("DELETE FROM saved_recipes WHERE id = :id")
     suspend fun deleteSavedRecipe(id: Long)
 
+    // ---- Period history ----
+    @Query("SELECT * FROM period_events ORDER BY startIso ASC")
+    fun periodEventsFlow(): Flow<List<PeriodEvent>>
+
+    @Query("SELECT * FROM period_events ORDER BY startIso ASC")
+    suspend fun periodEvents(): List<PeriodEvent>
+
+    @Query("SELECT * FROM period_events ORDER BY startIso DESC LIMIT 1")
+    suspend fun latestPeriodEvent(): PeriodEvent?
+
+    @Query("SELECT * FROM period_events WHERE startIso = :startIso LIMIT 1")
+    suspend fun periodEvent(startIso: String): PeriodEvent?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun savePeriodEvent(e: PeriodEvent): Long
+
+    @Query("DELETE FROM period_events")
+    suspend fun clearPeriodEvents()
+
+    @Query("DELETE FROM period_events WHERE id = :id")
+    suspend fun deletePeriodEvent(id: Long)
+
     // ---- Data management ----
     @Query("DELETE FROM checkins")
     suspend fun clearCheckIns()

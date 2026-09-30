@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dastyar.app.data.Cycle
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Health
 import com.dastyar.app.data.Profile
@@ -29,31 +30,54 @@ import com.dastyar.app.ui.theme.Cyan
 import com.dastyar.app.ui.theme.Rose
 
 /**
- * The menstrual-cycle ring. A full, unbroken 360° circle where one lap equals
- * one whole cycle: day 1 sits at the top and the days run clockwise. Every
- * single day of the cycle gets its own small dot, so a 20-day cycle shows 20
- * dots, a 28-day cycle shows 28, and so on — the count is never hard-coded.
+ * The menstrual-cycle ring.
+ *
+ * It is a ring, not a fully closed circle: a fixed gap of about
+ * [Cycle.RING_GAP_DAYS] days of visual space is always left at the top, so the
+ * first day of the period and the last day of the cycle are visibly separated
+ * instead of running into each other. The gap is a fixed *visual* size — it is
+ * the same on a 25-day cycle and a 35-day cycle — and every real day is spread
+ * evenly across the rest of the circumference.
+ *
+ * One lap still equals one whole cycle, day 1 sits just after the top gap and
+ * the days run clockwise. Every single day gets its own small dot, so a 20-day
+ * cycle shows 20 dots, a 28-day cycle shows 28, and so on — the count is never
+ * hard-coded.
  *
  * The coloured phases (period, ovulation, PMS) are all derived from the user's
  * own cycle length and period length through [Health.cycleWindows]. Ovulation
  * and PMS are estimates, not medical certainties.
  *
- * The user can change the cycle length and the period length right here; both
- * are persisted through the profile and the ring recalculates immediately.
+ * The user can change the cycle length and the period length right here, and
+ * can record the start and the end of a period. Both are persisted through the
+ * profile/history and the ring recalculates immediately.
  */
 @Composable
 fun CycleRing(
     profile: Profile?,
     cycleDay: Int,
+    info: Cycle.Info?,
     onStartPeriod: () -> Unit,
+    onEndPeriod: () -> Unit,
     onSetCycleLength: (Int) -> Unit,
     onSetPeriodDays: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val windows = Health.cycleWindows(profile)
+    // Prefer the lengths learned from the real history; fall back to the
+    // profile's declared values when there is not enough history yet.
+    val windows = if (info != null && info.hasCycle) {
+        Health.cycleWindows(info.startIso, info.length, info.periodDays)
+    } else {
+        Health.cycleWindows(profile)
+    }
     val hasData = windows != null && cycleDay > 0
     val length = windows?.length ?: (profile?.cycleLength ?: 28).coerceIn(15, 60)
     val periodDays = windows?.periodEnd ?: (profile?.periodDays ?: 5).coerceIn(1, 12)
+    val overdue = Cycle.isOverdue(info)
+    val overdueDays = Cycle.overdueDays(info)
+    // The marker uses the clamped day, so an overdue cycle parks on the last
+    // day instead of silently wrapping to day 1.
+    val markerDay = if (hasData) Cycle.markerDay(info).coerceAtLeast(1) else 0
 
     val periodColor = Rose
     val ovColor = Cyan
@@ -79,20 +103,38 @@ fun CycleRing(
                 val r = d / 2f
                 val cX = topLeft.x + r
                 val cY = topLeft.y + r
-                val perDay = 360f / length
-                // A day's dot sits at the CENTRE of that day's slice, so the
-                // full circle is covered evenly with no gap or overlap.
-                fun angleFor(day: Int) = Math.toRadians((-90.0 + (day - 0.5) * perDay))
+
+                // ---- geometry of the open ring -------------------------------
+                // The full 360° is shared between the real days and the fixed
+                // visual gap at the top. The gap takes the same share of the
+                // circumference on every cycle, so it is always the same size
+                // on screen regardless of how long the cycle is.
+                val gapDeg = 360f * (Cycle.RING_GAP_DAYS / (length + Cycle.RING_GAP_DAYS))
+                val usableDeg = 360f - gapDeg
+                val perDay = usableDeg / length
+                // The gap is centred on the top (12 o'clock), so the usable arc
+                // runs clockwise from just right of the gap all the way round
+                // to just left of it.
+                val startAngle = -90f + gapDeg / 2f
+
+                // A day's dot sits at the CENTRE of that day's slice.
+                fun angleFor(day: Int) =
+                    Math.toRadians((startAngle + (day - 0.5) * perDay).toDouble())
                 fun pointFor(day: Int): Offset {
                     val a = angleFor(day)
                     return Offset(cX + (r * Math.cos(a)).toFloat(), cY + (r * Math.sin(a)).toFloat())
                 }
+                // Arc angles for a run of whole days, measured in the same
+                // clockwise system as the dots.
+                fun arcStart(day: Int) = startAngle + (day - 1) * perDay
+                fun arcSweep(fromDay: Int, toDay: Int) = (toDay - fromDay + 1) * perDay
 
-                // Unbroken base track.
+                // The base track is drawn as the usable arc only: the top gap
+                // stays empty, which is what makes the break visible.
                 drawArc(
                     color = trackColor,
-                    startAngle = 0f,
-                    sweepAngle = 360f,
+                    startAngle = startAngle,
+                    sweepAngle = usableDeg,
                     useCenter = false,
                     topLeft = topLeft,
                     size = arcSize,
@@ -103,14 +145,10 @@ fun CycleRing(
                     val w = windows
                     fun drawRange(startDay: Int, endDay: Int, color: Color) {
                         if (endDay < startDay) return
-                        // Draw from the edge of the first day's slice to the edge
-                        // of the last day's slice so adjacent phases meet exactly.
-                        val start = -90f + (startDay - 1) * perDay
-                        val sweep = (endDay - startDay + 1) * perDay
                         drawArc(
                             color = color,
-                            startAngle = start,
-                            sweepAngle = sweep,
+                            startAngle = arcStart(startDay),
+                            sweepAngle = arcSweep(startDay, endDay),
                             useCenter = false,
                             topLeft = topLeft,
                             size = arcSize,
@@ -126,7 +164,7 @@ fun CycleRing(
                     drawRange(w.pmsStart, w.pmsEnd, pmsColor)
 
                     // One small dot per day of the cycle — the day number is
-                    // readable from its position (day 1 at the top).
+                    // readable from its position (day 1 just after the gap).
                     for (day in 1..length) {
                         val p = pointFor(day)
                         drawCircle(Color.White.copy(alpha = .95f), radius = dotR, center = p)
@@ -135,11 +173,14 @@ fun CycleRing(
 
                 // Current-day marker: a small ring that hugs the day's own dot,
                 // with the day number drawn inside it. It never covers the band.
-                if (hasData) {
-                    val mp = pointFor(cycleDay)
+                if (hasData && markerDay > 0) {
+                    val mp = pointFor(markerDay)
                     val mr = stroke * 0.78f
                     drawCircle(Color.White, radius = mr, center = mp)
-                    drawCircle(periodColor, radius = mr, center = mp, style = Stroke(width = 2.5f))
+                    drawCircle(
+                        if (overdue) Amber else periodColor,
+                        radius = mr, center = mp, style = Stroke(width = 2.5f)
+                    )
                 }
             }
 
@@ -156,14 +197,28 @@ fun CycleRing(
                 Spacer(Modifier.height(4.dp))
                 if (hasData) {
                     Text(
-                        if (cycleDay == 1) "روز اول پریود" else "روز ${Dates.fa(cycleDay)} چرخه",
+                        when {
+                            overdue -> "چرخه از موعد گذشته"
+                            cycleDay == 1 -> "روز اول پریود"
+                            else -> "روز ${Dates.fa(cycleDay)} چرخه"
+                        },
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
-                    Health.phaseLabel(profile)?.let {
-                        Spacer(Modifier.height(2.dp))
-                        Text(it, fontSize = 11.5.sp, color = periodColor, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    if (overdue) {
+                        Text(
+                            "${Dates.fa(overdueDays)} روز تأخیر — منتظر شروع پریودی",
+                            fontSize = 11.5.sp,
+                            color = Amber,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                    } else {
+                        Health.phaseLabel(profile)?.let {
+                            Text(it, fontSize = 11.5.sp, color = periodColor, fontWeight = FontWeight.Bold)
+                        }
                     }
                 } else {
                     Text(
@@ -181,23 +236,47 @@ fun CycleRing(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                // The real button: opens the existing period date picker.
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .clickable { onStartPeriod() }
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🩸", fontSize = 14.sp)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (hasData) "ویرایش پریود" else "شروع پریود",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
+                // Two real actions: start a period (opens the date picker) and,
+                // once a period is running, mark the day it ended.
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .clickable { onStartPeriod() }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🩸", fontSize = 14.sp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (hasData) "ویرایش / شروع پریود" else "شروع پریود",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    if (hasData) {
+                        Spacer(Modifier.height(6.dp))
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable { onEndPeriod() }
+                                .padding(horizontal = 16.dp, vertical = 7.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("✅", fontSize = 13.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "پایان پریود",
+                                    fontSize = 12.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                 }
             }

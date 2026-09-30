@@ -226,8 +226,19 @@ object Health {
     fun cycleWindows(profile: Profile?): CycleWindows? {
         val p = profile ?: return null
         if (p.lastPeriodDate.isBlank() || Dates.parse(p.lastPeriodDate) == null) return null
-        val len = if (p.cycleLength in 15..60) p.cycleLength else 28
-        val periodDays = p.periodDays.coerceIn(1, 10)
+        return cycleWindows(p.lastPeriodDate, p.cycleLength, p.periodDays)
+    }
+
+    /**
+     * The same windows, but with the cycle and period length supplied by the
+     * caller. The ring uses this with the lengths [Cycle] learned from the real
+     * recorded history, so the coloured phases follow the user's own pattern
+     * instead of the number typed once in the questionnaire.
+     */
+    fun cycleWindows(startIso: String, cycleLength: Int, periodDaysRaw: Int): CycleWindows? {
+        if (startIso.isBlank() || Dates.parse(startIso) == null) return null
+        val len = if (cycleLength in 15..60) cycleLength else 28
+        val periodDays = periodDaysRaw.coerceIn(1, 10)
         val periodEnd = min(periodDays, len)
         val ovStart = ovulationStart(len)
         val ovEnd = min(ovStart + 3, len)

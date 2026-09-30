@@ -7,10 +7,12 @@ import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.Prompts
 import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.data.CheckIn
+import com.dastyar.app.data.Cycle
 import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.DastyarDatabase
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Health
+import com.dastyar.app.data.PeriodEvent
 import com.dastyar.app.data.Profile
 import com.dastyar.app.data.SavedImage
 import com.dastyar.app.data.SavedRecipe
@@ -43,6 +45,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val smartFacts: StateFlow<List<SmartFact>> = dao.smartFactsFlow()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Every period the user has recorded, oldest first. This is the history the
+     * cycle ring learns from: the first row comes from onboarding, later rows
+     * from the "شروع پریود" / "پایان پریود" taps.
+     */
+    val periodEvents: StateFlow<List<PeriodEvent>> = dao.periodEventsFlow()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val today: String get() = Dates.today()
@@ -191,6 +201,70 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- AI refinement of the cycle prediction (never blocking) ----
+
+    /**
+     * An AI-written sentence that explains the learned cycle prediction. The
+     * local [Cycle] calculation is what actually drives the ring and the dates;
+     * this text is only an extra, warmer explanation. It is optional by design:
+     * when there is no key or no network, the dashboard simply keeps the local
+     * summary and nothing breaks.
+     */
+    private val _cycleNote = MutableStateFlow<String?>(null)
+    val cycleNote: StateFlow<String?> = _cycleNote.asStateFlow()
+
+    private val _loadingCycleNote = MutableStateFlow(false)
+    val loadingCycleNote: StateFlow<Boolean> = _loadingCycleNote.asStateFlow()
+
+    private var cycleNoteLoadedFor: String? = null
+
+    /**
+     * Asks the AI to explain the current prediction in one short Persian
+     * sentence, using only the real numbers already computed locally. Any
+     * failure is silent: the local summary stays, so the user always sees an
+     * answer.
+     */
+    fun loadCycleNote(force: Boolean = false) = viewModelScope.launch {
+        val p = profile.value ?: return@launch
+        val events = periodEvents.value
+        val info = Cycle.info(p, events) ?: run {
+            _cycleNote.value = null
+            return@launch
+        }
+        if (!info.hasCycle) {
+            _cycleNote.value = null
+            return@launch
+        }
+        val key = "${info.startIso}-${info.length}-${info.periodDays}-${info.samples}-${Cycle.rawDay(info)}"
+        if (!force && cycleNoteLoadedFor == key && _cycleNote.value != null) return@launch
+        if (!AiClient.chatConfigured) return@launch
+
+        _loadingCycleNote.value = true
+        val res = AiClient.chat(
+            system = Prompts.base(),
+            history = emptyList(),
+            userMessage = Prompts.cyclePredictionPrompt(
+                day = Cycle.rawDay(info),
+                length = info.length,
+                periodDays = info.periodDays,
+                samples = info.samples,
+                overdueDays = Cycle.overdueDays(info),
+                irregular = info.irregular,
+                nextDate = Cycle.nextPeriodDate(info)
+            )
+        )
+        _loadingCycleNote.value = false
+        res.onSuccess { text ->
+            val cleaned = text.trim()
+            if (cleaned.isNotBlank()) {
+                _cycleNote.value = cleaned
+                cycleNoteLoadedFor = key
+            }
+        }
+        // No onFailure branch: the local summary is the fallback, so a failure
+        // is not worth interrupting the user with.
+    }
+
     /**
      * Produces a short, educational explanation of the conditions the user
      * declared in their profile. Each forced load advances to a new topic, so
@@ -336,6 +410,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             dao.saveCheckIn(first)
             withContext(Dispatchers.Main) { _todayCheckIn.value = first }
         }
+        // Seed the period history with the questionnaire's own period date, so
+        // the very first cycle already exists in the history the ring learns
+        // from. Later cycles are added by the "شروع پریود" tap. This only ever
+        // adds a row; it never overwrites a date the user recorded later.
+        if (p.lastPeriodDate.isNotBlank() && dao.periodEvent(p.lastPeriodDate) == null) {
+            val firstSeed = dao.periodEvents().isEmpty()
+            dao.savePeriodEvent(
+                PeriodEvent(
+                    startIso = p.lastPeriodDate,
+                    endIso = if (firstSeed) Dates.plusDays(p.lastPeriodDate, p.periodDays - 1) else "",
+                    source = "onboarding"
+                )
+            )
+        }
         if (p.weightKg > 0f) {
             dao.saveWeight(WeightEntry(date = Dates.today(), weightKg = p.weightKg))
         }
@@ -363,18 +451,99 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Records the start date of a new period. It reuses the existing profile
-     * pipeline, so the cycle day, the tip and the period reminders all
-     * recalculate from the new date with no extra machinery.
+     * Records the start date of a new period.
+     *
+     * It does two things that must stay in step: it moves the profile's
+     * current-cycle anchor (which the whole app already reads), and it adds a
+     * [PeriodEvent] row so the real history keeps growing. The first event is
+     * tagged `onboarding` when it is the very first one, so the history is
+     * honest about where each date came from. The cycle day, the tip and the
+     * period reminders all recalculate from the new date with no extra
+     * machinery.
      */
     fun recordPeriodStart(dateIso: String) = viewModelScope.launch(Dispatchers.IO) {
         val current = dao.profile() ?: return@launch
         val updated = current.copy(lastPeriodDate = dateIso)
         dao.saveProfile(updated)
+
+        // Keep the history in step with the anchor. A blank end is correct here:
+        // the period has just started, so its end is not known yet.
+        val existing = dao.periodEvent(dateIso)
+        val hadAny = dao.periodEvents().isNotEmpty()
+        dao.savePeriodEvent(
+            existing?.copy(startIso = dateIso)
+                ?: PeriodEvent(
+                    startIso = dateIso,
+                    endIso = "",
+                    source = if (hadAny) "user" else "onboarding"
+                )
+        )
+
         // Re-arm the period reminders from the new date (same rule as saveProfile).
         com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), updated)
         withContext(Dispatchers.Main) {
             _toast.value = "شروع پریود ثبت شد 🩸"
+            _cycleTip.value = null
+            cycleTipLoadedFor = null
+            loadCycleTip(force = true)
+        }
+    }
+
+    /**
+     * Records the last day of bleeding for the current period.
+     *
+     * The end is written onto the matching history row (the one whose start is
+     * the current anchor) so the app learns how long this user's period really
+     * lasts instead of assuming the questionnaire number forever. If the end is
+     * before the start, or absurdly far after it, the entry is rejected with a
+     * plain message rather than corrupting the history.
+     */
+    fun recordPeriodEnd(dateIso: String) = viewModelScope.launch(Dispatchers.IO) {
+        val current = dao.profile() ?: return@launch
+        val anchor = current.lastPeriodDate
+        if (anchor.isBlank()) {
+            withContext(Dispatchers.Main) { _toast.value = "اول تاریخ شروع پریود را ثبت کن." }
+            return@launch
+        }
+        if (!Cycle.isValidPeriod(anchor, dateIso)) {
+            withContext(Dispatchers.Main) {
+                _toast.value = "تاریخ پایان باید بعد از شروع پریود و منطقی باشد."
+            }
+            return@launch
+        }
+
+        val existing = dao.periodEvent(anchor)
+        dao.savePeriodEvent(
+            existing?.copy(endIso = dateIso)
+                ?: PeriodEvent(startIso = anchor, endIso = dateIso, source = "user")
+        )
+
+        // The learned period length may have changed, so refresh the tip.
+        withContext(Dispatchers.Main) {
+            _toast.value = "پایان پریود ثبت شد ✅"
+            _cycleTip.value = null
+            cycleTipLoadedFor = null
+            loadCycleTip(force = true)
+        }
+    }
+
+    /**
+     * Deletes a recorded period from the history. Used when the user realises a
+     * date was entered by mistake; the current anchor is only moved when the
+     * deleted row was the anchor itself, so the ring never points at a period
+     * that no longer exists.
+     */
+    fun deletePeriodEvent(startIso: String) = viewModelScope.launch(Dispatchers.IO) {
+        val current = dao.profile() ?: return@launch
+        val events = dao.periodEvents()
+        val row = events.firstOrNull { it.startIso == startIso } ?: return@launch
+        dao.deletePeriodEvent(row.id)
+        if (current.lastPeriodDate == startIso) {
+            val previous = events.filter { it.startIso != startIso }.maxByOrNull { it.startIso }
+            dao.saveProfile(current.copy(lastPeriodDate = previous?.startIso.orEmpty()))
+        }
+        withContext(Dispatchers.Main) {
+            _toast.value = "این پریود از تاریخچه حذف شد."
             _cycleTip.value = null
             cycleTipLoadedFor = null
             loadCycleTip(force = true)
