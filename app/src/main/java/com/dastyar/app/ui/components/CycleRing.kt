@@ -123,7 +123,7 @@ fun CycleRing(
                     .pointerInput(reachableDay, length, startAngleOf(length)) {
                         detectTapGestures { tap ->
                             if (reachableDay <= 0) return@detectTapGestures
-                            val minDim = size.minDimension.toFloat()
+                            val minDim = minOf(size.width, size.height).toFloat()
                             val strokePx = minDim * 0.055f
                             val insetPx = strokePx / 2f + minDim * 0.03f
                             val dPx = minDim - insetPx * 2f
