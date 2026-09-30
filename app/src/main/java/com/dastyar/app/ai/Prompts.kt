@@ -560,6 +560,48 @@ $state
     }
 
     /**
+     * Prompt for the one-sentence explanation of the learned cycle prediction
+     * shown on the dashboard ring. Every number here was computed locally by
+     * [com.dastyar.app.data.Cycle] from the user's own recorded periods; the
+     * model may only phrase it warmly. It must never invent a different date,
+     * diagnose, or present an estimate as a certainty.
+     */
+    fun cyclePredictionPrompt(
+        day: Int,
+        length: Int,
+        periodDays: Int,
+        samples: Int,
+        overdueDays: Int,
+        irregular: Boolean,
+        nextDate: String?
+    ): String {
+        val state = StringBuilder()
+        state.append("روز فعلی چرخه: $day. ")
+        state.append("طول چرخه آموخته‌شده: $length روز. ")
+        state.append("مدت پریود آموخته‌شده: $periodDays روز. ")
+        state.append("تعداد چرخه‌های واقعی ثبت‌شده: $samples. ")
+        if (nextDate != null && nextDate.isNotBlank()) {
+            state.append("تاریخ تخمینی پریود بعدی (میلادی/شمسی ذخیره‌شده): $nextDate. ")
+        }
+        if (overdueDays > 0) state.append("چرخه $overdueDays روز از موعد گذشته است. ")
+        if (irregular) state.append("چرخه کاربر نامنظم است. ")
+
+        return """
+این اطلاعات واقعی چرخه کاربر است:
+$state
+
+در یک تا دو جملهٔ کوتاه و گرم، وضعیت فعلی چرخه را برای کاربر توضیح بده.
+
+قواعد:
+- فقط از همین اعداد استفاده کن؛ هیچ تاریخ یا عدد جدیدی از خودت نساز.
+- اگر چرخه از موعد گذشته، صریح و بدون نگران‌کردن بگو که هر وقت پریود شروع شد باید «شروع پریود» را بزند.
+- اگر تعداد چرخه‌های ثبت‌شده کم است یا چرخه نامنظم است، از عبارت «تقریبی» استفاده کن و عدد را قطعی نگو.
+- تشخیص پزشکی نده، دارو تجویز نکن، و از ترس‌آفرینی پرهیز کن.
+- فقط فارسی، ساده، حداکثر ۲ جمله، بدون تیتر و بدون خط جدید اضافه.
+""".trimIndent()
+    }
+
+    /**
      * Turns one ordinary, colloquial Persian sentence into structured task
      * fields. It is the only AI used by the tasks section. The model must not
      * invent a date or time: when the user did not say one, it answers with an

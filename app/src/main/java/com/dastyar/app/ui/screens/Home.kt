@@ -26,9 +26,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.dastyar.app.data.CheckIn
+import com.dastyar.app.data.Cycle
+import com.dastyar.app.ai.AiClient
 import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Health
+import com.dastyar.app.data.PeriodEvent
 import com.dastyar.app.data.Profile
 import com.dastyar.app.data.WeightEntry
 import com.dastyar.app.ui.MainViewModel
@@ -55,6 +58,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     var showSettings by remember { mutableStateOf(false) }
     var showWeightDialog by remember { mutableStateOf(false) }
     var showPeriodPicker by remember { mutableStateOf(false) }
+    var showPeriodEndPicker by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(Range.D7) }
     var selectedMetrics by remember { mutableStateOf<Set<Metric>?>(null) }
 
@@ -69,7 +73,19 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     val energyPct = energyPercent(today)
     val cycleDay = Health.cycleDay(profile)
     val cyclePhase = Health.phaseLabel(profile)
-    val cycleTipLocal = remember(profile, today) { Health.cycleTip(profile, today) }
+    // The learned cycle, from the real recorded period history. The ring and
+    // the prediction card both read this; the rest of the app keeps using the
+    // profile's own cycle fields exactly as before.
+    val periodEvents by vm.periodEvents.collectAsState()
+    val cycleInfo = remember(profile, periodEvents) { Cycle.info(profile, periodEvents) }
+    val cycleNote by vm.cycleNote.collectAsState()
+    val loadingCycleNote by vm.loadingCycleNote.collectAsState()
+    val cycleTipLocal = remember(profile, today, cycleInfo) {
+        // Prefer the learned summary (it knows about overdue cycles and the
+        // real history); fall back to the original phase tip when there is not
+        // enough data for the learned one.
+        Cycle.summary(cycleInfo, profile) ?: Health.cycleTip(profile, today)
+    }
     val cycleTip by vm.cycleTip.collectAsState()
     val loadingCycleTip by vm.loadingCycleTip.collectAsState()
     val cycleTipError by vm.cycleTipError.collectAsState()
@@ -88,6 +104,12 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
 
     LaunchedEffect(cycleDay, cyclePhase) {
         vm.loadCycleTip()
+    }
+
+    // The AI note is optional: it only decorates the local prediction, so it
+    // is loaded after the ring is already drawn and never blocks anything.
+    LaunchedEffect(cycleInfo?.startIso, cycleInfo?.samples, cycleInfo?.length) {
+        vm.loadCycleNote()
     }
 
     LaunchedEffect(skinSummary, today?.date) {
@@ -183,11 +205,25 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                 CycleRing(
                     profile = profile,
                     cycleDay = cycleDay,
+                    info = cycleInfo,
                     onStartPeriod = { showPeriodPicker = true },
+                    onEndPeriod = { showPeriodEndPicker = true },
                     onSetCycleLength = { vm.setCycleLength(it) },
                     onSetPeriodDays = { vm.setPeriodDays(it) }
                 )
             }
+        }
+
+        // --------------------------- learned cycle prediction + history
+        item {
+            CyclePredictionCard(
+                info = cycleInfo,
+                aiNote = cycleNote,
+                loadingAi = loadingCycleNote,
+                events = periodEvents,
+                onRefresh = { vm.loadCycleNote(force = true) },
+                onDelete = { vm.deletePeriodEvent(it) }
+            )
         }
 
         // ------------------------------------ smart tip for today's cycle day
@@ -405,6 +441,20 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             }
         )
     }
+
+    // "پایان پریود": the same Jalali picker, but the chosen date is written as
+    // the end of the current period, so the app learns the real bleeding length.
+    if (showPeriodEndPicker) {
+        JalaliDatePicker(
+            initialIso = cycleInfo?.endIso?.ifBlank { null }
+                ?: profile?.lastPeriodDate?.ifBlank { null },
+            onDismiss = { showPeriodEndPicker = false },
+            onPicked = { iso ->
+                vm.recordPeriodEnd(iso)
+                showPeriodEndPicker = false
+            }
+        )
+    }
 }
 
 // ------------------------------------------------------------------- cards
@@ -597,6 +647,170 @@ private fun ConditionCard(
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/**
+ * The learned cycle prediction card.
+ *
+ * It shows what the app has worked out from the user's own recorded periods:
+ * the current cycle length, the learned period length, how many real cycles
+ * the estimate is based on, the expected date of the next period, and — when
+ * the cycle has run past its length — an honest "overdue" line. Below that it
+ * lists the recorded history, so the user can see exactly what the app learned
+ * from and delete a wrong entry.
+ *
+ * The AI sentence is a bonus on top: the local numbers are always shown first
+ * and the card never depends on the network.
+ */
+@Composable
+private fun CyclePredictionCard(
+    info: Cycle.Info?,
+    aiNote: String?,
+    loadingAi: Boolean,
+    events: List<PeriodEvent>,
+    onRefresh: () -> Unit,
+    onDelete: (String) -> Unit
+) {
+    DastyarCard(accent = Pink) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Pink.copy(alpha = .16f)),
+                contentAlignment = Alignment.Center
+            ) { Text("🧠", fontSize = 19.sp) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("چرخه آموخته‌شده", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    Cycle.confidenceLabel(info) ?: "هنوز چرخه‌ای ثبت نشده",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (AiClient.chatConfigured) {
+                if (loadingAi) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "توضیح دوباره")
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        if (info == null || !info.hasCycle) {
+            Text(
+                "برای شروع، تاریخ آخرین پریود، طول چرخه و مدت پریود را در پرسشنامه ثبت کن. " +
+                        "بعد از آن فقط با زدن «شروع پریود» و «پایان پریود» چرخه دقیق‌تر می‌شود.",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return@DastyarCard
+        }
+
+        // ---- the local, always-available numbers ----
+        CycleStatRow("🔁", "طول چرخه آموخته‌شده", "${Dates.fa(info.length)} روز")
+        Spacer(Modifier.height(4.dp))
+        CycleStatRow("🩸", "مدت پریود آموخته‌شده", "${Dates.fa(info.periodDays)} روز")
+        Spacer(Modifier.height(4.dp))
+        val nextDate = Cycle.nextPeriodDate(info)
+        if (Cycle.isOverdue(info)) {
+            CycleStatRow(
+                "⏰", "وضعیت",
+                "${Dates.fa(Cycle.overdueDays(info))} روز تأخیر",
+                valueColor = Amber
+            )
+        } else if (nextDate != null) {
+            CycleStatRow("📅", "پریود بعدی (تقریبی)", Dates.pretty(nextDate))
+        }
+        Spacer(Modifier.height(4.dp))
+        CycleStatRow(
+            "📚", "تاریخچه",
+            if (info.samples == 0) "بدون چرخه واقعی"
+            else "${Dates.fa(info.samples)} چرخه واقعی ثبت‌شده"
+        )
+
+        // ---- the optional AI sentence ----
+        if (!aiNote.isNullOrBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(aiNote, fontSize = 13.sp, lineHeight = 21.sp)
+        }
+
+        // ---- the recorded history itself ----
+        if (events.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "تاریخ پریودهای ثبت‌شده",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            events.sortedByDescending { it.startIso }.take(6).forEach { e ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🩸", fontSize = 11.sp)
+                    Spacer(Modifier.width(7.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(Dates.pretty(e.startIso), fontSize = 12.sp)
+                        val len = Cycle.periodLength(e.startIso, e.endIso)
+                        Text(
+                            when {
+                                e.endIso.isBlank() -> "پایان ثبت نشده"
+                                len != null -> "پایان: ${Dates.pretty(e.endIso)} (${Dates.fa(len)} روز)"
+                                else -> "پایان: ${Dates.pretty(e.endIso)}"
+                            },
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        "حذف",
+                        fontSize = 11.sp,
+                        color = Rose,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onDelete(e.startIso) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "این اعداد از تاریخچه واقعی خودت محاسبه می‌شوند و هر ماه با ثبت پریود جدید دقیق‌تر می‌شوند. " +
+                    "تاریخ پریود بعدی تخمینی است، نه قطعی.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** One label/value line inside the prediction card. */
+@Composable
+private fun CycleStatRow(
+    emoji: String,
+    label: String,
+    value: String,
+    valueColor: Color = MaterialTheme.colorScheme.onSurfaceVariant
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(emoji, fontSize = 11.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = valueColor)
     }
 }
 

@@ -72,3 +72,28 @@ data class SavedRecipe(
     val body: String = "",              // the recipe text (ingredients + steps)
     val createdAt: Long = System.currentTimeMillis()
 )
+
+/**
+ * One recorded period, kept forever so the app can learn the user's real
+ * cycle instead of guessing from a single date.
+ *
+ * [startIso] is the first day of bleeding, [endIso] the last day (blank while
+ * the period is still going, or when the user never marked its end). Both are
+ * Jalali ISO strings (yyyy-MM-dd), the same calendar as every other stored
+ * date. [source] records where the row came from — "onboarding" for the very
+ * first entry, "user" for a manual start/end tap, "auto" for a value the app
+ * inferred itself — so the history stays honest about what was recorded by
+ * whom. A start date is unique: re-recording the same day replaces the row
+ * rather than creating a duplicate cycle.
+ */
+@Entity(tableName = "period_events", indices = [androidx.room.Index(value = ["startIso"], unique = true)])
+data class PeriodEvent(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val startIso: String = "",          // yyyy-MM-dd (Jalali), first day
+    val endIso: String = "",            // yyyy-MM-dd (Jalali), last day; "" = unknown
+    val source: String = "user",        // onboarding / user / auto
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    /** True when the end of this period has been recorded. */
+    val hasEnd: Boolean get() = endIso.isNotBlank()
+}
