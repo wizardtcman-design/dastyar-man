@@ -84,7 +84,11 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
         // Prefer the learned summary (it knows about overdue cycles and the
         // real history); fall back to the original phase tip when there is not
         // enough data for the learned one.
-        Cycle.summary(cycleInfo, profile) ?: Health.cycleTip(profile, today)
+        val base = Cycle.summary(cycleInfo, profile) ?: Health.cycleTip(profile, today)
+        // The recorded period symptoms are folded into the same tip, so the
+        // normal/abnormal reading is actually told to the user, not hidden.
+        val assessment = Health.assessPeriodText(profile, today)
+        listOfNotNull(base, assessment).joinToString("\n\n").ifBlank { null }
     }
     val cycleTip by vm.cycleTip.collectAsState()
     val loadingCycleTip by vm.loadingCycleTip.collectAsState()

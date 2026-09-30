@@ -36,6 +36,13 @@ data class CheckIn(
     val periodHeadache: String = "",
     val periodMedication: String = "",
 
+    // --- period detail added for the daily check-in on bleeding days ---
+    // All three are comma-joined multi-choice answers ("" = not answered),
+    // the same storage the questionnaire uses so the two never disagree.
+    val periodBloodColor: String = "",      // قرمز / قهوه‌ای / صورتی / نارنجی
+    val periodDigestion: String = "",       // اسهال / یبوست / تهوع / نفخ / ...
+    val periodDischarge: String = "",       // چسبناک / آبکی / بدبو / تخم‌مرغی / ...
+
     val dizziness: String = "",
     val palpitations: String = "",
     val shortBreath: String = "",
