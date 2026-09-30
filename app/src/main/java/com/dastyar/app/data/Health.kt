@@ -204,6 +204,49 @@ object Health {
         return max(10, len - 16)
     }
 
+    /**
+     * The coloured windows of one cycle, all expressed as inclusive day numbers
+     * (1-based) inside a cycle of [length] days. Nothing here is hard-coded to
+     * 28 days or 5 period days: every boundary is derived from the user's own
+     * cycle length and period length, using the same rules as [phase].
+     *
+     * - [periodEnd]    last day of bleeding
+     * - [ovulationStart]/[ovulationEnd]  the fertile window
+     * - [pmsStart]/[pmsEnd]              the pre-menstrual window
+     */
+    data class CycleWindows(
+        val length: Int,
+        val periodEnd: Int,
+        val ovulationStart: Int,
+        val ovulationEnd: Int,
+        val pmsStart: Int,
+        val pmsEnd: Int
+    )
+
+    fun cycleWindows(profile: Profile?): CycleWindows? {
+        val p = profile ?: return null
+        if (p.lastPeriodDate.isBlank() || Dates.parse(p.lastPeriodDate) == null) return null
+        val len = if (p.cycleLength in 15..60) p.cycleLength else 28
+        val periodDays = p.periodDays.coerceIn(1, 10)
+        val periodEnd = min(periodDays, len)
+        val ovStart = ovulationStart(len)
+        val ovEnd = min(ovStart + 3, len)
+        // PMS is the run-up to the next period. Five days is the common length;
+        // it is clamped so it can never overlap the ovulation window or the
+        // period itself, and shrinks on very short cycles instead of breaking.
+        val pmsLen = 5.coerceAtMost((len - ovEnd - 1).coerceAtLeast(0))
+        val pmsEnd = len
+        val pmsStart = (pmsEnd - pmsLen + 1).coerceAtLeast(ovEnd + 1)
+        return CycleWindows(
+            length = len,
+            periodEnd = periodEnd,
+            ovulationStart = ovStart,
+            ovulationEnd = ovEnd,
+            pmsStart = pmsStart,
+            pmsEnd = pmsEnd
+        )
+    }
+
     /** The current phase, or null when the cycle cannot be computed. */
     fun phase(profile: Profile?): CyclePhase? {
         val p = profile ?: return null

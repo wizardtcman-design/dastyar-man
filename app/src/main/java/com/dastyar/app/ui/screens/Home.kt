@@ -54,6 +54,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     val weights by vm.weights.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
     var showWeightDialog by remember { mutableStateOf(false) }
+    var showPeriodPicker by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(Range.D7) }
     var selectedMetrics by remember { mutableStateOf<Set<Metric>?>(null) }
 
@@ -68,7 +69,6 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
     val energyPct = energyPercent(today)
     val cycleDay = Health.cycleDay(profile)
     val cyclePhase = Health.phaseLabel(profile)
-    val daysUntilPeriod = Health.daysUntilPeriod(profile)
     val cycleTipLocal = remember(profile, today) { Health.cycleTip(profile, today) }
     val cycleTip by vm.cycleTip.collectAsState()
     val loadingCycleTip by vm.loadingCycleTip.collectAsState()
@@ -143,23 +143,25 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             )
         }
 
-        // ------------------------------------------------------- body & cycle
+        // ------------------------------------------------------- cycle ring
         item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.height(IntrinsicSize.Min)
-            ) {
+            DastyarCard(accent = Pink) {
+                CycleRing(
+                    profile = profile,
+                    cycleDay = cycleDay,
+                    onStartPeriod = { showPeriodPicker = true }
+                )
+            }
+        }
+
+        // ------------------------------------------------ body (BMI) tile
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 BmiTile(
                     profile = profile,
                     weights = weights,
                     onUpdate = { showWeightDialog = true },
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                )
-                CycleTile(
-                    cycleDay = cycleDay,
-                    phase = cyclePhase,
-                    daysUntil = daysUntilPeriod,
-                    modifier = Modifier.weight(1f).fillMaxHeight()
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -371,6 +373,20 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             onSave = { kg ->
                 vm.recordWeight(kg)
                 showWeightDialog = false
+            }
+        )
+    }
+
+    // "شروع پریود" / "ویرایش پریود": the same Jalali date picker used across the
+    // app. Picking a date records the cycle start through the normal profile
+    // pipeline, so the ring above recalculates on its own.
+    if (showPeriodPicker) {
+        JalaliDatePicker(
+            initialIso = profile?.lastPeriodDate?.ifBlank { null },
+            onDismiss = { showPeriodPicker = false },
+            onPicked = { iso ->
+                vm.recordPeriodStart(iso)
+                showPeriodPicker = false
             }
         )
     }

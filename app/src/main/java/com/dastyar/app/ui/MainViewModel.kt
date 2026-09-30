@@ -362,6 +362,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Records the start date of a new period. It reuses the existing profile
+     * pipeline, so the cycle day, the tip and the period reminders all
+     * recalculate from the new date with no extra machinery.
+     */
+    fun recordPeriodStart(dateIso: String) = viewModelScope.launch(Dispatchers.IO) {
+        val current = dao.profile() ?: return@launch
+        val updated = current.copy(lastPeriodDate = dateIso)
+        dao.saveProfile(updated)
+        // Re-arm the period reminders from the new date (same rule as saveProfile).
+        com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), updated)
+        withContext(Dispatchers.Main) {
+            _toast.value = "شروع پریود ثبت شد 🩸"
+            _cycleTip.value = null
+            cycleTipLoadedFor = null
+            loadCycleTip(force = true)
+        }
+    }
+
     /** Records a weight measurement for today and keeps the profile in sync. */
     fun recordWeight(kg: Float) = viewModelScope.launch(Dispatchers.IO) {
         if (kg <= 0f) return@launch
