@@ -381,6 +381,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Updates the cycle length (days). Persisted through the normal profile
+     * pipeline so the ring, the phase and the reminders recalculate at once.
+     */
+    fun setCycleLength(days: Int) = viewModelScope.launch(Dispatchers.IO) {
+        val current = dao.profile() ?: return@launch
+        val updated = current.copy(cycleLength = days.coerceIn(15, 60))
+        dao.saveProfile(updated)
+        com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), updated)
+        withContext(Dispatchers.Main) {
+            _cycleTip.value = null
+            cycleTipLoadedFor = null
+            loadCycleTip(force = true)
+        }
+    }
+
+    /**
+     * Updates the period length (days). Clamped to the cycle length so the
+     * period can never run past the end of the cycle.
+     */
+    fun setPeriodDays(days: Int) = viewModelScope.launch(Dispatchers.IO) {
+        val current = dao.profile() ?: return@launch
+        val maxDays = minOf(12, current.cycleLength.coerceIn(15, 60))
+        val updated = current.copy(periodDays = days.coerceIn(1, maxDays))
+        dao.saveProfile(updated)
+        withContext(Dispatchers.Main) {
+            _cycleTip.value = null
+            cycleTipLoadedFor = null
+            loadCycleTip(force = true)
+        }
+    }
+
     /** Records a weight measurement for today and keeps the profile in sync. */
     fun recordWeight(kg: Float) = viewModelScope.launch(Dispatchers.IO) {
         if (kg <= 0f) return@launch

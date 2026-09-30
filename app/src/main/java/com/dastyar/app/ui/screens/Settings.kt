@@ -44,7 +44,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     val profile by vm.profile.collectAsState()
-    val facts by vm.smartFacts.collectAsState()
     val learningEnabled by vm.learningEnabled.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -293,28 +292,15 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 Spacer(Modifier.width(10.dp))
                 Text("یادگیری از گفتگوها", fontSize = 14.sp)
             }
-            if (facts.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                Text("آنچه تا حالا یاد گرفته:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                facts.forEach { f ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("${f.key}: ${f.value}", fontSize = 12.5.sp)
-                            Text(
-                                "منبع: ${if (f.source == "chat") "گفتگو" else "داده ثبت‌شده"}",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        TextButton(onClick = { vm.deleteFact(f) }) {
-                            Text("حذف", fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
+            Spacer(Modifier.height(8.dp))
+            // The learned items are kept and used by the assistant, but they are
+            // never listed here, so this card stays the same size over time.
+            Text(
+                if (learningEnabled) "پروفایل هوشمند فعال است"
+                else "پروفایل هوشمند خاموش است",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Spacer(Modifier.height(14.dp))

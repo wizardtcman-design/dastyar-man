@@ -116,20 +116,41 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             )
         }
 
-        // ------------------------------------------------------ today status
-        // Note: there is deliberately no daily-questionnaire card here. The
-        // short daily questions appear on their own, once per day, when the app
-        // is opened (see MainScaffold), and are not part of the dashboard.
+        // ------------------------------------------------------ top 3 cards
+        // Exactly three equal cards in one row: قد و وزن | انرژی امروز | خواب دیشب.
+        // In RTL the first item sits on the right, so the order below is the
+        // right-to-left order the user asked for. Equal width (weight 1f) and a
+        // shared fixed height keep them the same size and inside the screen.
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile(
-                    "⚡", "انرژی امروز", "${Dates.fa(energyPct)}٪",
-                    energyHint(today), Purple, Modifier.weight(1f)
+            val bmi = Health.bmi(profile)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                MiniStat(
+                    emoji = "⚖️",
+                    label = "قد و وزن",
+                    value = if (bmi != null) Dates.fa("%.1f".format(bmi)) else "—",
+                    sub = if (bmi != null) "شاخص توده بدنی" else "ثبت نشده",
+                    accent = Green,
+                    onClick = { showWeightDialog = true },
+                    modifier = Modifier.weight(1f)
                 )
-                StatTile(
-                    "😴", "خواب دیشب", sleepLabel(today),
-                    today?.sleepQuality?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
-                    Cyan, Modifier.weight(1f)
+                MiniStat(
+                    emoji = "⚡",
+                    label = "انرژی امروز",
+                    value = "${Dates.fa(energyPct)}٪",
+                    sub = energyHint(today),
+                    accent = Purple,
+                    modifier = Modifier.weight(1f)
+                )
+                MiniStat(
+                    emoji = "😴",
+                    label = "خواب دیشب",
+                    value = sleepLabel(today),
+                    sub = today?.sleepQuality?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
+                    accent = Cyan,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -149,19 +170,9 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                 CycleRing(
                     profile = profile,
                     cycleDay = cycleDay,
-                    onStartPeriod = { showPeriodPicker = true }
-                )
-            }
-        }
-
-        // ------------------------------------------------ body (BMI) tile
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BmiTile(
-                    profile = profile,
-                    weights = weights,
-                    onUpdate = { showWeightDialog = true },
-                    modifier = Modifier.weight(1f)
+                    onStartPeriod = { showPeriodPicker = true },
+                    onSetCycleLength = { vm.setCycleLength(it) },
+                    onSetPeriodDays = { vm.setPeriodDays(it) }
                 )
             }
         }
@@ -841,6 +852,61 @@ private fun WaterCard(water: Int, goal: Int, onAdd: () -> Unit, onRemove: () -> 
                 shape = RoundedCornerShape(16.dp)
             ) { Text("−") }
         }
+    }
+}
+
+/**
+ * One of the three equal cards at the top of the dashboard. Fixed height so all
+ * three line up exactly, whatever the value length, and a fixed min size for the
+ * emoji badge so RTL text never pushes the layout out of the screen.
+ */
+@Composable
+private fun MiniStat(
+    emoji: String,
+    label: String,
+    value: String,
+    sub: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    Column(
+        modifier
+            .height(120.dp)
+            .cardEnter()
+            .clip(Shape.card)
+            .background(MaterialTheme.colorScheme.surface)
+            .cardOutline(accent)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.Top
+    ) {
+        Box(
+            Modifier
+                .size(30.dp)
+                .clip(Shape.badge)
+                .background(accent.copy(alpha = .16f)),
+            contentAlignment = Alignment.Center
+        ) { Text(emoji, fontSize = 15.sp) }
+        Spacer(Modifier.height(7.dp))
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(value, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            sub,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
     }
 }
 
