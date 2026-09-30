@@ -55,9 +55,16 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
     // is something to report, or the cycle says a period is expected.
     var showSkinDetail by remember { mutableStateOf(isFirstEver) }
     var showFatigueDetail by remember { mutableStateOf(isFirstEver) }
-    var showPeriodDetail by remember { mutableStateOf(
-        isFirstEver || expectedPeriod || cycleDay in listOf(1, 2)
-    ) }
+    // The period questions stay open while a period is running: today's answer
+    // was "yes", or an open period event exists (started but not yet ended).
+    val periodRunning = vm.periodEvents.collectAsState().value.let { events ->
+        val p = profile
+        if (p == null || p.lastPeriodDate.isBlank()) false
+        else events.firstOrNull { it.startIso == p.lastPeriodDate }?.endIso?.isBlank() == true
+    }
+    var showPeriodDetail by remember {
+        mutableStateOf(isFirstEver || expectedPeriod || cycleDay in listOf(1, 2) || periodRunning)
+    }
 
     Column(
         Modifier
@@ -205,19 +212,22 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
         // ---------- period ----------
-        SectionCard("🩷", "پریود", "درد، خونریزی و علائم", Pink) {
+        // The period section is the one place where the rule is strict: the
+        // first question is only "are you on your period today?". Answering
+        // "no" keeps the section closed and nothing else is asked; answering
+        // "yes" opens every period question. Once a period is running (an open
+        // period event with no end date), the questions stay open every day
+        // until the user marks the period as finished from the ring, after
+        // which this returns to the single yes/no question.
+        SectionCard("🩷", "پریود", "فقط اگر پریود هستی", Pink) {
             LabeledText("امروز روز پریود هستی؟")
             ChoiceChips(listOf("بله", "نه"), if (c.isPeriodDay) "بله" else "نه", accent = Pink) {
                 val yes = it == "بله"
                 draft = c.copy(isPeriodDay = yes)
-                if (yes) showPeriodDetail = true
-            }
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = { showPeriodDetail = !showPeriodDetail }) {
-                Text(if (showPeriodDetail) "بستن جزئیات پریود" else "جزئیات بیشتر پریود ▾")
+                showPeriodDetail = yes
             }
             if (showPeriodDetail) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(18.dp))
                 LabeledText("امروز درد داری؟")
                 ChoiceChips(listOf("ندارم", "دارم"), c.periodPain, accent = Pink) { draft = c.copy(periodPain = it) }
                 Spacer(Modifier.height(16.dp))
@@ -241,9 +251,41 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
                 LabeledText("لخته")
                 ChoiceChips(listOf("ندارم", "کم", "زیاد"), c.periodClots, accent = Pink) { draft = c.copy(periodClots = it) }
                 Spacer(Modifier.height(16.dp))
-                LabeledText("تهوع")
-                ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodNausea, accent = Pink) { draft = c.copy(periodNausea = it) }
-                Spacer(Modifier.height(16.dp))
+                LabeledText("مصرف مسکن")
+                ChoiceChips(listOf("نه", "بله"), c.periodMedication, accent = Pink) { draft = c.copy(periodMedication = it) }
+
+                // ---- the three symptom groups, multi-choice ----
+                Spacer(Modifier.height(18.dp))
+                LabeledText("خون پریودت چه رنگیه؟")
+                MultiChoiceChips(
+                    options = listOf("قرمز", "قهوه‌ای", "صورتی", "نارنجی"),
+                    selected = splitMulti(c.periodBloodColor),
+                    accent = Pink
+                ) { draft = c.copy(periodBloodColor = joinMulti(it)) }
+
+                Spacer(Modifier.height(18.dp))
+                LabeledText("وضعیت تغذیه و گوارشت چطوره؟")
+                MultiChoiceChips(
+                    options = listOf(
+                        "اسهال", "یبوست", "حالت تهوع", "نفخ",
+                        "پراشتهایی", "کم‌اشتهایی", "تغییر وزن ناگهانی", "میل به شیرینی"
+                    ),
+                    selected = splitMulti(c.periodDigestion),
+                    accent = Pink
+                ) { draft = c.copy(periodDigestion = joinMulti(it)) }
+
+                Spacer(Modifier.height(18.dp))
+                LabeledText("ترشحات واژنت از چه نوعیه؟")
+                MultiChoiceChips(
+                    options = listOf(
+                        "چسبناک", "آبکی", "بدبو", "تخم‌مرغی", "غیر عادی",
+                        "بدون ترشح", "خشکی واژن", "خارش واژن"
+                    ),
+                    selected = splitMulti(c.periodDischarge),
+                    accent = Pink
+                ) { draft = c.copy(periodDischarge = joinMulti(it)) }
+
+                Spacer(Modifier.height(18.dp))
                 LabeledText("سرگیجه")
                 ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodDizziness, accent = Pink) {
                     draft = c.copy(periodDizziness = it)
@@ -253,9 +295,14 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
                 ChoiceChips(listOf("ندارم", "خفیف", "شدید"), c.periodHeadache, accent = Pink) {
                     draft = c.copy(periodHeadache = it)
                 }
-                Spacer(Modifier.height(16.dp))
-                LabeledText("مصرف مسکن")
-                ChoiceChips(listOf("نه", "بله"), c.periodMedication, accent = Pink) { draft = c.copy(periodMedication = it) }
+            } else {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "وقتی «بله» را بزنی، سؤال‌های پریود باز می‌شوند و تا وقتی «پایان پریود» را " +
+                            "از حلقهٔ داشبورد ثبت نکنی هر روز همین‌ها پرسیده می‌شوند.",
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 

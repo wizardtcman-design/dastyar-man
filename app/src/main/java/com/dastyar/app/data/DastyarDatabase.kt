@@ -20,7 +20,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SavedRecipe::class,
         PeriodEvent::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class DastyarDatabase : RoomDatabase() {
@@ -88,13 +88,30 @@ abstract class DastyarDatabase : RoomDatabase() {
             }
         }
 
+        // v6 -> v7 adds the period-symptom detail (blood colour, digestion and
+        // discharge) to both the profile baseline and the daily check-in. Every
+        // existing row keeps its data and simply gets an empty value, meaning
+        // "not answered", so nothing is invented.
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `profile` ADD COLUMN `bloodColor` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `profile` ADD COLUMN `digestionState` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `profile` ADD COLUMN `dischargeType` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `checkins` ADD COLUMN `periodBloodColor` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `checkins` ADD COLUMN `periodDigestion` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `checkins` ADD COLUMN `periodDischarge` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): DastyarDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     DastyarDatabase::class.java,
                     "dastyar.db"
-                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                ).addMigrations(
+                    MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+                )
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }

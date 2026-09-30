@@ -65,6 +65,9 @@ object Prompts {
                 if (profile.periodPainLevel > 0) sb.appendLine("شدت معمول درد: ${profile.periodPainLevel} از ۱۰")
                 if (profile.painLocation.isNotBlank()) sb.appendLine("محل معمول درد: ${profile.painLocation}")
                 if (profile.painRelief.isNotBlank()) sb.appendLine("روش کنترل درد: ${profile.painRelief}")
+                if (profile.bloodColor.isNotBlank()) sb.appendLine("رنگ معمول خون پریود: ${profile.bloodColor}")
+                if (profile.digestionState.isNotBlank()) sb.appendLine("وضعیت معمول گوارش در پریود: ${profile.digestionState}")
+                if (profile.dischargeType.isNotBlank()) sb.appendLine("نوع معمول ترشح: ${profile.dischargeType}")
                 sb.appendLine()
             }
 
@@ -97,6 +100,23 @@ object Prompts {
             if (today.skinStatus.isNotBlank()) sb.appendLine("پوست: ${today.skinStatus}")
             if (today.stressLevel.isNotBlank()) sb.appendLine("استرس امروز: ${today.stressLevel}")
             if (today.isPeriodDay) sb.appendLine("امروز روز پریود است.")
+            if (today.isPeriodDay) {
+                if (today.periodBleeding.isNotBlank()) sb.appendLine("خونریزی امروز: ${today.periodBleeding}")
+                if (today.periodClots.isNotBlank()) sb.appendLine("لخته امروز: ${today.periodClots}")
+                if (today.periodPainLevel.isNotBlank()) sb.appendLine("شدت درد امروز: ${today.periodPainLevel}")
+                if (today.periodBloodColor.isNotBlank()) sb.appendLine("رنگ خون امروز: ${today.periodBloodColor}")
+                if (today.periodDigestion.isNotBlank()) sb.appendLine("گوارش امروز: ${today.periodDigestion}")
+                if (today.periodDischarge.isNotBlank()) sb.appendLine("ترشح امروز: ${today.periodDischarge}")
+                Health.assessPeriod(profile, today)?.let { a ->
+                    if (a.concern) {
+                        sb.appendLine("نکته قابل توجه در علائم ثبت‌شده: ${a.details.joinToString("، ")}")
+                        sb.appendLine("در مشاوره‌ات این موارد را با احتیاط و بدون ترس‌آفرینی مطرح کن و " +
+                                "پیشنهاد مراجعه به پزشک را در صورت لزوم بده.")
+                    } else {
+                        sb.appendLine("علائم ثبت‌شده امروز در محدوده معمول به نظر می‌رسد.")
+                    }
+                }
+            }
             sb.appendLine()
         }
 

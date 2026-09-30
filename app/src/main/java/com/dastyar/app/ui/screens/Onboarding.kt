@@ -435,6 +435,40 @@ fun PeriodSection(p: Profile, onChange: (Profile) -> Unit) {
             accent = Pink
         ) { onChange(p.copy(painRelief = joinMulti(it))) }
     }
+    Spacer(Modifier.height(14.dp))
+
+    // ---- period symptom baseline, so the AI knows the user's normal ----
+    QuestionCard("🩸", "خون پریودت چه رنگیه؟", "چند مورد هم اشکالی نداره", Pink) {
+        MultiChoiceChips(
+            options = listOf("قرمز", "قهوه‌ای", "صورتی", "نارنجی"),
+            selected = splitMulti(p.bloodColor),
+            accent = Pink
+        ) { onChange(p.copy(bloodColor = joinMulti(it))) }
+    }
+    Spacer(Modifier.height(14.dp))
+
+    QuestionCard("🍽", "وضعیت تغذیه و گوارشت چطوره؟", "چند مورد هم اشکالی نداره", Pink) {
+        MultiChoiceChips(
+            options = listOf(
+                "اسهال", "یبوست", "حالت تهوع", "نفخ",
+                "پراشتهایی", "کم‌اشتهایی", "تغییر وزن ناگهانی", "میل به شیرینی"
+            ),
+            selected = splitMulti(p.digestionState),
+            accent = Pink
+        ) { onChange(p.copy(digestionState = joinMulti(it))) }
+    }
+    Spacer(Modifier.height(14.dp))
+
+    QuestionCard("💧", "ترشحات واژنت از چه نوعیه؟", "چند مورد هم اشکالی نداره", Pink) {
+        MultiChoiceChips(
+            options = listOf(
+                "چسبناک", "آبکی", "بدبو", "تخم‌مرغی", "غیر عادی",
+                "بدون ترشح", "خشکی واژن", "خارش واژن"
+            ),
+            selected = splitMulti(p.dischargeType),
+            accent = Pink
+        ) { onChange(p.copy(dischargeType = joinMulti(it))) }
+    }
 }
 
 // ---------------------------------------------------------------- step 3: skin

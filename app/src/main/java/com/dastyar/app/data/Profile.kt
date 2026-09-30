@@ -34,6 +34,13 @@ data class Profile(
     val painImpact: String = "",
     val painRelief: String = "",
 
+    // Period symptom detail, asked once in the questionnaire as a baseline and
+    // kept as comma-joined multi-choice answers. The same three questions are
+    // asked again on each bleeding day in the daily check-in.
+    val bloodColor: String = "",        // قرمز / قهوه‌ای / صورتی / نارنجی
+    val digestionState: String = "",    // اسهال / یبوست / تهوع / نفخ / ...
+    val dischargeType: String = "",     // چسبناک / آبکی / بدبو / تخم‌مرغی / ...
+
     // Skin
     val skinType: String = "",
     val acneLevel: String = "",

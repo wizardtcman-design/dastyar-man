@@ -3,12 +3,17 @@ package com.dastyar.app.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -17,6 +22,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -27,7 +33,18 @@ import com.dastyar.app.data.Health
 import com.dastyar.app.data.Profile
 import com.dastyar.app.ui.theme.Amber
 import com.dastyar.app.ui.theme.Cyan
+import com.dastyar.app.ui.theme.Purple
 import com.dastyar.app.ui.theme.Rose
+
+/**
+ * The angle, in degrees, where the first day of the cycle begins. The fixed
+ * visual gap is centred on the top, so day 1 starts just to the right of it.
+ * Shared by the drawing code and the tap hit-testing so they can never drift.
+ */
+private fun gapDegOf(length: Int): Float =
+    360f * (Cycle.RING_GAP_DAYS / (length + Cycle.RING_GAP_DAYS))
+
+private fun startAngleOf(length: Int): Float = -90f + gapDegOf(length) / 2f
 
 /**
  * The menstrual-cycle ring.
@@ -63,6 +80,11 @@ fun CycleRing(
     onSetPeriodDays: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Which past day the user tapped, if any. Only days from the start of the
+    // cycle up to today can be picked; the future is deliberately not tappable.
+    var selectedDay by remember(info?.startIso, info?.length) { mutableStateOf<Int?>(null) }
+    // The furthest day the user may inspect: today's real position in the cycle.
+    val reachableDay = if (info != null && info.hasCycle) Cycle.markerDay(info) else 0
     // Prefer the lengths learned from the real history; fall back to the
     // profile's declared values when there is not enough history yet.
     val windows = if (info != null && info.hasCycle) {
@@ -92,7 +114,41 @@ fun CycleRing(
                 .aspectRatio(1f),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(Modifier.fillMaxSize()) {
+            Canvas(
+                Modifier
+                    .fillMaxSize()
+                    // Tapping the ring picks the nearest past day so the user
+                    // can see what day it was. Future days are not selectable:
+                    // anything past today's real position is ignored.
+                    .pointerInput(reachableDay, length, startAngleOf(length)) {
+                        detectTapGestures { tap ->
+                            if (reachableDay <= 0) return@detectTapGestures
+                            val minDim = minOf(size.width, size.height).toFloat()
+                            val strokePx = minDim * 0.055f
+                            val insetPx = strokePx / 2f + minDim * 0.03f
+                            val dPx = minDim - insetPx * 2f
+                            val cx = size.width / 2f
+                            val cy = size.height / 2f
+                            val dx = tap.x - cx
+                            val dy = tap.y - cy
+                            val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                            // Only taps near the ring band count, so the centre
+                            // buttons stay usable.
+                            if (dist < dPx / 2f - strokePx * 1.6f ||
+                                dist > dPx / 2f + strokePx * 1.6f
+                            ) return@detectTapGestures
+                            val deg = Math.toDegrees(kotlin.math.atan2(dy, dx).toDouble())
+                            val start = startAngleOf(length).toDouble()
+                            val rel = (deg - start + 360.0) % 360.0
+                            val usable = 360.0 - gapDegOf(length).toDouble()
+                            // A tap inside the top gap is not a day: ignore it.
+                            if (rel >= usable) return@detectTapGestures
+                            val day = (rel / usable * length).toInt() + 1
+                            val clamped = day.coerceIn(1, reachableDay)
+                            selectedDay = if (selectedDay == clamped) null else clamped
+                        }
+                    }
+            ) {
                 // Thinner band than before, so the ring reads as a fine ring.
                 val stroke = size.minDimension * 0.055f
                 val dotR = stroke * 0.24f
@@ -109,13 +165,13 @@ fun CycleRing(
                 // visual gap at the top. The gap takes the same share of the
                 // circumference on every cycle, so it is always the same size
                 // on screen regardless of how long the cycle is.
-                val gapDeg = 360f * (Cycle.RING_GAP_DAYS / (length + Cycle.RING_GAP_DAYS))
+                val gapDeg = gapDegOf(length)
                 val usableDeg = 360f - gapDeg
                 val perDay = usableDeg / length
                 // The gap is centred on the top (12 o'clock), so the usable arc
                 // runs clockwise from just right of the gap all the way round
                 // to just left of it.
-                val startAngle = -90f + gapDeg / 2f
+                val startAngle = startAngleOf(length)
 
                 // A day's dot sits at the CENTRE of that day's slice.
                 fun angleFor(day: Int) =
@@ -182,6 +238,16 @@ fun CycleRing(
                         radius = mr, center = mp, style = Stroke(width = 2.5f)
                     )
                 }
+
+                // The day the user tapped, highlighted with a soft filled dot so
+                // it is obvious which past day the label below refers to.
+                selectedDay?.let { sd ->
+                    if (sd in 1..length) {
+                        val sp = pointFor(sd)
+                        drawCircle(Purple.copy(alpha = .30f), radius = stroke * 0.95f, center = sp)
+                        drawCircle(Purple, radius = stroke * 0.42f, center = sp)
+                    }
+                }
             }
 
             // Centre content, drawn as normal composables on top of the canvas.
@@ -236,6 +302,53 @@ fun CycleRing(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
+                // Info label for the tapped past day. Purely informational: it
+                // says which day of the cycle it was, its date and its phase.
+                selectedDay?.let { sd ->
+                    if (hasData && sd in 1..length) {
+                        val dateIso = info?.startIso?.let { Dates.plusDays(it, sd - 1) }
+                        val phaseLabel = when {
+                            sd <= periodDays -> "مرحله قاعدگی"
+                            sd < Health.ovulationStart(length) -> "مرحله فولیکولی"
+                            sd <= Health.ovulationStart(length) + 3 -> "مرحله تخمک‌گذاری"
+                            else -> "مرحله لوتئال"
+                        }
+                        Column(
+                            Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Purple.copy(alpha = .12f))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                if (sd == reachableDay) "امروز — روز ${Dates.fa(sd)} چرخه"
+                                else "روز ${Dates.fa(sd)} چرخه",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Purple,
+                                textAlign = TextAlign.Center
+                            )
+                            if (dateIso != null) {
+                                Text(
+                                    Dates.pretty(dateIso),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                phaseLabel,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "برای بستن، دوباره روی همان روز بزن",
+                                fontSize = 9.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
                 // Two real actions: start a period (opens the date picker) and,
                 // once a period is running, mark the day it ended.
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

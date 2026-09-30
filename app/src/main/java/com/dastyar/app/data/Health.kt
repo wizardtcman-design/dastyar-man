@@ -173,6 +173,72 @@ object Health {
         return out.take(3)
     }
 
+    /**
+     * A cautious, local reading of the recorded period symptoms: is this
+     * bleeding pattern inside the usual range, or does something deserve
+     * attention? It is deliberately conservative and never a diagnosis — it
+     * only flags the combinations that are commonly worth mentioning to a
+     * doctor, and returns null when there is nothing to judge.
+     *
+     * The three symptom groups come from the questionnaire baseline ([Profile])
+     * and, when present, from today's check-in, which wins because it is the
+     * more recent, more specific record.
+     */
+    data class PeriodAssessment(
+        val concern: Boolean,
+        val headline: String,
+        val details: List<String>
+    )
+
+    fun assessPeriod(profile: Profile?, today: CheckIn?): PeriodAssessment? {
+        val blood = today?.periodBloodColor?.takeIf { it.isNotBlank() }
+            ?: profile?.bloodColor.orEmpty()
+        val digestion = today?.periodDigestion?.takeIf { it.isNotBlank() }
+            ?: profile?.digestionState.orEmpty()
+        val discharge = today?.periodDischarge?.takeIf { it.isNotBlank() }
+            ?: profile?.dischargeType.orEmpty()
+        val bleeding = today?.periodBleeding.orEmpty()
+        val clots = today?.periodClots.orEmpty()
+        val pain = today?.periodPainLevel.orEmpty()
+        val painImpact = profile?.painImpact.orEmpty()
+
+        val hasAnything = listOf(blood, digestion, discharge, bleeding, clots, pain)
+            .any { it.isNotBlank() } || painImpact.isNotBlank()
+        if (!hasAnything) return null
+
+        val flags = mutableListOf<String>()
+        // Discharge that is commonly worth checking with a doctor.
+        if (discharge.contains("بدبو")) flags += "ترشح بدبو"
+        if (discharge.contains("غیر عادی")) flags += "ترشح غیرعادی"
+        if (discharge.contains("خارش")) flags += "خارش واژن"
+        // Bleeding that is far from the user's own normal.
+        if (bleeding.contains("خیلی بیشتر")) flags += "خونریزی خیلی بیشتر از معمول"
+        if (clots.contains("زیاد")) flags += "لخته زیاد"
+        // Pain that is severe or interferes with daily life.
+        if (pain.contains("شدید") || painImpact.contains("زیاد")) flags += "درد شدید یا مؤثر بر فعالیت روزانه"
+        // Blood colour that can be a sign worth mentioning (dark/brown is
+        // usually old blood and common; orange is the one flagged gently).
+        if (blood.contains("نارنجی")) flags += "رنگ نارنجی خون"
+
+        val concern = flags.isNotEmpty()
+        val headline = if (concern)
+            "چند مورد ثبت‌شده ارزش گفتن به پزشک را دارد"
+        else
+            "علائمی که ثبت کردی در محدودهٔ معمول به نظر می‌رسد"
+        return PeriodAssessment(concern = concern, headline = headline, details = flags)
+    }
+
+    /** A short Persian sentence for the assessment, or null when there is none. */
+    fun assessPeriodText(profile: Profile?, today: CheckIn?): String? {
+        val a = assessPeriod(profile, today) ?: return null
+        return if (a.concern) {
+            "بر اساس علائمی که ثبت کردی، «${a.details.joinToString("، ")}» ممکن است طبیعی نباشد؛ " +
+                    "بهتر است با پزشک در میان بگذاری. این یک یادآوری آموزشی است، نه تشخیص."
+        } else {
+            "علائم پریودت در محدودهٔ معمول به نظر می‌رسد. اگر تغییری حس کردی، ثبتش کن تا دقیق‌تر بشود."
+        }
+    }
+
     // ------------------------------------------------------------ cycle info
 
     fun cycleDay(profile: Profile?): Int {
@@ -409,6 +475,11 @@ object Health {
         periodPain = if (p.periodPainLevel > 0) "دارم" else "",
         periodPainLevel = if (p.periodPainLevel > 0) p.periodPainLevel.toString() else "",
         periodPainLocation = p.painLocation,
+        // The period symptom baseline from the questionnaire, so day one's
+        // check-in already carries it and the AI can compare against it later.
+        periodBloodColor = p.bloodColor,
+        periodDigestion = p.digestionState,
+        periodDischarge = p.dischargeType,
         notes = "این اطلاعات از پرسشنامه اولیه (روز اول) ثبت شد."
     )
 
