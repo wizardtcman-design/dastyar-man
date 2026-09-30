@@ -131,7 +131,12 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                     emoji = "⚖️",
                     label = "قد و وزن",
                     value = if (bmi != null) Dates.fa("%.1f".format(bmi)) else "—",
-                    sub = if (bmi != null) "شاخص توده بدنی" else "ثبت نشده",
+                    sub = when {
+                        bmi == null -> "ثبت نشده"
+                        Health.bmiAdultBandsApply(profile) && Health.bmiCategory(profile) != null ->
+                            Health.bmiCategory(profile)!!
+                        else -> "شاخص توده بدنی"
+                    },
                     accent = Green,
                     onClick = { showWeightDialog = true },
                     modifier = Modifier.weight(1f)
@@ -148,7 +153,7 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
                     emoji = "😴",
                     label = "خواب دیشب",
                     value = sleepLabel(today),
-                    sub = today?.sleepQuality?.ifBlank { "ثبت نشده" } ?: "ثبت نشده",
+                    sub = sleepHint(today),
                     accent = Cyan,
                     modifier = Modifier.weight(1f)
                 )
@@ -1470,6 +1475,12 @@ fun energyHint(ci: CheckIn?): String = when {
     energyPercent(ci) >= 75 -> "وضعیت خوبی داری"
     energyPercent(ci) >= 55 -> "قابل قبول"
     else -> "به استراحت نیاز داری"
+}
+
+/** Short, plain-language description of last night's sleep. */
+fun sleepHint(ci: CheckIn?): String {
+    val q = ci?.sleepQuality?.ifBlank { null } ?: return "ثبت نشده"
+    return "کیفیت خواب: $q"
 }
 
 /** 0-100: higher is better skin condition. */
