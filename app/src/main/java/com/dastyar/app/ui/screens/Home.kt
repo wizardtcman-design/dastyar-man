@@ -116,46 +116,19 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             )
         }
 
-        // ------------------------------------------------------ top 3 cards
-        // Exactly three equal cards in one row: قد و وزن | انرژی امروز | خواب دیشب.
-        // In RTL the first item sits on the right, so the order below is the
-        // right-to-left order the user asked for. Equal width (weight 1f) and a
-        // shared fixed height keep them the same size and inside the screen.
+        // ------------------------------------------------------ top 2 cards
+        // انرژی امروز | خواب دیشب — same two-card row as before, each with its
+        // short description underneath.
         item {
-            val bmi = Health.bmi(profile)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                MiniStat(
-                    emoji = "⚖️",
-                    label = "قد و وزن",
-                    value = if (bmi != null) Dates.fa("%.1f".format(bmi)) else "—",
-                    sub = when {
-                        bmi == null -> "ثبت نشده"
-                        Health.bmiAdultBandsApply(profile) && Health.bmiCategory(profile) != null ->
-                            Health.bmiCategory(profile)!!
-                        else -> "شاخص توده بدنی"
-                    },
-                    accent = Green,
-                    onClick = { showWeightDialog = true },
-                    modifier = Modifier.weight(1f)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatTile(
+                    "⚡", "انرژی امروز", "${Dates.fa(energyPct)}٪",
+                    energyHint(today), Purple, Modifier.weight(1f)
                 )
-                MiniStat(
-                    emoji = "⚡",
-                    label = "انرژی امروز",
-                    value = "${Dates.fa(energyPct)}٪",
-                    sub = energyHint(today),
-                    accent = Purple,
-                    modifier = Modifier.weight(1f)
-                )
-                MiniStat(
-                    emoji = "😴",
-                    label = "خواب دیشب",
-                    value = sleepLabel(today),
-                    sub = sleepHint(today),
-                    accent = Cyan,
-                    modifier = Modifier.weight(1f)
+                StatTile(
+                    "😴", "خواب دیشب", sleepLabel(today),
+                    sleepHint(today),
+                    Cyan, Modifier.weight(1f)
                 )
             }
         }
@@ -204,13 +177,39 @@ fun HomeScreen(vm: MainViewModel, onOpenCheckIn: () -> Unit, needsCheckIn: Boole
             )
         }
 
+        // --------------------------------------- body weight & fatigue (2 cards)
+        // قد و وزن sits here, next to وضعیت بی‌رمقی. Equal width and height, RTL
+        // order: قد و وزن on the right, بی‌رمقی on the left.
         item {
-            StatTile(
-                "🥱", "وضعیت بی‌رمقی",
-                today?.fatigueSeverity?.ifBlank { profileHintFatigue(profile) } ?: profileHintFatigue(profile),
-                fatigueHint(today),
-                Rose, Modifier.fillMaxWidth()
-            )
+            val bmi = Health.bmi(profile)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                MiniStat(
+                    emoji = "⚖️",
+                    label = "قد و وزن",
+                    value = if (bmi != null) Dates.fa("%.1f".format(bmi)) else "—",
+                    sub = when {
+                        bmi == null -> "ثبت نشده"
+                        Health.bmiAdultBandsApply(profile) && Health.bmiCategory(profile) != null ->
+                            Health.bmiCategory(profile)!!
+                        else -> "شاخص توده بدنی"
+                    },
+                    accent = Green,
+                    onClick = { showWeightDialog = true },
+                    modifier = Modifier.weight(1f)
+                )
+                MiniStat(
+                    emoji = "🥱",
+                    label = "وضعیت بی‌رمقی",
+                    value = today?.fatigueSeverity?.ifBlank { profileHintFatigue(profile) }
+                        ?: profileHintFatigue(profile),
+                    sub = fatigueHint(today),
+                    accent = Rose,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         // ---------------------------------------------------- today's plan
@@ -877,7 +876,7 @@ private fun MiniStat(
 ) {
     Column(
         modifier
-            .height(120.dp)
+            .height(130.dp)
             .cardEnter()
             .clip(Shape.card)
             .background(MaterialTheme.colorScheme.surface)
@@ -909,7 +908,7 @@ private fun MiniStat(
             sub,
             fontSize = 10.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
+            maxLines = 3,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
