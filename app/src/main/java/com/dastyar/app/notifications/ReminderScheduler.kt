@@ -115,11 +115,28 @@ object DailyReminder {
 }
 
 /**
- * The period countdown reminder. It schedules an offline alarm for each of the
- * 7, 3 and 1 day marks before the estimated next period, using the user's real
- * cycle data. Alarms survive a reboot via [BootReceiver] and are re-armed
- * whenever the cycle data changes, so no duplicate or stale notification is
- * left behind. When there is not enough cycle data it schedules nothing.
+ * The cycle reminders.
+ *
+ * One switch controls a whole set of local alarms, each placed at a meaningful
+ * point of the cycle, following what established period trackers do:
+ *
+ * - **PMS starting** — a few days before the next period, with a heads-up.
+ * - **Period approaching** — the standard 7/3/2/1-day countdown (Google Health
+ *   uses 2 days + day 1; we keep the earlier marks too).
+ * - **Period due** — on the predicted first day.
+ * - **Period late** — a couple of days after the prediction with no period
+ *   logged, so the user is aware instead of confused.
+ * - **Fertile window starting** — two days before the estimated window.
+ * - **Ovulation day** — the estimated ovulation day, with care advice.
+ * - **Fertile window ending** — when the estimated window closes.
+ * - **Period ended** — a gentle "is your period over?" nudge one day after the
+ *   learned end, so the user can close the period and sharpen the history.
+ *
+ * Everything is computed locally from the same learned [com.dastyar.app.data.Cycle]
+ * the ring uses, so nothing is guessed and no network is needed. Alarms survive
+ * a reboot via [BootReceiver] and are re-armed whenever the cycle data or the
+ * period history changes, so no duplicate or stale notification is left behind.
+ * When there is not enough cycle data it schedules nothing.
  */
 object PeriodReminder {
 
@@ -128,6 +145,25 @@ object PeriodReminder {
 
     private const val BASE_REQUEST = 9200
     private const val HOUR = 9
+
+    /**
+     * One named point in the cycle that can produce a notification. The id is
+     * stable per event, so re-scheduling always replaces the previous alarm for
+     * that event instead of piling up duplicates.
+     */
+    enum class Event(val id: Int, val request: Int) {
+        PMS(9010, 1),
+        APPROACH_7(9011, 7),
+        APPROACH_3(9012, 3),
+        APPROACH_2(9013, 2),
+        APPROACH_1(9014, 1),
+        PERIOD_DUE(9015, 21),
+        PERIOD_LATE(9016, 22),
+        FERTILE_START(9017, 23),
+        OVULATION(9018, 24),
+        FERTILE_END(9019, 25),
+        PERIOD_ENDED(9020, 26)
+    }
 
     fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -147,7 +183,7 @@ object PeriodReminder {
     fun notificationId(daysBefore: Int): Int = 9002 + daysBefore
 
     /**
-     * (Re)schedules all three countdown alarms from the user's cycle data. A
+     * (Re)schedules every cycle alarm from the user's learned cycle data. A
      * null profile reloads from the database. Cancels everything first so an old
      * estimate cannot fire after the dates changed.
      */
@@ -161,14 +197,63 @@ object PeriodReminder {
 
         // Not enough cycle data: never create a guessed reminder.
         if (p.lastPeriodDate.isBlank()) return
-        val len = if (p.cycleLength in 15..60) p.cycleLength else return
-        val days = Dates.daysUntilNextPeriod(p.lastPeriodDate, len)
-        if (days < 0) return
+
+        // Learn the cycle from the real history, exactly like the ring: the
+        // learned length beats the questionnaire number once there is history.
+        val events = runCatching {
+            kotlinx.coroutines.runBlocking { DastyarDatabase.get(ctx).dao().periodEvents() }
+        }.getOrDefault(emptyList())
+        val info = com.dastyar.app.data.Cycle.info(p, events) ?: return
+        if (!info.hasCycle) return
+
+        val length = info.length
+        val periodDays = info.periodDays
+        val today = com.dastyar.app.data.Dates.today()
+        val rawDay = com.dastyar.app.data.Cycle.rawDay(info)
+
+        val ovStart = com.dastyar.app.data.Health.ovulationStart(length)
+        val ovEnd = ovStart + 3
+        val pmsStart = (length - 4).coerceAtLeast(ovEnd + 1)
+
+        // Every event is described as "the day-of-cycle to fire on" plus a flag
+        // for whether that day has already passed. Firing is at 9 in the
+        // morning local time; anything in the past is skipped.
+        data class Slot(val event: Event, val day: Int, val forceToday: Boolean)
+
+        val slots = mutableListOf<Slot>()
+        // Countdown marks before the period. The "day 0" mark is PERIOD_DUE, so
+        // APPROACH_1 is deliberately not scheduled again for the same day.
+        slots += Slot(Event.APPROACH_7, length - 6, false)
+        slots += Slot(Event.APPROACH_3, length - 2, false)
+        slots += Slot(Event.APPROACH_2, length - 1, false)
+        // PMS starts a few days out.
+        slots += Slot(Event.PMS, pmsStart, false)
+        // Fertile window edges and ovulation.
+        slots += Slot(Event.FERTILE_START, (ovStart - 2).coerceAtLeast(1), false)
+        slots += Slot(Event.OVULATION, (ovStart + 1).coerceAtMost(length), false)
+        slots += Slot(Event.FERTILE_END, ovEnd.coerceAtMost(length), false)
+        // The day the period is due, and a "late" nudge two days later.
+        slots += Slot(Event.PERIOD_DUE, length, true)
+        slots += Slot(Event.PERIOD_LATE, length + 2, true)
+        // Ask after the learned bleeding length whether the period is over.
+        slots += Slot(Event.PERIOD_ENDED, periodDays + 1, false)
 
         val alarm = ctx.getSystemService(AlarmManager::class.java)
-        for (offset in intArrayOf(7, 3, 1)) {
-            val trigger = triggerFor(days, offset) ?: continue
-            val pi = pendingIntent(ctx, offset)
+        for (slot in slots) {
+            // Compare on the absolute cycle calendar, not the wrapped day, so
+            // "the period is due" and "it is late" are not confused with an
+            // earlier cycle.
+            val targetIso = com.dastyar.app.data.Dates.plusDays(info.startIso, slot.day - 1)
+            val daysFromToday = com.dastyar.app.data.Jalali.daysBetween(today, targetIso)
+            // Fire today only for the due/late nudges; otherwise skip anything
+            // already in the past so a late schedule never spams the user.
+            val fireIn = when {
+                daysFromToday > 0 -> daysFromToday
+                daysFromToday == 0 && (slot.forceToday || slot.day > rawDay) -> 0
+                else -> continue
+            }
+            val trigger = triggerIn(ctx, fireIn) ?: continue
+            val pi = pendingIntent(ctx, slot.event)
             try {
                 alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
             } catch (_: SecurityException) {
@@ -181,41 +266,45 @@ object PeriodReminder {
 
     fun cancel(ctx: Context) {
         val alarm = ctx.getSystemService(AlarmManager::class.java)
-        for (offset in intArrayOf(7, 3, 1)) alarm.cancel(pendingIntent(ctx, offset))
+        for (event in Event.entries) alarm.cancel(pendingIntent(ctx, event))
     }
 
-    /** Shows a sample 7-day reminder immediately for testing. */
+    /** Shows a sample reminder immediately for testing. */
     fun showTestNow(ctx: Context) {
         NotificationHelper.show(
             ctx,
-            notificationId(7),
-            "یادآوری پریود",
-            "حدود ۷ روز تا پریود بعدی باقی مانده 🌸",
+            Event.OVULATION.id,
+            "یادآوری چرخه",
+            "امروز حدود روز تخمک‌گذاری تو است؛ این بازه معمولاً احتمال باروری بیشتری دارد 🌸",
             NotificationHelper.CHANNEL_PERIOD
         )
     }
 
     /**
-     * The wall-clock moment for one countdown: 9 in the morning, [daysBefore]
-     * days before the estimated period. Returns null when that moment is
-     * already in the past.
+     * The wall-clock moment [daysFromToday] days from now, at 9 in the morning.
+     * Returns null when the resulting moment is already in the past.
      */
-    private fun triggerFor(daysUntil: Int, daysBefore: Int): Long? {
-        val fireIn = daysUntil - daysBefore
-        if (fireIn < 0) return null
+    private fun triggerIn(ctx: Context, daysFromToday: Int): Long? {
         val target = LocalDateTime.now()
             .toLocalDate()
-            .plusDays(fireIn.toLong())
+            .plusDays(daysFromToday.toLong())
             .atTime(LocalTime.of(HOUR, 0))
-        if (!target.isAfter(LocalDateTime.now())) return null
+        if (!target.isAfter(LocalDateTime.now())) {
+            // A same-day alarm set after 9:00 should still fire, just very soon.
+            if (daysFromToday == 0) {
+                return System.currentTimeMillis() + 5_000L
+            }
+            return null
+        }
         return target.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 
-    private fun pendingIntent(ctx: Context, daysBefore: Int): PendingIntent {
+    private fun pendingIntent(ctx: Context, event: Event): PendingIntent {
         val i = Intent(ctx, PeriodReminderReceiver::class.java)
-            .putExtra("daysBefore", daysBefore)
+            .putExtra("event", event.name)
+            .putExtra("daysBefore", event.request)
         return PendingIntent.getBroadcast(
-            ctx, BASE_REQUEST + daysBefore, i,
+            ctx, BASE_REQUEST + event.request, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

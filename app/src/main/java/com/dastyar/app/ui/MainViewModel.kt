@@ -518,7 +518,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ?: PeriodEvent(startIso = anchor, endIso = dateIso, source = "user")
         )
 
-        // The learned period length may have changed, so refresh the tip.
+        // The learned period length changed, so re-arm the whole cycle schedule
+        // and refresh the tip.
+        com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), current)
         withContext(Dispatchers.Main) {
             _toast.value = "پایان پریود ثبت شد ✅"
             _cycleTip.value = null
@@ -542,6 +544,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val previous = events.filter { it.startIso != startIso }.maxByOrNull { it.startIso }
             dao.saveProfile(current.copy(lastPeriodDate = previous?.startIso.orEmpty()))
         }
+        // The history changed, so the learned cycle and the alarms must move too.
+        com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), current)
         withContext(Dispatchers.Main) {
             _toast.value = "این پریود از تاریخچه حذف شد."
             _cycleTip.value = null
