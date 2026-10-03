@@ -378,9 +378,11 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             SectionTitle("یادآوری پریود", "🌸")
             Spacer(Modifier.height(8.dp))
             Text(
-                "بر اساس تاریخ آخرین پریود و طول چرخه‌ات، ۷ روز و ۳ روز و ۱ روز قبل از " +
-                        "پریود بعدی یک اعلان محلی می‌گیری. این اعلان به اینترنت نیاز ندارد " +
-                        "و حتی با بسته بودن برنامه هم می‌رسد. زمان‌ها تقریبی‌اند.",
+                "بر اساس چرخه‌ای که برنامه از تاریخ‌های واقعی تو یاد گرفته، این اعلان‌ها را می‌گیری: " +
+                        "شروع PMS، شمارش ۷/۳/۲/۱ روز قبل از پریود، روز موعد پریود، هشدار تأخیر پریود، " +
+                        "شروع بازه باروری، روز تخمک‌گذاری، پایان بازه باروری، و یادآوری «پایان پریود». " +
+                        "همه محلی‌اند، به اینترنت نیاز ندارند و حتی با بسته بودن برنامه هم می‌رسند. " +
+                        "زمان‌ها تقریبی‌اند و بر اساس تاریخچه خودت هر ماه دقیق‌تر می‌شوند.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -395,7 +397,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     }
                 })
                 Spacer(Modifier.width(10.dp))
-                Text("یادآوری نزدیک شدن پریود", fontSize = 14.sp)
+                Text("یادآوری‌های چرخه و پریود", fontSize = 14.sp)
             }
             if (periodEnabled && profile?.lastPeriodDate.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))

@@ -162,30 +162,85 @@ class ReminderReceiver : BroadcastReceiver() {
 }
 
 /**
- * Fires the period countdown reminder on the morning of the 7, 3 and 1 day
- * before the estimated next period. Each offset uses a stable notification id so
- * a re-schedule replaces the old alarm and the user never gets duplicates. It
- * runs entirely on the device with no network.
+ * Fires one cycle event notification. The event name is carried in the intent
+ * so a single receiver serves every point of the cycle (PMS, period countdown,
+ * period due/late, fertile window, ovulation, period ended). Each has its own
+ * stable notification id, so a re-schedule replaces the previous alarm and the
+ * user never gets duplicates. Runs entirely on the device with no network.
  */
 class PeriodReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (!PeriodReminder.isEnabled(context)) return
+        val event = runCatching {
+            PeriodReminder.Event.valueOf(intent.getStringExtra("event") ?: "APPROACH_7")
+        }.getOrDefault(PeriodReminder.Event.APPROACH_7)
         val daysBefore = intent.getIntExtra("daysBefore", 0)
-        val body = when (daysBefore) {
-            7 -> "حدود ۷ روز تا پریود بعدی باقی مانده 🌸"
-            3 -> "حدود ۳ روز تا پریود بعدی باقی مانده 🌸"
-            1 -> "احتمالاً حدود ۱ روز تا پریود بعدی باقی مانده 🌸"
-            else -> "نزدیک پریود بعدی هستی 🌸"
+
+        val title: String
+        val body: String
+        when (event) {
+            PeriodReminder.Event.PMS -> {
+                title = "نزدیک شدن PMS 🌙"
+                body = "وارد روزهای پیش از پریود شدی. ممکن است خلق‌وخو نوسان کند یا نفخ و " +
+                        "خستگی بیشتر شود؛ خواب منظم، کربوهیدرات پیچیده و کافئین کمتر کمک می‌کند."
+            }
+            PeriodReminder.Event.APPROACH_7 -> {
+                title = "یادآوری پریود"
+                body = "حدود ۷ روز تا پریود بعدی باقی مانده 🌸 این زمان خوبی برای آماده‌بودن است."
+            }
+            PeriodReminder.Event.APPROACH_3 -> {
+                title = "یادآوری پریود"
+                body = "حدود ۳ روز تا پریود بعدی باقی مانده 🌸"
+            }
+            PeriodReminder.Event.APPROACH_2 -> {
+                title = "یادآوری پریود"
+                body = "حدود ۲ روز تا پریود بعدی باقی مانده؛ چند وسیله همراهت باشد 🌸"
+            }
+            PeriodReminder.Event.APPROACH_1 -> {
+                title = "یادآوری پریود"
+                body = "احتمالاً حدود ۱ روز تا پریود بعدی باقی مانده 🌸"
+            }
+            PeriodReminder.Event.PERIOD_DUE -> {
+                title = "امروز، موعد پریود 🌸"
+                body = "امروز روز تخمینی شروع پریودت است. هر وقت شروع شد، از داشبورد «شروع پریود» " +
+                        "را بزن تا چرخه دقیق‌تر ثبت شود."
+            }
+            PeriodReminder.Event.PERIOD_LATE -> {
+                title = "تأخیر در پریود ⏰"
+                body = "پریودت از موعد تقریبی‌اش چند روز گذشته. اگر شروع شده، «شروع پریود» را بزن؛ " +
+                        "اگر نه، نگران نباش — چرخه می‌تواند چند روز جابه‌جا شود."
+            }
+            PeriodReminder.Event.FERTILE_START -> {
+                title = "شروع بازه باروری 🌱"
+                body = "به بازه تخمینی باروری‌ات نزدیک می‌شوی. اگر برای بارداری برنامه داری این روزها " +
+                        "مهم‌اند؛ توجه کن این محاسبه روش قطعی پیشگیری از بارداری نیست."
+            }
+            PeriodReminder.Event.OVULATION -> {
+                title = "روز تخمک‌گذاری 💧"
+                body = "امروز حدود روز تخمک‌گذاری تو است. ممکن است ترشح بیشتر یا کمی درد یک‌طرفه " +
+                        "حس کنی؛ طبیعی است. آب کافی بنوش و به بدنت توجه کن."
+            }
+            PeriodReminder.Event.FERTILE_END -> {
+                title = "پایان بازه باروری"
+                body = "بازه تخمینی باروری‌ات به پایان رسید. اگر درباره بارداری سؤالی داری، ثبتش کن " +
+                        "تا در مشاوره دقیق‌تر بررسی شود."
+            }
+            PeriodReminder.Event.PERIOD_ENDED -> {
+                title = "پریودت تموم شده؟"
+                body = "اگر خونریزی‌ات تمام شده، از داشبورد «پایان پریود» را بزن تا برنامه طول پریودت " +
+                        "را یاد بگیرد و پیش‌بینی‌ها دقیق‌تر شوند."
+            }
         }
+
         if (!NotificationHelper.canPost(context)) return
         NotificationHelper.show(
             context,
-            PeriodReminder.notificationId(daysBefore),
-            "یادآوری پریود",
+            event.id,
+            title,
             body,
             NotificationHelper.CHANNEL_PERIOD
         )
-        // Re-arm the next cycle's reminder once today's has been delivered.
+        // Re-arm the whole schedule so the next cycle's events are ready.
         PeriodReminder.scheduleNext(context)
     }
 }
