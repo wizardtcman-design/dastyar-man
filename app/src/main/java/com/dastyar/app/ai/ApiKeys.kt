@@ -37,7 +37,7 @@ object ApiKeys {
         if (clean.isBlank()) return
         cachedKey = clean
         cachedProvider = provider.copy()
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        prefs(ctx).edit()
             .putString(KEY_ALT, clean)
             .putString(KEY_PROVIDER, provider.id)
             .putString(KEY_BASE, provider.baseUrl)
@@ -49,17 +49,18 @@ object ApiKeys {
     fun clearUserKey(ctx: Context) {
         cachedKey = null
         cachedProvider = null
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        prefs(ctx).edit()
             .remove(KEY_ALT).remove(KEY_PROVIDER).remove(KEY_BASE)
             .remove(KEY_TEXT_MODEL).remove(KEY_IMAGE_MODEL).apply()
     }
 
     /** The stored alternate key (reads preferences directly), or null. */
-    fun storedKey(ctx: Context): String? =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ALT, null)
+    fun storedKey(ctx: Context): String? = prefs(ctx).getString(KEY_ALT, null)
 
     fun load(ctx: Context) {
-        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Move a key written by an older version into encrypted storage first.
+        com.dastyar.app.security.SecurePrefs.migrateFromPlain(ctx, PREFS, listOf(KEY_ALT))
+        val p = prefs(ctx)
         val key = p.getString(KEY_ALT, null)?.trim()?.ifBlank { null }
         val base = p.getString(KEY_BASE, null)?.trim()
         val textModel = p.getString(KEY_TEXT_MODEL, null)?.trim()
@@ -74,4 +75,7 @@ object ApiKeys {
             )
         } else null
     }
+
+    private fun prefs(ctx: Context) =
+        com.dastyar.app.security.SecurePrefs.get(ctx, PREFS)
 }

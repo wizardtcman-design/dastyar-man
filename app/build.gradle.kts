@@ -128,6 +128,10 @@ dependencies {
     // DataStore for settings
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    // Encrypted preferences for the user's own AI service keys, so a key the
+    // user typed is never left as plain text in the app's preferences file.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // WorkManager for reminders
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
