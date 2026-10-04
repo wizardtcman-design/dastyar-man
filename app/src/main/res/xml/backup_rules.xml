@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup rules for the app's private data.
+
+  Everything this app stores is sensitive: the period history, the daily health
+  check-ins, the weight log and the user's own AI service keys. None of it is
+  meant to leave the device, so no app data is offered for backup or for
+  device-to-device transfer. Stating this explicitly (in addition to
+  android:allowBackup="false") means a future change to default behaviour on a
+  newer Android version cannot silently start exporting this data.
+-->
+<full-backup-content>
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="external" path="." />
+</full-backup-content>

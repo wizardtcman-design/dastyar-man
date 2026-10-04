@@ -314,13 +314,20 @@ object ServiceKeys {
 
     // ----------------------------------------------------------------- load
 
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun prefs(ctx: Context) =
+        com.dastyar.app.security.SecurePrefs.get(ctx, PREFS)
 
     private fun stateOf(v: String?): State =
         runCatching { State.valueOf(v ?: "") }.getOrDefault(State.NOT_SET)
 
     /** Restores every service and its capabilities; called once at startup. */
     fun load(ctx: Context) {
+        // One-time move of any plaintext key written by an older version into
+        // the encrypted store, before anything is read.
+        com.dastyar.app.security.SecurePrefs.migrateFromPlain(
+            ctx, PREFS,
+            listOf(OR_KEY, CC_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
+        )
         val p = prefs(ctx)
 
         orKey = p.getString(OR_KEY, null)?.trim()?.ifBlank { null }
