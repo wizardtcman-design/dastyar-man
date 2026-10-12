@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -58,6 +59,14 @@ object CloudflareClient {
          */
         val inpaint: Boolean = false,
         /**
+         * True for the new FLUX.2 klein editing path: the model takes the source
+         * photo plus a natural-language instruction as multipart form data
+         * (`input_image_0` + `prompt`) and regenerates the whole frame, keeping
+         * what the instruction does not ask to change. It has no mask, so the
+         * parts to preserve must be named in the prompt.
+         */
+        val referenceEdit: Boolean = false,
+        /**
          * Documented relative consumption. Cloudflare publishes per-model
          * Neuron rates in its pricing docs; when a rate is not published for a
          * model this stays null and the UI shows no number for it. It is never
@@ -67,6 +76,13 @@ object CloudflareClient {
     )
 
     val MODELS: List<CfModel> = listOf(
+        CfModel(
+            id = "@cf/black-forest-labs/flux-2-klein-4b",
+            label = "ویرایش تصویر (FLUX.2 klein)",
+            imageInput = true,
+            referenceEdit = true,
+            neuronHint = "مدل یکپارچهٔ تولید و ویرایش؛ عکس ورودی را با دستور متنی ویرایش می‌کند"
+        ),
         CfModel(
             id = "@cf/black-forest-labs/flux-1-schnell",
             label = "Flux 1 Schnell (سریع)",
@@ -99,15 +115,19 @@ object CloudflareClient {
     )
 
     /** The model used for text-to-image when the user has not chosen one. */
-    val DEFAULT_MODEL: CfModel = MODELS.first()
+    val DEFAULT_MODEL: CfModel =
+        MODELS.firstOrNull { it.id == "@cf/black-forest-labs/flux-1-schnell" } ?: MODELS.first()
 
     /**
-     * The model used for real image editing. Prefers a true inpainting model,
-     * because that is the only Cloudflare path that keeps the parts of the
-     * picture the user did not ask to change.
+     * The model used for real image editing. Prefers the FLUX.2 klein reference
+     * editor, which takes the user's photo plus a natural-language instruction
+     * and can change the background, clothing colour or hair in one request.
+     * Falls back to the older masked inpainting model only when the reference
+     * editor is not listed. It is never a text-to-image model: sending the photo
+     * nowhere and rendering a fresh scene is exactly the bug being avoided.
      */
     fun editModel(): CfModel? =
-        MODELS.firstOrNull { it.inpaint } ?: MODELS.firstOrNull { it.imageInput }
+        MODELS.firstOrNull { it.referenceEdit } ?: MODELS.firstOrNull { it.inpaint }
 
     fun modelById(id: String?): CfModel? = MODELS.firstOrNull { it.id == id }
 
@@ -219,6 +239,17 @@ object CloudflareClient {
         if (!model.imageInput) return@withContext CfResult(
             false, CfFail.MODEL, "مدل «${model.label}» قابلیت ویرایش تصویر ندارد."
         )
+        // FLUX.2 klein reference editor: multipart with the source photo as
+        // `input_image_0` (binary) and the instruction as `prompt`. No mask: the
+        // parts to preserve are named in the prompt. The source must be a
+        // smaller-than-512x512 image, which the caller prepares.
+        if (model.referenceEdit) {
+            val src = try { Base64.getDecoder().decode(sourceBase64) } catch (_: Exception) { null }
+                ?: return@withContext CfResult(false, CfFail.MODEL, "تصویر پایه خوانده نشد.")
+            return@withContext referenceEditCall(
+                accountId, token, model, prompt, src
+            )
+        }
         // Real inpainting: decode the source, build a mask for the region the
         // user asked to change, and send both as byte arrays.
         if (model.inpaint) {
@@ -263,6 +294,72 @@ object CloudflareClient {
         kotlinx.serialization.json.JsonArray(
             bytes.map { kotlinx.serialization.json.JsonPrimitive(it.toInt() and 0xFF) }
         )
+
+    /**
+     * FLUX.2 klein reference-edit call. The source photo is scaled below
+     * 512x512 (the model's documented limit for input images) and sent as the
+     * `input_image_0` multipart field; the instruction goes in `prompt`. The
+     * response is JSON with a base64 image in `result.image`.
+     */
+    private fun referenceEditCall(
+        accountId: String,
+        token: String,
+        model: CfModel,
+        prompt: String,
+        source: ByteArray
+    ): CfResult<ByteArray> {
+        if (accountId.isBlank() || token.isBlank()) {
+            return CfResult(false, CfFail.NO_CREDENTIALS, "شناسه حساب و توکن لازم است.")
+        }
+        val prepared = ImageMasker.forReferenceEdit(source)
+            ?: return CfResult(false, CfFail.MODEL, "عکس ورودی خوانده نشد.")
+        return try {
+            val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("prompt", prompt)
+                .addFormDataPart(
+                    "input_image_0", "source.png",
+                    prepared.toRequestBody("image/png".toMediaType())
+                )
+                .addFormDataPart("width", "512")
+                .addFormDataPart("height", "512")
+                .build()
+            val req = Request.Builder()
+                .url(runUrl(accountId, model.id))
+                .addHeader("Authorization", "Bearer $token")
+                .post(body)
+                .build()
+            http.newCall(req).execute().use { resp ->
+                val bytes = resp.body?.bytes() ?: ByteArray(0)
+                val text = bytes.toString(Charsets.UTF_8)
+                if (!resp.isSuccessful) {
+                    val kind = cfClassify(resp.code, text)
+                    return CfResult(
+                        false, kind, cfDescribe(resp.code, text),
+                        http = resp.code, neurons = extractNeurons(text),
+                        quotaExhausted = kind == CfFail.RATE_LIMIT && text.lowercase().contains("neuron")
+                    )
+                }
+                // Raw pixels for some models.
+                if (bytes.size > 500 && !looksLikeJson(bytes)) {
+                    return CfResult(true, CfFail.NONE, "✅ تصویر ویرایش شد", bytes,
+                        http = resp.code, neurons = extractNeurons(text))
+                }
+                // JSON with a base64 image for this one.
+                val b64 = extractBase64Image(text)
+                if (b64 != null) {
+                    val raw = try { Base64.getDecoder().decode(b64) } catch (e: Exception) { null }
+                    if (raw != null && raw.size > 500) {
+                        return CfResult(true, CfFail.NONE, "✅ تصویر ویرایش شد", raw,
+                            http = resp.code, neurons = extractNeurons(text))
+                    }
+                }
+                CfResult(false, cfClassify(resp.code, text), cfDescribe(resp.code, text),
+                    http = resp.code, neurons = extractNeurons(text))
+            }
+        } catch (e: Exception) {
+            CfResult(false, cfFailFromException(e), cfNetworkReason(e))
+        }
+    }
 
     private fun call(
         accountId: String,

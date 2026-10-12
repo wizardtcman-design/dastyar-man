@@ -92,4 +92,34 @@ object ImageMasker {
         val y = (src.height - side) / 2
         return Bitmap.createBitmap(src, x, y, side, side)
     }
+
+    /**
+     * Prepares the source photo for the FLUX.2 klein reference editor.
+     *
+     * That model documents that every input image must be smaller than
+     * 512x512. A non-square photo is scaled so its longest side is exactly 512
+     * (aspect ratio kept, no crop), because the model regenerates the whole
+     * frame and a crop would throw away parts of the user's picture. Returns
+     * PNG bytes, or null when [source] is not a decodable image.
+     */
+    fun forReferenceEdit(source: ByteArray): ByteArray? {
+        val decoded = try {
+            BitmapFactory.decodeByteArray(source, 0, source.size)
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val longest = maxOf(decoded.width, decoded.height)
+        val scaled = if (longest <= MAX_REFERENCE_SIDE) decoded else {
+            val ratio = MAX_REFERENCE_SIDE.toFloat() / longest.toFloat()
+            val w = (decoded.width * ratio).toInt().coerceAtLeast(1)
+            val h = (decoded.height * ratio).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(decoded, w, h, true)
+        }
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
+        return out.toByteArray()
+    }
+
+    /** The documented upper bound for an input image on the reference editor. */
+    private const val MAX_REFERENCE_SIDE = 512
 }
