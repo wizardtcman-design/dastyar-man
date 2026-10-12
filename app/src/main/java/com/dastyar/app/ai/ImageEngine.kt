@@ -45,9 +45,17 @@ object ImageEngine {
         prompt: String,
         width: Int = 768,
         height: Int = 1024,
-        seed: Int = (1..999_999).random()
+        seed: Int = (1..999_999).random(),
+        /**
+         * An already-prepared English prompt. When the user has seen and possibly
+         * edited the translated prompt, it is passed back here so the exact same
+         * English text is sent -- it is never translated a second time or
+         * rewritten behind the user's back. Null means "translate [prompt] now",
+         * which is the normal one-tap path.
+         */
+        englishOverride: String? = null
     ): Result<ImageOutcome> = withContext(Dispatchers.IO) {
-        if (prompt.isBlank()) return@withContext Result.failure(
+        if (prompt.isBlank() && englishOverride.isNullOrBlank()) return@withContext Result.failure(
             AiException("توصیف تصویر خالی است.")
         )
         val reasons = mutableListOf<String>()
@@ -57,8 +65,9 @@ object ImageEngine {
         // scene, or worse, try to draw the Persian letters. So the prompt is
         // translated ONCE here and the exact same English text is sent to
         // whichever provider runs -- never translated twice and never altered
-        // beyond a faithful translation.
-        val englishPrompt = toEnglishPrompt(prompt)
+        // beyond a faithful translation. When the user already reviewed and
+        // edited the English prompt, that exact text is used instead.
+        val englishPrompt = englishOverride?.takeIf { it.isNotBlank() } ?: toEnglishPrompt(prompt)
 
         // 1) Cloudflare, only when connected and not already out of quota today.
         val cfModel = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
@@ -152,7 +161,10 @@ object ImageEngine {
         // Same as generate(): the edit instruction is translated ONCE so the
         // exact same English reaches whichever provider runs. A raw Persian
         // instruction makes the model ignore the edit and render something else.
-        val englishPrompt = toEnglishPrompt(prompt)
+        // For an edit the translator is told this is an instruction about an
+        // EXISTING photo, so it must keep every requested change and never
+        // invent a new scene.
+        val englishPrompt = toEnglishPrompt(prompt, forEdit = true)
 
         // Which slice of the picture the instruction is about, so the inpainting
         // model changes only that part and leaves the rest untouched.
@@ -160,19 +172,29 @@ object ImageEngine {
 
         val model = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
         if (ServiceKeys.cloudflareReady() && !QuotaGuard.cloudflareExhaustedToday(ctx)) {
-            // A real edit needs a model that accepts the source image; prefer the
-            // true inpainting model so unmentioned parts are preserved.
+            // A real edit needs a model that accepts the source image. Prefer
+            // the FLUX.2 klein reference editor (one photo + a natural-language
+            // instruction, can do several changes at once); fall back to the
+            // older masked inpainting model only when it is not listed.
             val editModel = when {
-                model != null && model.inpaint -> model
+                model != null && (model.referenceEdit || model.inpaint) -> model
                 else -> CloudflareClient.editModel()
             }
             if (editModel != null && editModel.imageInput) {
+                // The reference editor has no mask, so the parts to keep are
+                // named in the prompt. The instruction is joined with a firm
+                // "keep everything else" clause so the face and any detail the
+                // user did not mention survive as far as the model allows.
+                val editPrompt = if (editModel.referenceEdit)
+                    "$englishPrompt, keep the person's face, identity and all parts not " +
+                        "mentioned above exactly the same, do not change the subject"
+                else englishPrompt
                 val t0 = System.currentTimeMillis()
                 val r = CloudflareClient.imageToImage(
                     accountId = ServiceKeys.cloudflareAccount(),
                     token = ServiceKeys.cloudflareToken(),
                     model = editModel,
-                    prompt = englishPrompt,
+                    prompt = editPrompt,
                     sourceBase64 = sourceBase64,
                     region = region
                 )
@@ -246,33 +268,66 @@ object ImageEngine {
     }
 
     /**
-     * Faithfully translates a Persian prompt into English for the image models,
-     * which only understand English. The translation is deliberately literal:
-     * the system message forbids adding, removing, or reimagining anything, so
-     * "a snowy mountain with a blue sky" stays that and does not become a
-     * different scene.
-     *
-     * The same call is used for both Cloudflare and Pollinations, so a prompt
-     * is translated exactly once per request and both providers receive the
-     * identical English text.
+     * Prepares the English prompt for [prompt] without generating an image, so
+     * the user can see exactly what will be sent to the image model and edit it
+     * if needed. A Persian prompt is translated+structured once; an English one
+     * is returned as-is. This never touches the network beyond the translation
+     * call and spends no image-generation quota.
      */
-    private suspend fun toEnglishPrompt(prompt: String): String {
+    suspend fun prepareEnglishPrompt(prompt: String): String {
+        if (prompt.isBlank()) return ""
+        return toEnglishPrompt(prompt)
+    }
+
+    /**
+     * Turns the user's Persian description into a single English prompt that the
+     * image models (Flux) can render faithfully.
+     *
+     * The old version translated the text *literally*, word for word. That is
+     * correct for meaning but useless as an image prompt: a short Persian
+     * sentence becomes a short English one ("cat"), and Flux then invents a whole
+     * scene of its own. This version does two things in one pass:
+     *
+     *   1. TRANSLATE faithfully -- every subject, count, garment, colour, place,
+     *      pose, action and relationship the user wrote is kept exactly.
+     *   2. STRUCTURE the result as a prompt -- keep the explicit details and add
+     *      only neutral rendering hints (lighting, camera, quality) that the user
+     *      did NOT already mention and that do NOT contradict anything they said.
+     *
+     * The model is explicitly forbidden from inventing new subjects, changing how
+     * many people/animals there are, or altering colours/clothing/setting, so a
+     * "grey wolf next to a boy in a red jacket in snowy mountains" stays exactly
+     * that and never becomes a random wolf.
+     *
+     * When [forEdit] is true the text is an instruction about an EXISTING photo,
+     * not a fresh scene, so a separate system prompt is used: it asks the
+     * translator to phrase the change(s) as an edit command and to keep every
+     * requested change without turning it into a description of a new image.
+     *
+     * The same call is used for both Cloudflare and Pollinations, so a prompt is
+     * processed exactly once per request and both providers receive the identical
+     * English text.
+     */
+    private suspend fun toEnglishPrompt(prompt: String, forEdit: Boolean = false): String {
         val hasPersian = prompt.any { it in '\u0600'..'\u06FF' }
         if (!hasPersian) return prompt
         val cleaned = try {
             AiClient.chat(
-                system = "You are a literal translator of image-generation prompts into English. " +
-                        "Translate the user's text into natural English word for word in meaning. " +
-                        "Do NOT add, remove, summarize, embellish, or reinterpret any subject, " +
-                        "place, object, color, or style. Do NOT answer or describe anything else. " +
-                        "Output ONLY the English translation, no quotes, no notes, one line.",
+                system = if (forEdit) EDIT_PROMPT_ENGINEER_SYSTEM else PROMPT_ENGINEER_SYSTEM,
                 history = emptyList(),
                 userMessage = prompt
             ).getOrNull()
                 ?.trim()
                 ?.removeSurrounding("\"")
-                ?.lineSequence()?.firstOrNull()?.trim()
-                ?.takeIf { it.isNotBlank() && it.length < 400 }
+                // Keep the whole answer, not just the first line: a rich scene
+                // is often written across a couple of lines.
+                ?.lineSequence()
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.joinToString(" ")
+                ?.replace(Regex("\\s+"), " ")
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && it.length < 700 }
         } catch (e: Exception) {
             null
         }
@@ -286,4 +341,62 @@ object ImageEngine {
                 c.count { it.isLetter() && it.code < 128 } >= 3
         return if (looksEnglish) c!! else prompt
     }
+
+    /**
+     * The instruction that turns the user's text into a faithful, rendered-ready
+     * English prompt. It is deliberately strict about preservation: the model is
+     * a translator and prompt-writer, never a storyteller. It may ONLY fill in
+     * neutral photographic/style hints, and only when the user did not already
+     * give them.
+     */
+    private const val PROMPT_ENGINEER_SYSTEM =
+        "You convert a user's description into ONE English text-to-image prompt for the Flux model. " +
+        "Translate the user's text into natural English, then write it as a clear image prompt.\n" +
+        "HARD RULES - you must obey all of them:\n" +
+        "1. PRESERVE every concrete detail the user gave: all subjects (people and animals), " +
+        "their exact count, gender and age if stated, clothing and its colours, objects, " +
+        "the setting/place, the pose, the action, the spatial relationships between subjects " +
+        "(e.g. 'next to', 'looking at', 'behind'), the time of day, weather and mood. " +
+        "Never drop, merge, swap or reorder these in a way that changes the meaning.\n" +
+        "2. DO NOT invent new subjects, extra people/animals, or a different scene. " +
+        "If the user says one wolf and one boy, there is exactly one wolf and one boy.\n" +
+        "3. Keep the user's colours, clothing and environment EXACTLY as written." +
+        " If the user says a red jacket, it is red.\n" +
+        "4. You MAY add neutral rendering hints ONLY when the user did not specify them and " +
+        "they do not contradict the user: e.g. lighting, camera angle, lens, depth of field, " +
+        "photo-realistic/cinematic style, high detail. If the user already stated the style, " +
+        "lighting or camera, use THEIRS and add nothing that conflicts.\n" +
+        "5. Do not answer, explain, ask questions, or add commentary.\n" +
+        "Output ONLY the final English prompt as a single line of comma-separated phrases, " +
+        "no quotes, no labels, no notes."
+
+    /**
+     * The instruction that turns a user's EDIT command (about a photo they
+     * already have) into one English editing prompt for the image model.
+     *
+     * It is a translator, not a scene writer: it must carry EVERY requested
+     * change (background, clothing colour, hair, objects, and so on) into the
+     * English text and must not drop any, while never describing a brand-new
+     * scene. It is told the edit is applied to an existing photo, so parts the
+     * user did not mention should stay.
+     */
+    private const val EDIT_PROMPT_ENGINEER_SYSTEM =
+        "You convert a user's Persian instruction into ONE English image-EDITING prompt. " +
+        "The prompt will be applied to a photo the user already has, so it must read as an " +
+        "edit command, not as a description of a new scene.\n" +
+        "HARD RULES - you must obey all of them:\n" +
+        "1. CARRY every change the user asked for: change of background/scene, clothing or its " +
+        "colour, hair style or colour, added/removed objects, pose or expression. Do not drop, " +
+        "weaken or merge any requested change. If the user asked for three changes, all three " +
+        "appear in the English prompt.\n" +
+        "2. DO NOT invent new changes, new subjects, extra people, or a different scene. Only " +
+        "translate and rephrase what the user asked.\n" +
+        "3. Keep every specific detail the user gave (colours, items, places) EXACTLY: a red " +
+        "jacket stays red, snowy mountains stay snowy mountains.\n" +
+        "4. Write it as an instruction to the editor, e.g. 'replace the background with a snowy " +
+        "mountain, change the jacket color to red'. It MUST NOT add an instruction to keep or " +
+        "preserve the face or other parts; preservation is handled separately, so do not mention it.\n" +
+        "5. Do not answer, explain, ask questions, or add commentary.\n" +
+        "Output ONLY the final English editing prompt as a single line of comma-separated phrases, " +
+        "no quotes, no labels, no notes."
 }

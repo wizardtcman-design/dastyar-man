@@ -107,6 +107,18 @@ fun ImageScreen(vm: MainViewModel) {
     // edit-mode base image (bytes of the picture the user picked / re-picked)
     var baseBytes by remember { mutableStateOf<ByteArray?>(null) }
 
+    // The English prompt that will actually be sent to the image model. It is
+    // shown (and can be edited) so the user sees exactly what Flux receives.
+    // Empty means "translate the Persian prompt automatically when generating".
+    var englishPrompt by remember { mutableStateOf("") }
+    var showEnglish by remember { mutableStateOf(false) }
+    var prepBusy by remember { mutableStateOf(false) }
+    var prepError by remember { mutableStateOf<String?>(null) }
+
+    // A change to the Persian text makes any previously prepared English prompt
+    // stale, so it is cleared to avoid sending an old translation.
+    LaunchedEffect(prompt) { if (englishPrompt.isNotBlank()) englishPrompt = "" }
+
     val saveToGallery = rememberGallerySaver { saveMsg = it }
 
     val cfExhausted = QuotaGuard.cloudflareExhaustedToday(ctx)
@@ -135,13 +147,38 @@ fun ImageScreen(vm: MainViewModel) {
                 prompt = prompt,
                 onPrompt = { prompt = it },
                 loading = loading,
+                englishPrompt = englishPrompt,
+                onEnglishPrompt = { englishPrompt = it },
+                showEnglish = showEnglish,
+                prepBusy = prepBusy,
+                prepError = prepError,
+                onToggleEnglish = {
+                    // Show/hide the English box. On first show, prepare the
+                    // translation so there is something to look at.
+                    if (showEnglish) { showEnglish = false; return@GenerateSection }
+                    if (prompt.isBlank()) {
+                        prepError = "اول توضیح بده چه تصویری می‌خواهی."
+                        return@GenerateSection
+                    }
+                    showEnglish = true
+                    if (englishPrompt.isBlank()) {
+                        prepBusy = true; prepError = null
+                        scope.launch {
+                            englishPrompt = ImageEngine.prepareEnglishPrompt(prompt)
+                            prepBusy = false
+                        }
+                    }
+                },
                 onGenerate = {
                     if (loading) return@GenerateSection
                     if (prompt.isBlank()) { error = "لطفاً توضیح بده چه تصویری می‌خواهی."; return@GenerateSection }
                     loading = true; error = null; note = null
                     scope.launch {
                         lastPrompt = prompt
-                        val res = ImageEngine.generate(ctx, prompt)
+                        // If the user reviewed/edited the English prompt, send it
+                        // verbatim; otherwise the engine translates automatically.
+                        val override = englishPrompt.takeIf { it.isNotBlank() }
+                        val res = ImageEngine.generate(ctx, prompt, englishOverride = override)
                         loading = false
                         res.onSuccess {
                             resultBytes = it.bytes; note = it.note
@@ -345,6 +382,12 @@ private fun GenerateSection(
     prompt: String,
     onPrompt: (String) -> Unit,
     loading: Boolean,
+    englishPrompt: String,
+    onEnglishPrompt: (String) -> Unit,
+    showEnglish: Boolean,
+    prepBusy: Boolean,
+    prepError: String?,
+    onToggleEnglish: () -> Unit,
     onGenerate: () -> Unit
 ) {
     // Order matters here: the ready-made prompts sit directly above the chat
@@ -361,6 +404,56 @@ private fun GenerateSection(
         placeholder = "توضیح بده چه تصویری می‌خواهی بسازم...",
         accent = Purple
     )
+
+    Spacer(Modifier.height(10.dp))
+    // Lets the user see exactly what is sent to the image model, and fix it,
+    // instead of guessing why the picture differs from the request.
+    OutlinedButton(
+        onClick = onToggleEnglish,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Text(
+            if (showEnglish) "پنهان‌کردن پرامپت انگلیسی ⬆" else "نمایش پرامپت انگلیسی ⬇",
+            fontSize = 12.5.sp
+        )
+    }
+
+    if (showEnglish) {
+        Spacer(Modifier.height(8.dp))
+        when {
+            prepBusy -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("در حال آماده‌سازی پرامپت انگلیسی…", fontSize = 12.5.sp)
+            }
+            else -> {
+                OutlinedTextField(
+                    value = englishPrompt,
+                    onValueChange = onEnglishPrompt,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("پرامپت انگلیسی این‌جا نمایش داده می‌شود و قابل ویرایش است.", fontSize = 12.sp) },
+                    shape = RoundedCornerShape(16.dp),
+                    minLines = 3,
+                    maxLines = 10,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Cyan,
+                        unfocusedBorderColor = Cyan.copy(alpha = .35f)
+                    )
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "این همان متنی است که به مدل تصویر فرستاده می‌شود؛ می‌توانی ویرایشش کنی.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+    prepError?.let {
+        Spacer(Modifier.height(6.dp))
+        Text("⚠️ $it", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+    }
 
     Spacer(Modifier.height(14.dp))
     GradientButton(text = if (loading) "…" else "ساخت تصویر 🎨", enabled = !loading, onClick = onGenerate)
