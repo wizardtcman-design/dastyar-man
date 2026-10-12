@@ -119,6 +119,21 @@ object CloudflareClient {
         MODELS.firstOrNull { it.id == "@cf/black-forest-labs/flux-1-schnell" } ?: MODELS.first()
 
     /**
+     * Resolves the model to use for TEXT-TO-IMAGE from a stored id.
+     *
+     * The image-model catalog is shared by generation and editing, and the
+     * FLUX.2 klein editor only accepts multipart form data (it is an
+     * input-image model). If such a model were used for text-to-image, the
+     * JSON request [textToImage] sends would be rejected and the picture would
+     * not match the prompt. So a generation request is never routed to a
+     * reference-edit model: it falls back to the default text-to-image model.
+     */
+    fun generateModel(id: String?): CfModel {
+        val m = modelById(id)
+        return if (m != null && !m.referenceEdit) m else DEFAULT_MODEL
+    }
+
+    /**
      * The model used for real image editing. Prefers the FLUX.2 klein reference
      * editor, which takes the user's photo plus a natural-language instruction
      * and can change the background, clothing colour or hair in one request.
@@ -206,6 +221,11 @@ object CloudflareClient {
      * Text -> image. Sends the prompt to the chosen Cloudflare model and
      * returns real image bytes, whether the model answers with raw pixels or
      * with JSON containing a base64 image.
+     *
+     * A reference-edit model (FLUX.2 klein) is refused here: it only accepts
+     * multipart form data with an input image, so this JSON text-to-image
+     * request would fail. The caller resolves the model through [generateModel],
+     * which already avoids that; this is the last-line guard.
      */
     suspend fun textToImage(
         accountId: String,
@@ -213,10 +233,11 @@ object CloudflareClient {
         model: CfModel,
         prompt: String
     ): CfResult<ByteArray> = withContext(Dispatchers.IO) {
+        val safe = if (model.referenceEdit) DEFAULT_MODEL else model
         call(accountId, token,
-            runUrl(accountId, model.id),
+            runUrl(accountId, safe.id),
             buildJsonObject { put("prompt", prompt) }.toString(),
-            model
+            safe
         )
     }
 

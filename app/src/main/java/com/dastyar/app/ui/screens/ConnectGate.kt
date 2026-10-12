@@ -208,10 +208,13 @@ fun ConnectGate(onConnected: () -> Unit) {
                 scope.launch {
                     // Discover a real image model, then verify it with a request.
                     val models = CloudflareClient.listImageModels(cfAccount.trim(), cfToken.trim())
+                    // Never store a reference-edit model as the generation model:
+                    // it only accepts an input image (multipart), so text-to-image
+                    // would fail. generateModel falls back to the default.
                     val pick = CloudflareClient.DEFAULT_MODEL.id.takeIf { models.isEmpty() || it in models }
                         ?: models.firstOrNull()
                         ?: CloudflareClient.DEFAULT_MODEL.id
-                    val model = CloudflareClient.modelById(pick) ?: CloudflareClient.DEFAULT_MODEL
+                    val model = CloudflareClient.generateModel(pick)
                     val r = CloudflareClient.test(cfAccount.trim(), cfToken.trim(), model)
                     cfBusy = false; cfStatus = r
                     if (r.ok) {

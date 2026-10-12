@@ -175,9 +175,12 @@ fun ImageScreen(vm: MainViewModel) {
                     loading = true; error = null; note = null
                     scope.launch {
                         lastPrompt = prompt
-                        // If the user reviewed/edited the English prompt, send it
-                        // verbatim; otherwise the engine translates automatically.
-                        val override = englishPrompt.takeIf { it.isNotBlank() }
+                        // Only send a prepared English prompt when the user can
+                        // actually see it (the box is open). Otherwise a stale
+                        // translation from a previous description could be sent
+                        // and the image would not match what the user just typed;
+                        // the engine translates the current text itself.
+                        val override = englishPrompt.takeIf { showEnglish && it.isNotBlank() }
                         val res = ImageEngine.generate(ctx, prompt, englishOverride = override)
                         loading = false
                         res.onSuccess {

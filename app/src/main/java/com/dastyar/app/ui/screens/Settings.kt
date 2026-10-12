@@ -597,10 +597,14 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             cfModels?.let { models ->
-                if (models.size > 1) {
+                // Only text-to-image-capable models are offered for the generation
+                // model. A reference-edit model (FLUX.2 klein) is for the edit
+                // path only and would fail a text-to-image request.
+                val genModels = models.filter { CloudflareClient.modelById(it)?.referenceEdit != true }
+                if (genModels.size > 1) {
                     Spacer(Modifier.height(8.dp))
                     Text("انتخاب مدل تصویر:", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                    models.forEach { m ->
+                    genModels.forEach { m ->
                         val on = ServiceKeys.cloudflareModel() == m
                         Surface(
                             shape = RoundedCornerShape(10.dp),
@@ -624,8 +628,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     scope.launch {
                         cfBusy = true
                         cfStatus = "در حال تست واقعی…"
-                        val m = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
-                            ?: CloudflareClient.DEFAULT_MODEL
+                        val m = CloudflareClient.generateModel(ServiceKeys.cloudflareModel())
                         val r = CloudflareClient.test(
                             ServiceKeys.cloudflareAccount(), ServiceKeys.cloudflareToken(), m
                         )
@@ -664,7 +667,9 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                             val pick = CloudflareClient.DEFAULT_MODEL.id
                                 .takeIf { models.isEmpty() || it in models }
                                 ?: models.firstOrNull() ?: CloudflareClient.DEFAULT_MODEL.id
-                            val model = CloudflareClient.modelById(pick) ?: CloudflareClient.DEFAULT_MODEL
+                            // Resolve through generateModel so a reference-edit
+                            // model is never stored as the generation model.
+                            val model = CloudflareClient.generateModel(pick)
                             val r = CloudflareClient.test(cfAccount.trim(), cfToken.trim(), model)
                             if (r.ok) {
                                 ServiceKeys.saveCloudflare(ctx, cfAccount.trim(), cfToken.trim(), model.id)
