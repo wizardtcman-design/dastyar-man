@@ -70,8 +70,11 @@ object ImageEngine {
         val englishPrompt = englishOverride?.takeIf { it.isNotBlank() } ?: toEnglishPrompt(prompt)
 
         // 1) Cloudflare, only when connected and not already out of quota today.
-        val cfModel = CloudflareClient.modelById(ServiceKeys.cloudflareModel())
-            ?: CloudflareClient.DEFAULT_MODEL
+        // The stored model is resolved through generateModel(): if the account
+        // has a reference-edit model (which only accepts multipart and needs an
+        // input image) selected, generation must NOT use it, or the JSON request
+        // would be rejected and the result would not match the prompt.
+        val cfModel = CloudflareClient.generateModel(ServiceKeys.cloudflareModel())
         if (ServiceKeys.cloudflareReady() && !QuotaGuard.cloudflareExhaustedToday(ctx)) {
             val t0 = System.currentTimeMillis()
             val r = CloudflareClient.textToImage(
