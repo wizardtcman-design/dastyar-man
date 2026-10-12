@@ -510,9 +510,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 }
                 ServiceButton("تغییر", Modifier.weight(1f)) { showOrEdit = !showOrEdit }
                 ServiceButton("حذف", Modifier.weight(1f)) {
-                    if (ServiceKeys.textProvider().id == AiProviders.codeCraft.id)
-                        ServiceKeys.clearCodeCraft(ctx)
-                    else ServiceKeys.clearOpenRouter(ctx)
+                    ServiceKeys.clearTextProvider(ctx)
                     keysVersion++
                     orStatus = "کلید ${ServiceKeys.textProvider().label} حذف شد."
                 }
@@ -533,14 +531,19 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                             val provider = ServiceKeys.textProvider()
                             val (r, caps) = AiClient.testProvider(provider, orNewKey.trim())
                             if (r.ok) {
-                                if (provider.id == AiProviders.codeCraft.id) {
-                                    ServiceKeys.saveCodeCraft(ctx, orNewKey.trim())
-                                } else {
+                                if (provider.id == AiProviders.openRouter.id) {
                                     ServiceKeys.saveOpenRouter(
                                         ctx, orNewKey.trim(),
                                         imageModel = caps?.imageModel ?: provider.imageModel,
                                         supportsImg = caps?.supportsImage ?: false,
                                         supportsEdit = caps?.supportsEdit ?: false
+                                    )
+                                } else {
+                                    // CodeCraft and Atria are text-only: save the
+                                    // key for the selected provider through the
+                                    // shared path.
+                                    ServiceKeys.saveTextProvider(
+                                        ctx, orNewKey.trim(), provider.textModel
                                     )
                                 }
                                 orNewKey = ""; showOrEdit = false
@@ -566,7 +569,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 )
             } else {
                 Text(
-                    "اعتبار CodeCraft از API قابل دریافت نیست؛ از داشبورد خودشان ببین.",
+                    "اعتبار ${ServiceKeys.textProvider().label} از API قابل دریافت نیست؛ از داشبورد خودشان ببین.",
                     fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

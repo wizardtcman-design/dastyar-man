@@ -222,8 +222,9 @@ object AiClient {
                         ServiceKeys.setTextModel(ctx, candidate.model)
                     }
                     // Image capabilities are only meaningful for OpenRouter,
-                    // whose chat endpoint can also return images. CodeCraft has
-                    // no image models at all, so never probe it for one.
+                    // whose chat endpoint can also return images. CodeCraft and
+                    // Atria have no image models at all, so never probe them for
+                    // one.
                     if (p.supportsImages || p.id == AiProviders.openRouter.id) {
                         val caps = resolveImageModel(p, key)
                         if (caps != null && p.id == AiProviders.openRouter.id) {
@@ -400,7 +401,7 @@ object AiClient {
         for (candidate in textModelChain(provider, key)) {
             val r = probeModelFor(provider, key, candidate.model)
             if (r.ok) {
-                // CodeCraft has no image models, so never probe it for one.
+                // CodeCraft and Atria have no image models, so never probe for one.
                 val caps = if (provider.id == AiProviders.openRouter.id)
                     resolveImageModel(provider, key) else null
                 val dc = if (caps != null)
@@ -721,8 +722,8 @@ object AiClient {
     private fun textModelChain(provider: AiProvider): List<ModelAttempt> {
         val primary = ServiceKeys.textModel().ifBlank { provider.textModel }
         // The free-model fallback exists because OpenRouter free accounts cannot
-        // reach paid models. CodeCraft is a paid gateway with no free tier, so
-        // its configured model is the only one tried.
+        // reach paid models. CodeCraft and Atria are paid gateways with no free
+        // tier, so their configured model is the only one tried.
         val free = if (provider.id == AiProviders.openRouter.id) freeTextModels() else emptyList()
         return buildChain(provider, primary, free)
     }

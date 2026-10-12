@@ -109,16 +109,10 @@ fun ConnectGate(onConnected: () -> Unit) {
                 value = keyInput,
                 onValueChange = { keyInput = it.trim() },
                 label = {
-                    Text(
-                        if (selectedProviderId == AiProviders.codeCraft.id)
-                            "CodeCraft API Key" else "OpenRouter API Key"
-                    )
+                    Text(gateKeyLabel(selectedProviderId))
                 },
                 placeholder = {
-                    Text(
-                        if (selectedProviderId == AiProviders.codeCraft.id)
-                            "cc_…" else "sk-or-v1-…"
-                    )
+                    Text(gateKeyHint(selectedProviderId))
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
@@ -146,14 +140,18 @@ fun ConnectGate(onConnected: () -> Unit) {
                     val (r, caps) = AiClient.testProvider(provider, keyInput.trim())
                     orBusy = false; orStatus = r
                     if (r.ok) {
-                        if (provider.id == AiProviders.codeCraft.id) {
-                            ServiceKeys.saveCodeCraft(ctx, keyInput.trim())
-                        } else {
+                        if (provider.id == AiProviders.openRouter.id) {
                             ServiceKeys.saveOpenRouter(
                                 ctx, keyInput.trim(),
                                 imageModel = caps?.imageModel ?: provider.imageModel,
                                 supportsImg = caps?.supportsImage ?: false,
                                 supportsEdit = caps?.supportsEdit ?: false
+                            )
+                        } else {
+                            // CodeCraft and Atria are text-only: save the key for
+                            // the selected provider through the shared path.
+                            ServiceKeys.saveTextProvider(
+                                ctx, keyInput.trim(), provider.textModel
                             )
                         }
                         keyInput = ""
@@ -306,6 +304,20 @@ fun ConnectGate(onConnected: () -> Unit) {
 private fun gateMask(v: String?): String {
     if (v.isNullOrBlank()) return "وارد نشده"
     return if (v.length <= 10) "••••" else v.take(6) + "…" + v.takeLast(4)
+}
+
+/** The key-field label for the selected text provider. */
+private fun gateKeyLabel(providerId: String): String = when (providerId) {
+    AiProviders.codeCraft.id -> "CodeCraft API Key"
+    AiProviders.atria.id -> "Atria API Key"
+    else -> "OpenRouter API Key"
+}
+
+/** An example of the selected provider's key format. */
+private fun gateKeyHint(providerId: String): String = when (providerId) {
+    AiProviders.codeCraft.id -> "cc_…"
+    AiProviders.atria.id -> "atr_…"
+    else -> "sk-or-v1-…"
 }
 
 @Composable

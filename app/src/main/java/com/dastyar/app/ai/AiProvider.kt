@@ -90,6 +90,21 @@ object AiProviders {
         modelsPath = "models"
     )
 
+    /**
+     * Atria ASI (Atria Dawn Preview) is the third text provider. It is
+     * OpenAI-compatible (`/v1/chat/completions`, `Authorization: Bearer`), so it
+     * is served entirely by the app's shared text path. It exposes exactly one
+     * model ([textModel]) and is text-only -- it accepts no image input and
+     * produces no images, so it is offered for chat/text features only and never
+     * for image generation, which stays on Cloudflare / OpenRouter / Pollinations.
+     */
+    val atria = AiProvider(
+        id = "atria",
+        label = "Atria (Atria-Dawn-Preview)",
+        baseUrl = "https://api.atria-asi.ai/v1",
+        textModel = "Atria-Dawn-Preview"
+    )
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -103,9 +118,9 @@ object AiProviders {
      * user. Keeping this list short and explicit means the picker never offers a
      * provider that cannot do the job.
      */
-    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft)
+    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft, atria)
 
-    val all: List<AiProvider> = listOf(openRouter, codeCraft, openAiCompatible)
+    val all: List<AiProvider> = listOf(openRouter, codeCraft, atria, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

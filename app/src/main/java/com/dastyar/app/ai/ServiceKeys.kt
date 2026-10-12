@@ -33,6 +33,11 @@ object ServiceKeys {
     private const val CC_MODEL = "cc_text_model"
     private const val CC_STATE = "cc_state"
 
+    // Atria (Atria Dawn Preview)
+    private const val AT_KEY = "at_key"
+    private const val AT_MODEL = "at_text_model"
+    private const val AT_STATE = "at_state"
+
     // Cloudflare
     private const val CF_ACCOUNT = "cf_account"
     private const val CF_TOKEN = "cf_token"
@@ -58,6 +63,10 @@ object ServiceKeys {
     @Volatile private var ccKey: String? = null
     @Volatile private var ccTextModel: String = AiProviders.codeCraft.textModel
     @Volatile private var ccState: State = State.NOT_SET
+
+    @Volatile private var atKey: String? = null
+    @Volatile private var atTextModel: String = AiProviders.atria.textModel
+    @Volatile private var atState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -174,6 +183,44 @@ object ServiceKeys {
         prefs(ctx).edit().remove(CC_KEY).remove(CC_MODEL).remove(CC_STATE).apply()
     }
 
+    // --------------------------------------------------------------- Atria
+
+    fun atriaKey(): String? = atKey
+    fun atriaTextModel(): String = atTextModel
+    fun atriaState(): State = atState
+    fun atriaReady(): Boolean = atState == State.CONNECTED && !atKey.isNullOrBlank()
+
+    fun saveAtria(ctx: Context, key: String, state: State = State.CONNECTED,
+                  textModel: String? = null) {
+        val clean = key.trim()
+        if (clean.isBlank()) return
+        atKey = clean
+        atState = state
+        textModel?.takeIf { it.isNotBlank() }?.let { atTextModel = it }
+        prefs(ctx).edit()
+            .putString(AT_KEY, clean)
+            .putString(AT_MODEL, atTextModel)
+            .putString(AT_STATE, state.name)
+            .apply()
+    }
+
+    fun setAtriaState(ctx: Context, state: State) {
+        atState = state
+        prefs(ctx).edit().putString(AT_STATE, state.name).apply()
+    }
+
+    fun setAtriaTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        atTextModel = model
+        prefs(ctx).edit().putString(AT_MODEL, model).apply()
+    }
+
+    fun clearAtria(ctx: Context) {
+        atKey = null
+        atState = State.NOT_SET
+        prefs(ctx).edit().remove(AT_KEY).remove(AT_MODEL).remove(AT_STATE).apply()
+    }
+
     // ------------------------------------------------------ text provider
 
     /**
@@ -200,6 +247,7 @@ object ServiceKeys {
     fun textKey(): String =
         when (textProvider().id) {
             AiProviders.codeCraft.id -> ccKey.orEmpty()
+            AiProviders.atria.id -> atKey.orEmpty()
             else -> orKey.orEmpty()
         }
 
@@ -207,6 +255,7 @@ object ServiceKeys {
     fun textModel(): String =
         when (textProvider().id) {
             AiProviders.codeCraft.id -> ccTextModel
+            AiProviders.atria.id -> atTextModel
             else -> orTextModel
         }
 
@@ -214,6 +263,7 @@ object ServiceKeys {
     fun textState(): State =
         when (textProvider().id) {
             AiProviders.codeCraft.id -> ccState
+            AiProviders.atria.id -> atState
             else -> orState
         }
 
@@ -221,6 +271,7 @@ object ServiceKeys {
     fun textReady(): Boolean =
         when (textProvider().id) {
             AiProviders.codeCraft.id -> codeCraftReady()
+            AiProviders.atria.id -> atriaReady()
             else -> openRouterReady()
         }
 
@@ -228,6 +279,7 @@ object ServiceKeys {
     fun saveTextProvider(ctx: Context, key: String, model: String, state: State = State.CONNECTED) {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> saveCodeCraft(ctx, key, state, model)
+            AiProviders.atria.id -> saveAtria(ctx, key, state, model)
             else -> saveOpenRouter(ctx, key, state)
         }
     }
@@ -235,6 +287,7 @@ object ServiceKeys {
     fun setTextProviderState(ctx: Context, state: State) {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> setCodeCraftState(ctx, state)
+            AiProviders.atria.id -> setAtriaState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
     }
@@ -242,7 +295,17 @@ object ServiceKeys {
     fun setTextModel(ctx: Context, model: String) {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> setCodeCraftTextModel(ctx, model)
+            AiProviders.atria.id -> setAtriaTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
+        }
+    }
+
+    /** Clears the key of whichever provider serves text right now. */
+    fun clearTextProvider(ctx: Context) {
+        when (textProvider().id) {
+            AiProviders.codeCraft.id -> clearCodeCraft(ctx)
+            AiProviders.atria.id -> clearAtria(ctx)
+            else -> clearOpenRouter(ctx)
         }
     }
 
@@ -326,7 +389,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, CC_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
+            listOf(OR_KEY, CC_KEY, AT_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
 
@@ -341,6 +404,10 @@ object ServiceKeys {
         ccKey = p.getString(CC_KEY, null)?.trim()?.ifBlank { null }
         ccTextModel = p.getString(CC_MODEL, null)?.ifBlank { null } ?: AiProviders.codeCraft.textModel
         ccState = if (ccKey == null) State.NOT_SET else stateOf(p.getString(CC_STATE, null))
+
+        atKey = p.getString(AT_KEY, null)?.trim()?.ifBlank { null }
+        atTextModel = p.getString(AT_MODEL, null)?.ifBlank { null } ?: AiProviders.atria.textModel
+        atState = if (atKey == null) State.NOT_SET else stateOf(p.getString(AT_STATE, null))
 
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
 
