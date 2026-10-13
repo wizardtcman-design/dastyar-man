@@ -1,5 +1,11 @@
 package com.dastyar.app.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +56,30 @@ fun UpdateScreen(onClose: () -> Unit, autoCheck: Boolean = true) {
     val vm: UpdateViewModel = viewModel()
     val s by vm.state.collectAsState()
     var installError by remember { mutableStateOf<String?>(null) }
+
+    // Android 13+: notifications need a runtime grant. The update feature is
+    // useless without it, so we ask for it right here and, once granted, post
+    // the alert for the version men already found.
+    val notifPerm = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val info = vm.state.value.update
+        if (granted && info != null) {
+            com.dastyar.app.update.UpdateManager.notifyNow(ctx, info)
+        }
+    }
+    LaunchedEffect(s.update?.version) {
+        val info = s.update ?: return@LaunchedEffect
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            // Permission already held: make sure this version has its alert.
+            com.dastyar.app.update.UpdateManager.notifyNow(ctx, info)
+        }
+    }
 
     // Checking on open is what the notification tap relies on; a plain manual
     // open from Settings also benefits from a fresh look.
@@ -207,15 +237,29 @@ fun UpdateScreen(onClose: () -> Unit, autoCheck: Boolean = true) {
                                     onClick = {
                                         installError = null
                                         val file = s.readyFile
-                                        if (file == null) {
-                                            installError = "فایل نصب پیدا نشد؛ دوباره دانلود کن."
-                                        } else if (!ApkInstaller.canInstall(ctx)) {
-                                            // First time: send the user to grant
-                                            // the "install unknown apps" permission.
-                                            ApkInstaller.openInstallPermissionSettings(ctx)
-                                            installError = "برای نصب، اجازه «نصب برنامه‌های ناشناس» را به دستیار من بده و برگرد."
-                                        } else if (!ApkInstaller.install(ctx, file)) {
-                                            installError = "باز کردن نصب‌کننده ممکن نشد."
+                                        // Re-verify right before install: the
+                                        // file on disk must still be a valid,
+                                        // same-signed APK of this app.
+                                        val verifyError = if (file == null) {
+                                            "فایل نصب پیدا نشد؛ دوباره دانلود کن."
+                                        } else {
+                                            com.dastyar.app.update.ApkDownloader
+                                                .verifyApk(ctx, file)
+                                        }
+                                        if (verifyError != null) {
+                                            installError = verifyError
+                                        } else when (ApkInstaller.install(ctx, file!!)) {
+                                            ApkInstaller.Result.STARTED -> Unit
+                                            ApkInstaller.Result.NO_PERMISSION -> {
+                                                // Send the user to grant the
+                                                // "install unknown apps" toggle.
+                                                ApkInstaller.openInstallPermissionSettings(ctx)
+                                                installError = "برای نصب، اجازه «نصب برنامه‌های ناشناس» را به دستیار من بده و دوباره بزن."
+                                            }
+                                            ApkInstaller.Result.NO_INSTALLER ->
+                                                installError = "نصب‌کنندهٔ برنامه روی این دستگاه پیدا نشد."
+                                            ApkInstaller.Result.FAILED ->
+                                                installError = "باز کردن نصب‌کننده ممکن نشد. اطلاعاتت محفوظ است؛ دوباره تلاش کن."
                                         }
                                     },
                                     modifier = Modifier.fillMaxWidth(),

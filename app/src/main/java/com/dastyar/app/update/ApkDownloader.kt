@@ -135,11 +135,35 @@ object ApkDownloader {
         // 1. A real APK is a zip; reject anything that is not one.
         if (!isZip(file)) return "فایل دانلود‌شده یک بسته معتبر نیست."
 
-        // 2. Read the signer advertised inside the downloaded APK.
-        val downloaded = downloadedCertSha256(ctx, file)
+        // 2. Read the package id, version and signer advertised inside the APK.
+        val flags = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+        val info = try {
+            ctx.packageManager.getPackageArchiveInfo(file.absolutePath, flags)
+        } catch (_: Exception) {
+            null
+        } ?: return "فایل دانلود‌شده خوانده نشد."
+
+        // The APK must be this very app and nothing else.
+        if (info.packageName != ctx.packageName) {
+            return "این فایل مربوط به برنامهٔ دیگری است؛ نصب لغو شد."
+        }
+
+        // The update must not be older than what is already installed.
+        val currentVersionCode = try {
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
+        } catch (_: Exception) {
+            -1L
+        }
+        if (currentVersionCode >= 0 && info.longVersionCode < currentVersionCode) {
+            return "این فایل از نسخهٔ نصب‌شده قدیمی‌تر است؛ نصب لازم نیست."
+        }
+
+        // 3. The signature must match the one this app is already signed with,
+        //    which is what lets Android install it in place and keep the data.
+        val downloaded = info.signingInfo?.apkContentsSigners
+            ?.firstOrNull()?.toByteArray()?.let { sha256(it) }
             ?: return "امضای فایل خوانده نشد؛ نصب امن نیست."
 
-        // 3. Read the signer of the app currently installed.
         val current = installedCertSha256(ctx)
             ?: return "امضای برنامه فعلی خوانده نشد؛ برای امنیت نصب انجام نمی‌شود."
 
@@ -153,24 +177,6 @@ object ApkDownloader {
         java.util.zip.ZipFile(file).use { true }
     } catch (_: Exception) {
         false
-    }
-
-    /**
-     * SHA-256 of the certificate inside the downloaded APK, read through
-     * [android.content.pm.PackageManager.getPackageArchiveInfo]. minSdk is 26,
-     * so GET_SIGNING_CERTIFICATES is always available.
-     */
-    private fun downloadedCertSha256(ctx: Context, apk: File): String? {
-        return try {
-            val flags = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
-            val info = ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, flags)
-                ?: return null
-            val signers = info.signingInfo?.apkContentsSigners ?: return null
-            val first = signers.firstOrNull() ?: return null
-            sha256(first.toByteArray())
-        } catch (_: Exception) {
-            null
-        }
     }
 
     private fun installedCertSha256(ctx: Context): String? {
