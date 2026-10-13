@@ -124,13 +124,13 @@ object AiClient {
      * hiccup never turns into "this model cannot make images".
      */
     private fun fetchCatalogue(provider: AiProvider, key: String): List<ModelCaps> {
-        val url = provider.modelsUrl() ?: return emptyList()
+        val url = provider.routedModelsUrl() ?: return emptyList()
         return try {
-            val req = Request.Builder()
+            val builder = Request.Builder()
                 .url(url)
-                .addHeader("Authorization", "Bearer $key")
                 .addHeader("Accept", "application/json")
-                .get().build()
+            ProviderGateway.applyAuth(builder, key)
+            val req = builder.get().build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return emptyList()
                 val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
@@ -267,12 +267,11 @@ object AiClient {
                 add(buildJsonObject { put("role", "user"); put("content", "سلام") })
             })
         }.toString()
-        val req = Request.Builder()
-            .url(p.chatUrl())
-            .addHeader("Authorization", "Bearer $key")
+        val builder = Request.Builder()
+            .url(p.routedChatUrl())
             .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+        ProviderGateway.applyAuth(builder, key)
+        val req = builder.post(body.toRequestBody("application/json".toMediaType())).build()
         http.newCall(req).execute().use { resp ->
             if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
             else {
@@ -315,12 +314,11 @@ object AiClient {
                     add(buildJsonObject { put("role", "user"); put("content", "سلام") })
                 })
             }.toString()
-            val req = Request.Builder()
-                .url(p.chatUrl())
-                .addHeader("Authorization", "Bearer $key")
+            val builder = Request.Builder()
+                .url(p.routedChatUrl())
                 .addHeader("Content-Type", "application/json")
-                .post(body.toRequestBody("application/json".toMediaType()))
-                .build()
+            ProviderGateway.applyAuth(builder, key)
+            val req = builder.post(body.toRequestBody("application/json".toMediaType())).build()
             http.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     report.append("✅ چت: پاسخ ۲۰۰ — سالم\n")
@@ -427,12 +425,11 @@ object AiClient {
                 add(buildJsonObject { put("role", "user"); put("content", "سلام") })
             })
         }.toString()
-        val req = Request.Builder()
-            .url(provider.chatUrl())
-            .addHeader("Authorization", "Bearer $key")
+        val builder = Request.Builder()
+            .url(provider.routedChatUrl())
             .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+        ProviderGateway.applyAuth(builder, key)
+        val req = builder.post(body.toRequestBody("application/json".toMediaType())).build()
         http.newCall(req).execute().use { resp ->
             if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
             else {
@@ -493,11 +490,11 @@ object AiClient {
 
         fun probe(key: String): Pair<Double?, Double?>? {
             fun get(url: String): kotlinx.serialization.json.JsonObject? = try {
-                val req = Request.Builder()
+                val b = Request.Builder()
                     .url(url)
-                    .addHeader("Authorization", "Bearer $key")
                     .addHeader("Accept", "application/json")
-                    .get().build()
+                ProviderGateway.applyAuth(b, key)
+                val req = b.get().build()
                 http.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) null else
                         json.parseToJsonElement(resp.body?.string().orEmpty())
@@ -509,7 +506,7 @@ object AiClient {
 
             var rem: Double? = null
             var used: Double? = null
-            provider.creditsUrl()?.let { url ->
+            provider.routedCreditsUrl()?.let { url ->
                 get(url)?.let { d ->
                     val total = jsonDouble(d, "total_credits")
                     val u = jsonDouble(d, "total_usage")
@@ -519,7 +516,7 @@ object AiClient {
                     }
                 }
             }
-            if (rem == null) provider.keyInfoUrl()?.let { url ->
+            if (rem == null) provider.routedKeyInfoUrl()?.let { url ->
                 get(url)?.let { d ->
                     val r = jsonDouble(d, "limit_remaining")
                     val limit = jsonDouble(d, "limit")
@@ -632,6 +629,9 @@ object AiClient {
 
         var lastError = "اتصال به هوش مصنوعی ناموفق بود."
         var usedFreeFallback = false
+        // True when the failure was a transport/network fault (not an HTTP
+        // rejection), which is the only case where trying the relay is useful.
+        var sawNetworkError = false
 
         // Try the configured model first, then genuinely free models. A paid
         // model on a free account answers 402; instead of failing the whole
@@ -652,10 +652,11 @@ object AiClient {
                 repeat(candidate.attempts) { attempt ->
                     if (stopKey) return@repeat
                     try {
-                        val req = Request.Builder()
-                            .url(activeProvider().chatUrl())
-                            .addHeader("Authorization", "Bearer $key")
+                        val builder = Request.Builder()
+                            .url(activeProvider().routedChatUrl())
                             .addHeader("Content-Type", "application/json")
+                        ProviderGateway.applyAuth(builder, key)
+                        val req = builder
                             .post(body.toRequestBody("application/json".toMediaType()))
                             .build()
 
@@ -698,6 +699,10 @@ object AiClient {
                             }
                         }
                     } catch (e: Exception) {
+                        // A transport fault, not an HTTP rejection. Only this
+                        // kind may be retried through the relay, because only a
+                        // blocked/unreachable host is fixed by a relay.
+                        sawNetworkError = true
                         lastError = "اتصال به هوش مصنوعی ناموفق بود. اینترنت را بررسی کن."
                     }
                     if (!stopKey && attempt < candidate.attempts - 1) {
@@ -707,8 +712,65 @@ object AiClient {
             }
             if (lastError.contains("اعتبار") || lastError.contains("نامعتبر")) continue
         }
+
+        // The direct path failed with a transport error. If the user configured
+        // a relay, try the whole chain once through it. Auth/quota rejections
+        // (401/402/403/429) never reach here, so the relay is never spammed for
+        // a problem a relay cannot fix.
+        if (sawNetworkError && ProviderGateway.proxyReady()) {
+            for (candidate in textModelChain(activeProvider())) {
+                val body = buildJsonObject {
+                    put("model", candidate.model)
+                    put("messages", messages)
+                    put("stream", false)
+                    put("temperature", 0.6)
+                    put("max_tokens", CHAT_MAX_TOKENS)
+                }.toString()
+                try {
+                    val routedUrl = ProviderGateway.endpoint() +
+                            "/proxy/" + relayHostOf(activeProvider()) +
+                            "/chat/completions"
+                    val builder = Request.Builder()
+                        .url(routedUrl)
+                        .addHeader("Content-Type", "application/json")
+                    ProviderGateway.applyAuth(builder, null)
+                    val req = builder
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .build()
+                    http.newCall(req).execute().use { resp ->
+                        val text = resp.body?.string().orEmpty()
+                        if (resp.isSuccessful) {
+                            val choice = json.parseToJsonElement(text)
+                                .jsonObject["choices"]?.jsonArray
+                                ?.firstOrNull()?.jsonObject
+                            val content = choice?.get("message")?.jsonObject
+                                ?.get("content")?.jsonPrimitive?.contentOrNull
+                            val truncated = choice?.get("finish_reason")
+                                ?.jsonPrimitive?.contentOrNull == "length"
+                            if (!content.isNullOrBlank() && !truncated) {
+                                activeTextModel = candidate.model
+                                return@withContext Result.success(content.trim())
+                            }
+                            lastError = "پاسخ خالی از سرویس دریافت شد."
+                        } else {
+                            lastError = describeError(resp.code, text)
+                            // A rejection through the relay is final; do not loop.
+                            if (resp.code == 401 || resp.code == 402 ||
+                                resp.code == 403 || resp.code == 429) break
+                        }
+                    }
+                } catch (_: Exception) {
+                    lastError = "مسیر واسط هم پاسخ نداد. اگر VPN روشن است، خاموشش کن و دوباره تلاش کن."
+                }
+            }
+        }
+
         Result.failure(AiException(lastError))
     }
+
+    /** The host of a provider, used to build a relay path. */
+    private fun relayHostOf(p: AiProvider): String =
+        runCatching { java.net.URI(p.baseUrl).host }.getOrNull() ?: ""
 
     /** One model to try, how many times, and whether it is a free one. */
     private data class ModelAttempt(val model: String, val attempts: Int, val free: Boolean)
@@ -800,11 +862,11 @@ object AiClient {
     private fun freeTextModelsFor(provider: AiProvider, key: String): List<String> {
         if (key.isBlank()) return emptyList()
         return try {
-            val url = provider.modelsUrl() ?: return emptyList()
-            val req = Request.Builder().url(url)
-                .addHeader("Authorization", "Bearer $key")
+            val url = provider.routedModelsUrl() ?: return emptyList()
+            val b = Request.Builder().url(url)
                 .addHeader("Accept", "application/json")
-                .get().build()
+            ProviderGateway.applyAuth(b, key)
+            val req = b.get().build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return emptyList()
                 val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
@@ -964,10 +1026,11 @@ object AiClient {
                     }
                 }.toString()
 
-                val req = Request.Builder()
-                    .url(provider.chatUrl())
-                    .addHeader("Authorization", "Bearer $key")
+                val builder = Request.Builder()
+                    .url(provider.routedChatUrl())
                     .addHeader("Content-Type", "application/json")
+                ProviderGateway.applyAuth(builder, key)
+                val req = builder
                     .post(body.toRequestBody("application/json".toMediaType()))
                     .build()
 

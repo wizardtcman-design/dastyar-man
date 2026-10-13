@@ -1,6 +1,7 @@
 package com.dastyar.app
 
 import android.app.Application
+import com.dastyar.app.ai.ProviderGateway
 import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.notifications.NotificationHelper
 import com.dastyar.app.update.UpdateCheckWorker
@@ -12,6 +13,9 @@ class DastyarApp : Application() {
         NotificationHelper.createChannels(this)
         UpdateManager.createChannel(this)
         ServiceKeys.load(this)
+        // The single, central AI request router. Captures the app context and
+        // loads the saved direct/relay choice before any request can run.
+        ProviderGateway.init(this)
         // A once-a-day background check, so a new version is heard about even if
         // the app is only opened briefly. Harmless if it never finds anything.
         UpdateCheckWorker.schedule(this)
