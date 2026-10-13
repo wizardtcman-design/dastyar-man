@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تشخیص مشکل ویرایش تصویر — دستیار من</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fff;--subtle:#fafafa;--muted:#f4f4f5;--line:#e4e4e7;--faint:#a1a1aa;--soft:#71717a;--text2:#52525b;--text:#18181b;--good:#15803d;--bad:#b91c1c;--warn:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 Vazirmatn,system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+main{max-width:1040px;margin:0 auto;padding:48px 24px 72px}
+h1{font-size:26px;line-height:1.35;letter-spacing:-.02em;margin:0 0 12px;font-weight:700}
+h2{font-size:19px;margin:38px 0 12px;font-weight:600}
+h3{font-size:15px;margin:20px 0 8px;font-weight:600}
+p{margin:0 0 12px;color:var(--text2)}
+a{color:var(--text);text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:2px}
+.meta{font-size:13px;color:var(--soft);margin-bottom:24px}
+.lead{font-size:16.5px;color:var(--text);max-width:820px}
+.callout{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--subtle);margin:14px 0}
+.callout.warn{border-color:#fde68a;background:#fffbeb}
+.callout.bad{border-color:#fecaca;background:#fef2f2}
+.callout.good{border-color:#bbf7d0;background:#f0fdf4}
+.callout strong{color:var(--text)}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin:12px 0}
+table{width:100%;border-collapse:collapse;font-size:14px;min-width:560px}
+th,td{padding:10px 12px;text-align:right;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--subtle);font-weight:600;font-size:12px;color:var(--soft);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.tag{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;background:var(--muted);color:var(--text2);white-space:nowrap}
+.tag.ok{background:#f0fdf4;color:var(--good)}
+.tag.bad{background:#fef2f2;color:var(--bad)}
+.tag.check{background:#fffbeb;color:var(--warn)}
+ul,ol{margin:0;padding-right:20px;color:var(--text2)}
+li{margin:5px 0}
+code{background:var(--muted);padding:1px 6px;border-radius:6px;font-size:13px;direction:ltr;display:inline;overflow-wrap:anywhere}
+pre{background:#18181b;color:#e4e4e7;padding:14px 16px;border-radius:12px;overflow-x:auto;max-width:100%;font-size:12.5px;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-word}
+footer{margin-top:48px;font-size:12px;color:var(--faint)}
+@media (max-width:600px){main{padding:28px 16px 48px}h1{font-size:21px}.lead{font-size:15.5px}}
+</style>
+</head>
+<body>
+<main>
+  <h1>تشخیص مشکل«ویرایش تصویر با هوش مصنوعی» — دستیار من</h1>
+  <div class="meta">بررسی نسخه فعلی · فقط بررسی، هیچ فایلی تغییر نکرد</div>
+
+  <p class="lead">
+    <strong>خلاصه:</strong> مسیر کد ویرایش تا حد خوبی درست است (عکس واقعی به مدل می‌رود، ترجمه انجام می‌شود، ماسک ساخته می‌شود).
+    مشکل اصلی <strong>ماهیت مدل ویرایش فعلی است</strong>: اپ از <code>stable-diffusion-v1.5-inpainting</code> استفاده می‌کند — یک مدل کوچک ۲۰۲۲
+    که برای «پر کردن یک ناحیه‌ی ماسک‌شده» ساخته شده، نه برای تغییر پس‌زمینه، تغییر لباس یا حفظ دقیق چهره. با این مدل،
+    درخواست‌هایی مثل «پس‌زمینه را کوهستان برفی کن» یا «چهره‌ام را حفظ کن» از نظر فنی قابل تحقق نیست، هرچند پرامپت را عوض کنیم.
+  </p>
+
+  <h2>۱) مسیر کامل ویرایش (ردیابی‌شده در کد)</h2>
+  <pre>انتخاب عکس از گالری  →  baseBytes (Image.kt)
+      ↓
+متن فارسی در کادر (prompt)
+      ↓
+ImageEngine.edit(prompt, base64)
+      ├─ toEnglishPrompt(prompt)      ← ترجمه + ساختاردهی
+      ├─ editRegion(prompt)           ← SKY / BACKGROUND / WHOLE
+      └─ انتخاب مدل ادیت
+      ↓
+CloudflareClient.imageToImage(...)
+      ├─ ImageMasker.build()  ← center-crop مربع + 512×512 + ساخت ماسک
+      └─ POST api.cloudflare.com/.../ai/run/@cf/runwayml/stable-diffusion-v1-5-inpainting
+      ↓
+پاسخ: بایت خام تصویر یا JSON با base64 → برگردانده می‌شود</pre>
+
+  <h2>۲) کدام ارائه‌دهنده برای ویرایش استفاده می‌شود؟</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>اولویت</th><th>ارائه‌دهنده</th><th>عکس ورودی می‌گیرد؟</th><th>وضعیت</th></tr></thead>
+      <tbody>
+        <tr><td>۱</td><td>Cloudflare — SD v1.5 Inpainting</td><td>بله (<code>image</code> + <code>mask</code>)</td><td><span class="tag check">مدل ضعیف برای ادیت معنایی</span></td></tr>
+        <tr><td>۲</td><td>OpenRouter image model</td><td>فقط اگر مدل <code>imageInput</code> باشد</td><td><span class="tag check">به اعتبار/مدل کاربر وابسته</span></td></tr>
+        <tr><td>—</td><td>Pollinations</td><td>خیر (فقط متن→تصویر)</td><td><span class="tag bad">برای ادیت استفاده نمی‌شود (درست)</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>۳) مثال مشخص تو — گام‌به‌گام چه اتفاقی می‌افتد؟</h2>
+  <div class="callout">
+    <strong>دستور کاربر:</strong> «پس‌زمینه را به کوهستان برفی تغییر بده، کاپشنم را قرمز کن و چهره‌ام را تا حد ممکن حفظ کن»
+  </div>
+  <ol>
+    <li>ترجمه به انگلیسی: «change the background to snowy mountains, make my jacket red, keep my face unchanged» — <span class="tag ok">ترجمه درست</span></li>
+    <li>تعیین ناحیه: چون کلمه «پس‌زمینه» هست → <code>EditRegion.BACKGROUND</code> → ماسک فقط حاشیه را سفید می‌کند، وسط (بدن و چهره) سیاه و دست‌نخورده.</li>
+    <li>مشکل ۱ — <strong>کاپشن سفید می‌ماند:</strong> کاپشن در مرکز قاب است و در ماسک سیاه قرار دارد، پس مدل اجازه‌ی تغییرش را ندارد. دستور «کاپشن قرمز شود» <em>اجرا نمی‌شود</em>.</li>
+    <li>مشکل ۲ — <strong>چهره حفظ می‌شود ولی کلیشه‌ای:</strong> چون چهره بیرون از ماسک است، مدل به آن دست نمی‌زند؛ این بخش درست کار می‌کند، ولی زوج و ماسک‌بندی نقطه‌ای است.</li>
+    <li>مشکل ۳ — <strong>پس‌زمینه واقعی عوض نمی‌شود:</strong> SD v1.5 کوچک است؛ با پرامپت انگلیسی، فقط لکه/رنگ پس‌زمینه را عوض می‌کند، نه یک «کوهستان برفی» واقعی. نتیجه: تصویری متفاوت از آنچه خواسته شده.</li>
+    <li>مشکل ۴ — <code>strength</code> ارسال نمی‌شود → پیش‌فرض <code>1.0</code>، یعنی حداکثر تغییر داخل ماسک؛ این هم به‌حفظ‌نشدنِ ظاهر کمک می‌کند.</li>
+  </ol>
+
+  <div class="callout bad">
+    <strong>ریشه‌ی واقعی:</strong> مدل <code>stable-diffusion-v1-5-inpainting</code> برای «ویرایش معنایی + حفظ هویت» ساخته نشده.
+    Domain این مدل «توپر کردن یک ناحیه‌ی خالی/ماسک‌شده» است، نه بازآفرینی پس‌زمینه با حفظ دقیق چهره. با تغییر پرامپت نمی‌توان این ضعف را جبران کرد.
+  </div>
+
+  <h2>۴) آیا مسیرهای فنی درست‌اند؟</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>مورد بررسی‌شده</th><th>وضعیت</th></tr></thead>
+      <tbody>
+        <tr><td>ارسال عکس واقعی به مدل (نه فقط متن)</td><td><span class="tag ok">بله — image + mask</span></td></tr>
+        <tr><td>نام فیلد ماسک مطابق schema رسمی</td><td><span class="tag ok">درست — <code>mask</code></span></td></tr>
+        <tr><td>فرمت image/mask (آرایه‌ی int از بایت‌های PNG)</td><td><span class="tag ok">پذیرفته‌شده توسط API</span></td></tr>
+        <tr><td>اندازه (512×512 مربع)</td><td><span class="tag ok">درست برای این مدل</span></td></tr>
+        <tr><td>ترجمه‌ی فارسی→انگلیسی</td><td><span class="tag ok">درست</span></td></tr>
+        <tr><td>مدل OpenRouter فقط با <code>imageInput</code></td><td><span class="tag ok">درست</span></td></tr>
+        <tr><td>Pollinations از ادیت حذف شده</td><td><span class="tag ok">درست (جلوگیری از باگ)</span></td></tr>
+        <tr><td>ماسک ناحیه‌ای (پس‌زمینه/آسمان/کل)</td><td><span class="tag check">کاربر را محدود می‌کند (مثلاً لباس در مرکز)</span></td></tr>
+        <tr><td>پارامتر <code>strength</code></td><td><span class="tag bad">ارسال نمی‌شود → پیش‌فرض 1.0</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>۵) محدودیت‌های فنی ارائه‌دهنده فعلی</h2>
+  <ul>
+    <li><strong>SD v1.5 Inpainting (Cloudflare):</strong> مدل کوچک، کیفیت پایین، درک ضعیف صحنه، جزئیات چهره را با گرین/اغتشاش بازشکل می‌دهد. برای «تغییر پس‌زمینه واقعی» یا «تغییر لباس در مرکز قاب» مناسب نیست.</li>
+    <li><strong>ماسک ناحیه‌ای ثابت:</strong> منطق فعلی فقط «آسمان/پس‌زمینه/کل» را می‌فهمد. اگر کاربر در یک جمله هم پس‌زمینه و هم لباس را بخواهد، یک ناحیه نمی‌تواند هر دو را پوشش دهد.</li>
+    <li><strong>OpenRouter edit:</strong> فقط اگر کاربر کلید پولی + یک مدل multimodal واقعی (مثل Gemini Flash Image / GPT image) داشته باشد، ادیت معنایی خوب می‌دهد — ولی به پول و به‌قلم‌نیامدن مدل مناسب بسته است.</li>
+    <li><strong>بدون <code>strength</code> پایین:</strong> مدل اجازه دارد حداکثر تغییر را داخل ماسک بدهد، که چهره/هویت را می‌شکند.</li>
+  </ul>
+
+  <h2>۶) راه‌حل‌های پیشنهادی (منتظر تأیید)</h2>
+  <ol>
+    <li><strong>بهترین گزینه (کیفیت واقعی ادیت):</strong> افزودن یک ارائه‌دهنده‌ی ادیت مدرن که واقعاً «image+prompt→image» با حفظ هویت می‌کند
+      (مثل Google Gemini 2.5 Flash Image «Nano Banana»، یا OpenAI gpt-image-1). این‌ها با کلید کاربر و هزینه‌ی خودش قابل استفاده‌اند.</li>
+    <li><strong>بهبود مدل فعلی (کیفیت محدود):</strong> ارسال <code>strength</code> پایین‌تر (مثلاً ۰.۶–۰.۷۵)، ارتقای ماسک به تفکیک شیء (اگر ممکن شد)، و افزودن گزینه‌ی «فقط پس‌زمینه»/«فقط لباس» به‌صورت جداگانه.</li>
+    <li><strong>حذف ادعای نادرست:</strong> اگر مدلی قابلیت ادیت ندارد، به کاربر صریح گفته شود، به‌جای اینکه نتیجه‌ی تصادفی نمایش داده شود.</li>
+  </ol>
+  <div class="callout warn">
+    توجه: هیچ‌کدام اجرا نشده و اپ تغییر نکرد. منتظر تأیید تو برای هر پیاده‌سازی هستم.
+  </div>
+
+  <h2>منابع</h2>
+  <ol class="sources" style="font-size:13px">
+    <li><a href="https://developers.cloudflare.com/workers-ai/models/stable-diffusion-v1-5-inpainting/">Cloudflare — stable-diffusion-v1-5-inpainting</a> — schema ورودی و فیلد <code>mask</code></li>
+    <li><a href="https://developers.cloudflare.com/workers-ai/models/phoenix-1.0/">Cloudflare — phoenix-1.0 (Leonardo)</a> — پارامترها</li>
+    <li><a href="https://github.com/snekkenull/Cloudflare-ImageX/blob/main/app.py">Cloudflare-ImageX</a> — نمونه‌ی تبدیل تصویر به آرایه‌ی int</li>
+  </ol>
+
+  <footer>این گزارش فقط خواندنی است: هیچ فایل، کد، شاخه، تگ، نسخه یا تنظیمی در این نشست تغییر نکرد.</footer>
+</main>
+</body>
+</html>

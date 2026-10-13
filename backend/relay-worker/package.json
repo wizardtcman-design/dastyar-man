@@ -1,6 +1,7 @@
 {
   "name": "dastyar-relay-worker",
   "private": true,
+  "type": "module",
   "version": "1.0.0",
   "description": "Secure relay for the Dastyar app: authenticated access to OpenAI-compatible AI providers.",
   "scripts": {
