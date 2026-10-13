@@ -53,6 +53,25 @@ data class AiProvider(
 
     fun modelsUrl(): String? =
         modelsPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
+
+    // --- gateway-aware variants ------------------------------------------
+    //
+    // The pure URLs above are the real provider endpoints. These helpers pass
+    // them through [ProviderGateway], so in DIRECT mode they are identical and
+    // in PROXY mode they point at the user's relay instead. Call sites use
+    // these, so switching the transport is a single central decision.
+
+    /** Gateway-aware chat URL: direct by default, relay when configured. */
+    fun routedChatUrl(): String = ProviderGateway.resolveUrl(chatUrl())
+
+    /** Gateway-aware model catalogue URL, or null when the provider has none. */
+    fun routedModelsUrl(): String? = modelsUrl()?.let { ProviderGateway.resolveUrl(it) }
+
+    /** Gateway-aware credits URL, or null when the provider exposes none. */
+    fun routedCreditsUrl(): String? = creditsUrl()?.let { ProviderGateway.resolveUrl(it) }
+
+    /** Gateway-aware key-info URL, or null when the provider exposes none. */
+    fun routedKeyInfoUrl(): String? = keyInfoUrl()?.let { ProviderGateway.resolveUrl(it) }
 }
 
 object AiProviders {
