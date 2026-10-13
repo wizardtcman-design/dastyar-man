@@ -354,6 +354,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearOpenTask() { _openTask.value = 0L }
 
+    // ---- deep-link: an update notification tap opens the update screen ----
+    private val _openUpdate = MutableStateFlow(0)
+    val openUpdate: StateFlow<Int> = _openUpdate.asStateFlow()
+
+    /** Requests that the UI open the in-app update screen. */
+    fun requestOpenUpdate() { _openUpdate.value = _openUpdate.value + 1 }
+
     init {
         viewModelScope.launch {
             refreshToday()

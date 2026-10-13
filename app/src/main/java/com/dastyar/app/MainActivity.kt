@@ -40,6 +40,7 @@ class MainActivity : FragmentActivity() {
     companion object {
         const val EXTRA_OPEN_CHECKIN = "open_checkin"
         const val EXTRA_OPEN_TASK = "open_task"
+        const val EXTRA_OPEN_UPDATE = "open_update"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +59,7 @@ class MainActivity : FragmentActivity() {
         DailyReminder.reschedule(this)
         val openCheckIn = intent?.getBooleanExtra(EXTRA_OPEN_CHECKIN, false) == true
         val openTask = intent?.getLongExtra(EXTRA_OPEN_TASK, 0L) ?: 0L
+        val openUpdate = intent?.getBooleanExtra(EXTRA_OPEN_UPDATE, false) == true
 
         setContent {
             DastyarTheme {
@@ -72,6 +74,17 @@ class MainActivity : FragmentActivity() {
                     }
                     LaunchedEffect(openTask) {
                         if (openTask > 0L && profile?.onboardingDone == true) vm.requestOpenTask(openTask)
+                    }
+                    LaunchedEffect(openUpdate) {
+                        if (openUpdate && profile?.onboardingDone == true) vm.requestOpenUpdate()
+                    }
+
+                    // A silent, non-blocking update check on launch. It only
+                    // posts a notification; it never interrupts the user.
+                    LaunchedEffect(Unit) {
+                        runCatching {
+                            com.dastyar.app.update.UpdateManager.checkAndNotify(this@MainActivity)
+                        }
                     }
 
                     // First run: the app has no built-in key, so the user

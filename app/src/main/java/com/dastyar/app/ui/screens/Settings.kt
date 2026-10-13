@@ -830,6 +830,29 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         }
         Spacer(Modifier.height(14.dp))
 
+        // ---- update ----
+        DastyarCard {
+            SectionTitle("به‌روزرسانی", "⬆️")
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "نسخه رسمی تازه را از منبع اصلی بررسی و نصب کن. اطلاعاتت حفظ می‌شود.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    // The update screen lives above the tabs in MainScaffold;
+                    // this hands control to it and closes Settings.
+                    vm.requestOpenUpdate()
+                    onClose()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("بررسی و نصب نسخه تازه") }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
         // ---- version ----
         DastyarCard {
             SectionTitle("اطلاعات نسخه", "ℹ️")
