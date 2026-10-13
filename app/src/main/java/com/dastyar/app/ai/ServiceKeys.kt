@@ -38,6 +38,11 @@ object ServiceKeys {
     private const val AT_MODEL = "at_text_model"
     private const val AT_STATE = "at_state"
 
+    // Groq (GPT-OSS 120B / 20B)
+    private const val GQ_KEY = "gq_key"
+    private const val GQ_MODEL = "gq_text_model"
+    private const val GQ_STATE = "gq_state"
+
     // Cloudflare
     private const val CF_ACCOUNT = "cf_account"
     private const val CF_TOKEN = "cf_token"
@@ -67,6 +72,10 @@ object ServiceKeys {
     @Volatile private var atKey: String? = null
     @Volatile private var atTextModel: String = AiProviders.atria.textModel
     @Volatile private var atState: State = State.NOT_SET
+
+    @Volatile private var gqKey: String? = null
+    @Volatile private var gqTextModel: String = AiProviders.groq.textModel
+    @Volatile private var gqState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -221,6 +230,44 @@ object ServiceKeys {
         prefs(ctx).edit().remove(AT_KEY).remove(AT_MODEL).remove(AT_STATE).apply()
     }
 
+    // ----------------------------------------------------------------- Groq
+
+    fun groqKey(): String? = gqKey
+    fun groqTextModel(): String = gqTextModel
+    fun groqState(): State = gqState
+    fun groqReady(): Boolean = gqState == State.CONNECTED && !gqKey.isNullOrBlank()
+
+    fun saveGroq(ctx: Context, key: String, state: State = State.CONNECTED,
+                  textModel: String? = null) {
+        val clean = key.trim()
+        if (clean.isBlank()) return
+        gqKey = clean
+        gqState = state
+        textModel?.takeIf { it.isNotBlank() }?.let { gqTextModel = it }
+        prefs(ctx).edit()
+            .putString(GQ_KEY, clean)
+            .putString(GQ_MODEL, gqTextModel)
+            .putString(GQ_STATE, state.name)
+            .apply()
+    }
+
+    fun setGroqState(ctx: Context, state: State) {
+        gqState = state
+        prefs(ctx).edit().putString(GQ_STATE, state.name).apply()
+    }
+
+    fun setGroqTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        gqTextModel = model
+        prefs(ctx).edit().putString(GQ_MODEL, model).apply()
+    }
+
+    fun clearGroq(ctx: Context) {
+        gqKey = null
+        gqState = State.NOT_SET
+        prefs(ctx).edit().remove(GQ_KEY).remove(GQ_MODEL).remove(GQ_STATE).apply()
+    }
+
     // ------------------------------------------------------ text provider
 
     /**
@@ -248,6 +295,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> ccKey.orEmpty()
             AiProviders.atria.id -> atKey.orEmpty()
+            AiProviders.groq.id -> gqKey.orEmpty()
             else -> orKey.orEmpty()
         }
 
@@ -256,6 +304,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> ccTextModel
             AiProviders.atria.id -> atTextModel
+            AiProviders.groq.id -> gqTextModel
             else -> orTextModel
         }
 
@@ -264,6 +313,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> ccState
             AiProviders.atria.id -> atState
+            AiProviders.groq.id -> gqState
             else -> orState
         }
 
@@ -272,6 +322,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> codeCraftReady()
             AiProviders.atria.id -> atriaReady()
+            AiProviders.groq.id -> groqReady()
             else -> openRouterReady()
         }
 
@@ -280,6 +331,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> saveCodeCraft(ctx, key, state, model)
             AiProviders.atria.id -> saveAtria(ctx, key, state, model)
+            AiProviders.groq.id -> saveGroq(ctx, key, state, model)
             else -> saveOpenRouter(ctx, key, state)
         }
     }
@@ -288,6 +340,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> setCodeCraftState(ctx, state)
             AiProviders.atria.id -> setAtriaState(ctx, state)
+            AiProviders.groq.id -> setGroqState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
     }
@@ -296,6 +349,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> setCodeCraftTextModel(ctx, model)
             AiProviders.atria.id -> setAtriaTextModel(ctx, model)
+            AiProviders.groq.id -> setGroqTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
     }
@@ -305,6 +359,7 @@ object ServiceKeys {
         when (textProvider().id) {
             AiProviders.codeCraft.id -> clearCodeCraft(ctx)
             AiProviders.atria.id -> clearAtria(ctx)
+            AiProviders.groq.id -> clearGroq(ctx)
             else -> clearOpenRouter(ctx)
         }
     }
@@ -389,7 +444,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, CC_KEY, AT_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
+            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
 
@@ -408,6 +463,10 @@ object ServiceKeys {
         atKey = p.getString(AT_KEY, null)?.trim()?.ifBlank { null }
         atTextModel = p.getString(AT_MODEL, null)?.ifBlank { null } ?: AiProviders.atria.textModel
         atState = if (atKey == null) State.NOT_SET else stateOf(p.getString(AT_STATE, null))
+
+        gqKey = p.getString(GQ_KEY, null)?.trim()?.ifBlank { null }
+        gqTextModel = p.getString(GQ_MODEL, null)?.ifBlank { null } ?: AiProviders.groq.textModel
+        gqState = if (gqKey == null) State.NOT_SET else stateOf(p.getString(GQ_STATE, null))
 
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
 

@@ -105,6 +105,35 @@ object AiProviders {
         textModel = "Atria-Dawn-Preview"
     )
 
+    /**
+     * Groq Cloud is the fourth text provider. It is OpenAI-compatible
+     * (`/openai/v1/chat/completions`, `Authorization: Bearer`), so it is served
+     * entirely by the app's shared text path. It is text-only -- no image
+     * models -- so it is offered for chat/text features only.
+     *
+     * The main model is the larger, higher-quality GPT-OSS 120B; the app also
+     * carries the faster GPT-OSS 20B as a same-provider fallback for when the
+     * main model is rate-limited (HTTP 429) or busy. Both are listed in
+     * [groqModels] so the picker can offer them without any other change.
+     */
+    val groq = AiProvider(
+        id = "groq",
+        label = "Groq (GPT-OSS)",
+        baseUrl = "https://api.groq.com/openai/v1",
+        textModel = "openai/gpt-oss-120b",
+        modelsPath = "models"
+    )
+
+    /**
+     * The models the Groq card offers, main first. The fallback model is a
+     * normal, user-selectable choice here; the app additionally uses it
+     * automatically when the main model is rate-limited.
+     */
+    val groqModels = listOf(
+        "openai/gpt-oss-120b" to "GPT-OSS 120B (دقیق‌تر)",
+        "openai/gpt-oss-20b" to "GPT-OSS 20B (سریع‌تر)"
+    )
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -118,9 +147,9 @@ object AiProviders {
      * user. Keeping this list short and explicit means the picker never offers a
      * provider that cannot do the job.
      */
-    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft, atria)
+    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq)
 
-    val all: List<AiProvider> = listOf(openRouter, codeCraft, atria, openAiCompatible)
+    val all: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

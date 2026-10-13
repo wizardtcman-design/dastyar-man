@@ -721,6 +721,14 @@ object AiClient {
      */
     private fun textModelChain(provider: AiProvider): List<ModelAttempt> {
         val primary = ServiceKeys.textModel().ifBlank { provider.textModel }
+        // Groq has no free-model catalogue: instead it carries a fixed, fast
+        // same-provider fallback (the 20B model) that is used only when the
+        // chosen model is rate-limited or busy. It is tried after the primary
+        // and never replaces the user's choice on a normal reply.
+        if (provider.id == AiProviders.groq.id) {
+            val others = AiProviders.groqModels.map { it.first }.filter { it != primary }
+            return buildChain(provider, primary, others, fallbackIsFree = false)
+        }
         // The free-model fallback exists because OpenRouter free accounts cannot
         // reach paid models. CodeCraft and Atria are paid gateways with no free
         // tier, so their configured model is the only one tried.
@@ -758,7 +766,8 @@ object AiClient {
     private fun buildChain(
         provider: AiProvider,
         primary: String,
-        free: List<String>
+        free: List<String>,
+        fallbackIsFree: Boolean = true
     ): List<ModelAttempt> {
         val ordered = free.sortedBy { m ->
             val i = PREFERRED_FREE.indexOf(m)
@@ -766,7 +775,7 @@ object AiClient {
         }
         val chain = mutableListOf(ModelAttempt(primary, 2, free = false))
         for (m in ordered) {
-            if (m != primary) chain += ModelAttempt(m, 1, free = true)
+            if (m != primary) chain += ModelAttempt(m, 1, free = fallbackIsFree)
         }
         return chain
     }
