@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,29 @@ fun MainScaffold(vm: MainViewModel) {
     val openTask by vm.openTask.collectAsState()
     LaunchedEffect(openTask) {
         if (openTask > 0L) tab = "tasks"
+    }
+
+    // An update notification tap opens the in-app update screen.
+    var showUpdate by remember { mutableStateOf(false) }
+    val openUpdate by vm.openUpdate.collectAsState()
+    LaunchedEffect(openUpdate) {
+        if (openUpdate > 0) showUpdate = true
+    }
+
+    // One-time "دستیار من به‌روز شد" note per version: if the running version
+    // has not been announced to this user yet, fetch its release notes and show
+    // the dialog once, then remember it so it never appears again.
+    val whatsCtx = LocalContext.current
+    var whatsVersion by remember { mutableStateOf<String?>(null) }
+    var whatsNotes by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        val current = com.dastyar.app.BuildConfig.VERSION_NAME
+        if (com.dastyar.app.update.UpdatePrefs.whatsNewShownVersion(whatsCtx) != current) {
+            val notes = com.dastyar.app.update.GitHubReleaseClient
+                .fetchNotesForVersion(current)
+            whatsNotes = notes.orEmpty()
+            whatsVersion = current
+        }
     }
 
     // The daily check-in is only offered once the user finished onboarding and
@@ -143,6 +167,41 @@ fun MainScaffold(vm: MainViewModel) {
                 "checkin" -> CheckInScreen(vm, onDone = { tab = "home" })
             }
         }
+    }
+
+    // ------------------------------------------------- update screen
+    //
+    // Opened from the "به‌روزرسانی" shortcut in Settings or from an update
+    // notification tap. It is a full-screen overlay so it works from any tab.
+    if (showUpdate) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+                        )
+                    )
+            ) {
+                UpdateScreen(onClose = { showUpdate = false })
+            }
+        }
+    }
+
+    // ------------------------------------------------- what's new (once)
+    whatsVersion?.let { v ->
+        com.dastyar.app.ui.components.WhatsNewDialog(
+            version = v,
+            notes = whatsNotes,
+            onDismiss = {
+                com.dastyar.app.update.UpdatePrefs.setWhatsNewShownVersion(whatsCtx, v)
+                whatsVersion = null
+            }
+        )
     }
 
     // ------------------------------------------------- welcome note
