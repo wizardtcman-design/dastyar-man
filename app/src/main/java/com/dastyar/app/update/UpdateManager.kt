@@ -38,14 +38,24 @@ object UpdateManager {
 
     fun createChannel(ctx: Context) {
         val mgr = ctx.getSystemService(NotificationManager::class.java)
+        // HIGH so the "نسخه تازه" alert is visibly shown (heads-up) instead of
+        // being filed silently, which is what makes it easy to miss.
         mgr.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_UPDATES,
                 "به‌روزرسانی دستیار من",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply { description = "اطلاع‌رسانی نسخه‌های تازه دستیار من" }
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "اطلاع‌رسانی نسخه‌های تازه دستیار من"
+                // The user should never lose the update alert by accident; keep
+                // it visible in the shade until they act on it or dismiss it.
+                setShowBadge(true)
+            }
         )
     }
+
+    /** The notification title shown in the shade, per the feature request. */
+    const val NOTIF_TITLE = "به‌روزرسانی دستیار من"
 
     /**
      * Runs a check honouring the interval, and returns the newer [UpdateInfo]
@@ -74,16 +84,42 @@ object UpdateManager {
      */
     suspend fun checkAndNotify(ctx: Context): UpdateInfo? {
         val update = checkForUpdate(ctx, force = false) ?: return null
+        // One notification per version. If the permission was still missing, the
+        // version is NOT marked as notified, so the alert can still appear later
+        // once the user grants notification access.
         if (update.version != UpdatePrefs.notifiedVersion(ctx)) {
-            notify(ctx, update)
-            UpdatePrefs.setNotifiedVersion(ctx, update.version)
+            val posted = notify(ctx, update)
+            if (posted) UpdatePrefs.setNotifiedVersion(ctx, update.version)
         }
         return update
     }
 
-    /** Posts the "نسخه تازه" notification. Never throws. */
-    fun notify(ctx: Context, update: UpdateInfo) {
-        if (!NotificationHelper.canPost(ctx)) return
+    /**
+     * Posts the alert for a version already in hand, e.g. right after the user
+     * grants notification permission from the update screen. It still respects
+     * the one-per-version rule, so no duplicate ever appears.
+     */
+    fun notifyNow(ctx: Context, update: UpdateInfo): Boolean {
+        if (update.version == UpdatePrefs.notifiedVersion(ctx)) return true
+        val posted = notify(ctx, update)
+        if (posted) UpdatePrefs.setNotifiedVersion(ctx, update.version)
+        return posted
+    }
+
+    /**
+     * Posts the "نسخه تازه" notification. Never throws. Returns true when the
+     * notification was actually handed to the system, false when the user has
+     * not granted notification permission (so a caller can then prompt for it).
+     *
+     * The alert carries the exact new version number and the release title, and
+     * tapping it opens the in-app update screen.
+     */
+    fun notify(ctx: Context, update: UpdateInfo): Boolean {
+        // Re-create the channel every time: a user who upgraded from an older
+        // build that had a different channel still gets the correct one.
+        createChannel(ctx)
+        if (!NotificationHelper.canPost(ctx)) return false
+
         val intent = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_UPDATE, true)
@@ -92,21 +128,30 @@ object UpdateManager {
             ctx, ID_UPDATE, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        // The release title from GitHub, when present, e.g. "دستیار من v1.0.88".
+        val releaseName = update.tagName.ifBlank { "v${update.version}" }
+        val body = "نسخه ${update.version} منتشر شد — $releaseName\n" +
+                "برای دیدن تغییرات و نصب، بزن."
+
         val notif = NotificationCompat.Builder(ctx, CHANNEL_UPDATES)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("نسخه تازه دستیار من آماده است 🎉")
-            .setContentText("نسخه ${update.version} منتشر شد. برای دیدن تغییرات و نصب بزن.")
+            // The title the user sees in the notification bar.
+            .setContentTitle(NOTIF_TITLE)
+            .setContentText("نسخه ${update.version} آماده است: $releaseName")
             .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("نسخه ${update.version} منتشر شد. برای دیدن تغییرات و نصب، بزن.")
+                NotificationCompat.BigTextStyle().bigText(body)
             )
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
-        try {
+        return try {
             NotificationManagerCompat.from(ctx).notify(ID_UPDATE, notif)
+            true
         } catch (_: SecurityException) {
+            false
         }
     }
 }

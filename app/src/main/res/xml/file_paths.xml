@@ -2,5 +2,10 @@
 <paths>
     <files-path name="images" path="images/" />
     <cache-path name="cache" path="/" />
+    <!-- Downloaded update APKs live in cacheDir/update/. The cache root above
+         already covers them, and this explicit entry keeps the installer path
+         working even if the cache layout changes. Only content URIs built by
+         FileProvider are ever shared, never a file URI. -->
+    <cache-path name="updates" path="update/" />
     <external-files-path name="ext" path="/" />
 </paths>
