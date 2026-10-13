@@ -718,7 +718,11 @@ object AiClient {
         // (401/402/403/429) never reach here, so the relay is never spammed for
         // a problem a relay cannot fix.
         if (sawNetworkError && ProviderGateway.proxyReady()) {
+            // A relay rejection that a relay cannot fix (401/402/403/429) stops
+            // the whole retry, so we never loop on an auth/quota problem.
+            var relayFinal = false
             for (candidate in textModelChain(activeProvider())) {
+                if (relayFinal) break
                 val body = buildJsonObject {
                     put("model", candidate.model)
                     put("messages", messages)
@@ -754,9 +758,9 @@ object AiClient {
                             lastError = "پاسخ خالی از سرویس دریافت شد."
                         } else {
                             lastError = describeError(resp.code, text)
-                            // A rejection through the relay is final; do not loop.
                             if (resp.code == 401 || resp.code == 402 ||
-                                resp.code == 403 || resp.code == 429) break
+                                resp.code == 403 || resp.code == 429
+                            ) relayFinal = true
                         }
                     }
                 } catch (_: Exception) {
