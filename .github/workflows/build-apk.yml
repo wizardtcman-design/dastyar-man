@@ -86,6 +86,15 @@ jobs:
             capture && /^## / {exit}
             capture {print}
           ' CHANGELOG.md)
+          # No section for this exact run number? Fall back to the newest
+          # section in the file, so a release never ships with empty or generic
+          # notes just because the run number moved ahead of the changelog.
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES=$(awk '
+              /^## / {if (capture) exit; capture=1; next}
+              capture {print}
+            ' CHANGELOG.md)
+          fi
           if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
             NOTES="- به‌روزرسانی نسخه و بهبود کلی برنامه."
           fi
