@@ -486,6 +486,36 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("مدل چت: ${ServiceKeys.textModel()}", fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // Groq lets the user pick between its two models. The one not picked
+            // stays available as the automatic fallback when the picked model is
+            // rate-limited.
+            if (ServiceKeys.textProvider().id == AiProviders.groq.id) {
+                Spacer(Modifier.height(8.dp))
+                Text("انتخاب مدل Groq:", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                AiProviders.groqModels.forEach { (id, label) ->
+                    val on = ServiceKeys.textModel() == id
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (on) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                            .clickable {
+                                ServiceKeys.setGroqTextModel(ctx, id)
+                                keysVersion++
+                            }
+                    ) {
+                        Text(label, Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            fontSize = 11.sp,
+                            color = if (on) Color.White
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Text(
+                    "اگر مدل انتخابی مشغول یا محدود شود، برنامه خودکار از مدل دیگر Groq استفاده می‌کند.",
+                    fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (ServiceKeys.textProvider().id == AiProviders.openRouter.id) {
                 Text(
                     if (ServiceKeys.openRouterSupportsImage())
