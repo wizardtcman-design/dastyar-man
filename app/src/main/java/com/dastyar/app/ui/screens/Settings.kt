@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.AiProviders
 import com.dastyar.app.ai.CloudflareClient
+import com.dastyar.app.ai.CloudflareUsage
 import com.dastyar.app.ai.PollinationsClient
 import com.dastyar.app.ai.QuotaGuard
 import com.dastyar.app.ai.ServiceKeys
@@ -74,6 +75,14 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var showCfEdit by remember { mutableStateOf(false) }
     var cfBusy by remember { mutableStateOf(false) }
     var cfModels by remember { mutableStateOf<List<String>?>(null) }
+    // Cloudflare text account (separate from the image account)
+    var cftAccount by remember { mutableStateOf("") }
+    var cftToken by remember { mutableStateOf("") }
+    var cftStatus by remember { mutableStateOf<String?>(null) }
+    var showCftEdit by remember { mutableStateOf(false) }
+    // Cloudflare usage panel (real data from the GraphQL Analytics API)
+    var usage by remember { mutableStateOf<CloudflareUsage.Usage?>(null) }
+    var usageLoading by remember { mutableStateOf(false) }
     // Pollinations card
     var poKey by remember { mutableStateOf("") }
     var poStatus by remember { mutableStateOf<String?>(null) }
@@ -91,6 +100,20 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         balanceLoading = true
         balance = AiClient.fetchBalance()
         balanceLoading = false
+    }
+
+    // Read the real Workers AI usage for the Cloudflare text account whenever the
+    // stored keys change (and on first open). Nothing is shown until it is read.
+    LaunchedEffect(keysVersion) {
+        if (ServiceKeys.cloudflareTextConfigured()) {
+            usageLoading = true
+            usage = CloudflareUsage.fetch(
+                ServiceKeys.cloudflareTextAccount(), ServiceKeys.cloudflareTextToken()
+            )
+            usageLoading = false
+        } else {
+            usage = null
+        }
     }
 
     // Setting/changing the lock code: take over the whole screen with the same
@@ -526,66 +549,151 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 Text("مدل تصویر: ندارد (سرویس متن)", fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("کلید: " + maskKey(ServiceKeys.textKey()), fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ServiceButton("تست", Modifier.weight(1f)) {
-                    scope.launch {
-                        orStatus = "در حال تست واقعی…"
-                        val r = AiClient.testConnection(ctx)
-                        orStatus = if (r.ok) "✅ اتصال برقرار است" else "⚠️ ${r.message}"
+            // Cloudflare text is authenticated with an Account ID + API Token
+            // (its own account, separate from the image account), not a single
+            // key, so it gets its own fields and save flow.
+            if (ServiceKeys.textProvider().id == AiProviders.cloudflareText.id) {
+                Text("حساب: " + maskKey(ServiceKeys.cloudflareTextAccount()), fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("توکن: " + maskKey(ServiceKeys.cloudflareTextToken()), fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "این حساب جداست و سهمیهٔ تصویر را مصرف نمی‌کند.",
+                    fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ServiceButton("تست", Modifier.weight(1f)) {
+                        scope.launch {
+                            cftStatus = "در حال تست واقعی…"
+                            val r = AiClient.testCloudflareText(
+                                ServiceKeys.cloudflareTextAccount(),
+                                ServiceKeys.cloudflareTextToken()
+                            )
+                            cftStatus = if (r.ok) "✅ اتصال برقرار است" else "⚠️ ${r.message}"
+                            keysVersion++
+                        }
+                    }
+                    ServiceButton("تغییر", Modifier.weight(1f)) { showCftEdit = !showCftEdit }
+                    ServiceButton("حذف", Modifier.weight(1f)) {
+                        ServiceKeys.clearCloudflareText(ctx)
+                        usage = null
                         keysVersion++
+                        cftStatus = "حساب Cloudflare متنی حذف شد."
                     }
                 }
-                ServiceButton("تغییر", Modifier.weight(1f)) { showOrEdit = !showOrEdit }
-                ServiceButton("حذف", Modifier.weight(1f)) {
-                    ServiceKeys.clearTextProvider(ctx)
-                    keysVersion++
-                    orStatus = "کلید ${ServiceKeys.textProvider().label} حذف شد."
-                }
-            }
-            if (showOrEdit) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = orNewKey, onValueChange = { orNewKey = it.trim() },
-                    label = { Text("کلید جدید ${ServiceKeys.textProvider().label}") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp), singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            orStatus = "در حال آزمایش کلید جدید…"
-                            val provider = ServiceKeys.textProvider()
-                            val (r, caps) = AiClient.testProvider(provider, orNewKey.trim())
-                            if (r.ok) {
-                                if (provider.id == AiProviders.openRouter.id) {
-                                    ServiceKeys.saveOpenRouter(
-                                        ctx, orNewKey.trim(),
-                                        imageModel = caps?.imageModel ?: provider.imageModel,
-                                        supportsImg = caps?.supportsImage ?: false,
-                                        supportsEdit = caps?.supportsEdit ?: false
+                if (showCftEdit) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = cftAccount, onValueChange = { cftAccount = it.trim() },
+                        label = { Text("Cloudflare Account ID (حساب متن)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp), singleLine = true
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = cftToken, onValueChange = { cftToken = it.trim() },
+                        label = { Text("API Token (Workers AI + Account Analytics Read)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp), singleLine = true
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                cftStatus = "در حال آزمایش حساب و مدل…"
+                                val provider = ServiceKeys.textProvider()
+                                val r = AiClient.testCloudflareText(
+                                    cftAccount.trim(), cftToken.trim(), provider.textModel
+                                )
+                                if (r.ok) {
+                                    ServiceKeys.saveCloudflareText(
+                                        ctx, cftAccount.trim(), cftToken.trim(),
+                                        provider.textModel, ServiceKeys.State.CONNECTED
                                     )
+                                    cftAccount = ""; cftToken = ""; showCftEdit = false
+                                    keysVersion++
+                                    cftStatus = "✅ ذخیره شد"
                                 } else {
-                                    // CodeCraft and Atria are text-only: save the
-                                    // key for the selected provider through the
-                                    // shared path.
-                                    ServiceKeys.saveTextProvider(
-                                        ctx, orNewKey.trim(), provider.textModel
+                                    ServiceKeys.saveCloudflareText(
+                                        ctx, cftAccount.trim(), cftToken.trim(),
+                                        provider.textModel, ServiceKeys.State.ERROR
                                     )
+                                    keysVersion++
+                                    cftStatus = "⚠️ ${r.message}"
                                 }
-                                orNewKey = ""; showOrEdit = false
-                                keysVersion++
-                                balance = AiClient.fetchBalance()
-                                orStatus = "✅ کلید جدید ذخیره شد و از این به بعد استفاده می‌شود"
-                            } else orStatus = "⚠️ ${r.message}"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("آزمایش و ذخیره") }
+                }
+                cftStatus?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Text("کلید: " + maskKey(ServiceKeys.textKey()), fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ServiceButton("تست", Modifier.weight(1f)) {
+                        scope.launch {
+                            orStatus = "در حال تست واقعی…"
+                            val r = AiClient.testConnection(ctx)
+                            orStatus = if (r.ok) "✅ اتصال برقرار است" else "⚠️ ${r.message}"
+                            keysVersion++
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
-                ) { Text("آزمایش و ذخیره کلید جدید") }
+                    }
+                    ServiceButton("تغییر", Modifier.weight(1f)) { showOrEdit = !showOrEdit }
+                    ServiceButton("حذف", Modifier.weight(1f)) {
+                        ServiceKeys.clearTextProvider(ctx)
+                        keysVersion++
+                        orStatus = "کلید ${ServiceKeys.textProvider().label} حذف شد."
+                    }
+                }
+                if (showOrEdit) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = orNewKey, onValueChange = { orNewKey = it.trim() },
+                        label = { Text("کلید جدید ${ServiceKeys.textProvider().label}") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp), singleLine = true
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                orStatus = "در حال آزمایش کلید جدید…"
+                                val provider = ServiceKeys.textProvider()
+                                val (r, caps) = AiClient.testProvider(provider, orNewKey.trim())
+                                if (r.ok) {
+                                    if (provider.id == AiProviders.openRouter.id) {
+                                        ServiceKeys.saveOpenRouter(
+                                            ctx, orNewKey.trim(),
+                                            imageModel = caps?.imageModel ?: provider.imageModel,
+                                            supportsImg = caps?.supportsImage ?: false,
+                                            supportsEdit = caps?.supportsEdit ?: false
+                                        )
+                                    } else {
+                                        // CodeCraft and Atria are text-only: save the
+                                        // key for the selected provider through the
+                                        // shared path.
+                                        ServiceKeys.saveTextProvider(
+                                            ctx, orNewKey.trim(), provider.textModel
+                                        )
+                                    }
+                                    orNewKey = ""; showOrEdit = false
+                                    keysVersion++
+                                    balance = AiClient.fetchBalance()
+                                    orStatus = "✅ کلید جدید ذخیره شد و از این به بعد استفاده می‌شود"
+                                } else orStatus = "⚠️ ${r.message}"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("آزمایش و ذخیره کلید جدید") }
+                }
             }
             Spacer(Modifier.height(8.dp))
             if (ServiceKeys.textProvider().id == AiProviders.openRouter.id) {
@@ -605,6 +713,11 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                             "اعتبار kie.ai: ${"%.1f".format(balance!!.remaining!!)} کردیت"
                         else -> "اعتبار kie.ai: قابل دریافت نیست"
                     },
+                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (ServiceKeys.textProvider().id == AiProviders.cloudflareText.id) {
+                Text(
+                    "مصرف واقعی این حساب در بخش «مصرف Cloudflare» پایین‌تر آمده است.",
                     fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
@@ -808,6 +921,129 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // ---- Cloudflare usage (real data from the GraphQL Analytics API) ----
+        // Everything here reflects the separate TEXT account. Its numbers come
+        // straight from Cloudflare's analytics; nothing is guessed from tokens
+        // or message counts, and a figure is shown only when Cloudflare answered.
+        DastyarCard(accent = Cyan) {
+            SectionTitle("مصرف Cloudflare", "📊")
+            Spacer(Modifier.height(6.dp))
+            val u = usage
+            when {
+                !ServiceKeys.cloudflareTextConfigured() -> Text(
+                    "برای نمایش مصرف واقعی، حساب Cloudflare متنی را در بخش «سرویس متن (چت)» وصل کن.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                usageLoading && u == null -> Text(
+                    "در حال خواندن مصرف از Cloudflare…",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                u == null -> Text(
+                    "مصرف در دسترس نیست.", fontSize = 12.sp, color = Amber
+                )
+                !u.ok || !u.verified -> {
+                    Text("وضعیت: نامشخص", fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold, color = Amber)
+                    Spacer(Modifier.height(4.dp))
+                    Text(u.message, fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                else -> {
+                    Text("وضعیت حساب: تأییدشده ✅", fontSize = 12.sp, color = Green)
+                    Spacer(Modifier.height(4.dp))
+                    Text("سهمیهٔ روزانه: ${Dates.fa(CloudflareUsage.FREE_DAILY_NEURONS.toInt())} Neuron",
+                        fontSize = 12.sp)
+                    Text(
+                        "مصرف امروز (UTC): ${neuronsText(u.todayNeurons)} Neuron — " +
+                                "${Dates.fa(u.todayRequests)} درخواست",
+                        fontSize = 12.sp
+                    )
+                    Text("باقی‌مانده: ${neuronsText(u.remaining)} Neuron", fontSize = 12.sp)
+                    Text("درصد مصرف‌شده: ${Dates.fa("%.1f".format(u.percentUsed)).replace('.', '٫')}٪",
+                        fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { (u.percentUsed / 100.0).toFloat() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Remaining messages, from the account's REAL average cost per
+                    // request today -- never a fixed guess.
+                    if (u.todayRequests > 0 && u.todayNeurons > 0.0) {
+                        val avg = u.todayNeurons / u.todayRequests
+                        val est = if (avg > 0.0) (u.remaining / avg).toInt() else 0
+                        Spacer(Modifier.height(6.dp))
+                        Text("تخمین پیام باقی‌مانده: حدود ${Dates.fa(est)} پیام",
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "میانگین واقعی امروز: ${neuronsText(avg)} Neuron برای هر پیام (تخمینی).",
+                            fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    Text("بازنشانی سهمیه: ${resetLabel()}", fontSize = 11.5.sp)
+
+                    if (u.rows.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("مدل‌های استفاده‌شده امروز:",
+                            fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        u.rows.take(6).forEach { r ->
+                            Text(
+                                "• ${r.model} — ${Dates.fa(r.requests)} درخواست، " +
+                                        "${neuronsText(r.neurons)} Neuron",
+                                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Response time and API error state, from this app's own log.
+                    val ts = UsageLog.todayText(ctx)
+                    Spacer(Modifier.height(6.dp))
+                    Text("درخواست‌های متنی امروز (این برنامه): ${Dates.fa(ts.requests)}",
+                        fontSize = 11.5.sp)
+                    if (ts.lastOk != null) {
+                        Text(
+                            "آخرین پاسخ: ${if (ts.lastOk) "موفق" else "ناموفق"} — " +
+                                    "${Dates.fa("%.1f".format(ts.lastDurationMs / 1000.0)).replace('.', '٫')} ثانیه" +
+                                    (if (ts.lastHttp > 0) " (کد ${Dates.fa(ts.lastHttp)})" else ""),
+                            fontSize = 11.5.sp,
+                            color = if (ts.lastOk) Green else MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (ts.failed > 0) {
+                        Text("خطاهای API امروز: ${Dates.fa(ts.failed)}",
+                            fontSize = 11.5.sp, color = Amber)
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "منبع: تحلیل رسمی Cloudflare (GraphQL «aiInferenceAdaptiveGroups»). " +
+                                "ممکن است چند دقیقه تأخیر داشته باشد.",
+                        fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(CloudflareUsage.GEMMA_PRICING_NOTE, fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        usageLoading = true
+                        usage = CloudflareUsage.fetch(
+                            ServiceKeys.cloudflareTextAccount(), ServiceKeys.cloudflareTextToken()
+                        )
+                        usageLoading = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("به‌روزرسانی مصرف") }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -1182,6 +1418,17 @@ private fun money(v: Double): String {
 /** Total Cloudflare image requests recorded today (generate + edit). */
 private fun cloudflareRequests(s: UsageLog.Summary): Int =
     s.cloudflareGenerate + s.cloudflareEdit
+
+/** Persian digits for a Neuron amount, rounded to a whole number. */
+private fun neuronsText(v: Double): String =
+    Dates.fa(Math.round(v).toString())
+
+/** The free-allocation reset, from Cloudflare's documented 00:00 UTC rule. */
+private fun resetLabel(): String {
+    val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+    val local = fmt.format(CloudflareUsage.nextResetUtc())
+    return "۰۰:۰۰ UTC (حدود ${Dates.fa(local)} به وقت گوشی)"
+}
 
 /** Masks a secret, keeping only the start and the last few characters. */
 private fun maskKey(v: String?): String {

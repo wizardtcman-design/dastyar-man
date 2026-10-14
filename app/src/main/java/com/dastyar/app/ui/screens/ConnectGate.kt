@@ -46,6 +46,7 @@ fun ConnectGate(onConnected: () -> Unit) {
     // Compose state so switching providers or saving a key updates the UI at once.
     var selectedProviderId by remember { mutableStateOf(ServiceKeys.textProviderId()) }
     var keyInput by remember { mutableStateOf("") }
+    var cfTextAccount by remember { mutableStateOf("") }
     var orStatus by remember { mutableStateOf<AiClient.ConnectResult?>(null) }
     var orBusy by remember { mutableStateOf(false) }
 
@@ -105,14 +106,33 @@ fun ConnectGate(onConnected: () -> Unit) {
             }
 
             Spacer(Modifier.height(10.dp))
+            // Cloudflare text is its own account, entered as Account ID + token.
+            if (selectedProviderId == AiProviders.cloudflareText.id) {
+                OutlinedTextField(
+                    value = cfTextAccount,
+                    onValueChange = { cfTextAccount = it.trim() },
+                    label = { Text("Cloudflare Account ID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             OutlinedTextField(
                 value = keyInput,
                 onValueChange = { keyInput = it.trim() },
                 label = {
-                    Text(gateKeyLabel(selectedProviderId))
+                    Text(
+                        if (selectedProviderId == AiProviders.cloudflareText.id)
+                            "Cloudflare API Token" else gateKeyLabel(selectedProviderId)
+                    )
                 },
                 placeholder = {
-                    Text(gateKeyHint(selectedProviderId))
+                    Text(
+                        if (selectedProviderId == AiProviders.cloudflareText.id)
+                            "Workers AI + Account Analytics Read"
+                        else gateKeyHint(selectedProviderId)
+                    )
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
@@ -131,31 +151,54 @@ fun ConnectGate(onConnected: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             GradientButton(
                 text = if (orBusy) "در حال بررسی…" else "اتصال و بررسی",
-                enabled = !orBusy && keyInput.isNotBlank()
+                enabled = !orBusy && keyInput.isNotBlank() &&
+                        (selectedProviderId != AiProviders.cloudflareText.id || cfTextAccount.isNotBlank())
             ) {
                 if (orBusy) return@GradientButton
                 orBusy = true; orStatus = null
                 scope.launch {
                     val provider = AiProviders.byId(selectedProviderId)
-                    val (r, caps) = AiClient.testProvider(provider, keyInput.trim())
-                    orBusy = false; orStatus = r
-                    if (r.ok) {
-                        if (provider.id == AiProviders.openRouter.id) {
-                            ServiceKeys.saveOpenRouter(
-                                ctx, keyInput.trim(),
-                                imageModel = caps?.imageModel ?: provider.imageModel,
-                                supportsImg = caps?.supportsImage ?: false,
-                                supportsEdit = caps?.supportsEdit ?: false
+                    if (provider.id == AiProviders.cloudflareText.id) {
+                        val r = AiClient.testCloudflareText(
+                            cfTextAccount.trim(), keyInput.trim(), provider.textModel
+                        )
+                        orBusy = false; orStatus = r
+                        if (r.ok) {
+                            ServiceKeys.saveCloudflareText(
+                                ctx, cfTextAccount.trim(), keyInput.trim(),
+                                provider.textModel, ServiceKeys.State.CONNECTED
                             )
+                            ServiceKeys.setTextProvider(ctx, provider.id)
+                            cfTextAccount = ""
+                            keyInput = ""
+                            connected++
                         } else {
-                            // CodeCraft and Atria are text-only: save the key for
-                            // the selected provider through the shared path.
-                            ServiceKeys.saveTextProvider(
-                                ctx, keyInput.trim(), provider.textModel
+                            ServiceKeys.saveCloudflareText(
+                                ctx, cfTextAccount.trim(), keyInput.trim(),
+                                provider.textModel, ServiceKeys.State.ERROR
                             )
                         }
-                        keyInput = ""
-                        connected++
+                    } else {
+                        val (r, caps) = AiClient.testProvider(provider, keyInput.trim())
+                        orBusy = false; orStatus = r
+                        if (r.ok) {
+                            if (provider.id == AiProviders.openRouter.id) {
+                                ServiceKeys.saveOpenRouter(
+                                    ctx, keyInput.trim(),
+                                    imageModel = caps?.imageModel ?: provider.imageModel,
+                                    supportsImg = caps?.supportsImage ?: false,
+                                    supportsEdit = caps?.supportsEdit ?: false
+                                )
+                            } else {
+                                // CodeCraft and Atria are text-only: save the key for
+                                // the selected provider through the shared path.
+                                ServiceKeys.saveTextProvider(
+                                    ctx, keyInput.trim(), provider.textModel
+                                )
+                            }
+                            keyInput = ""
+                            connected++
+                        }
                     }
                 }
             }

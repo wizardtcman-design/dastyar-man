@@ -109,6 +109,38 @@ object AiClient {
     private fun textModel(): String =
         ServiceKeys.textModel().ifBlank { activeProvider().textModel }
 
+    /**
+     * The real text endpoint for a provider. Cloudflare's account id lives in the
+     * path, so its OpenAI-compatible URL is built here from the stored account;
+     * every other provider uses its plain [AiProvider.chatUrl].
+     */
+    private fun chatEndpoint(p: AiProvider): String =
+        if (p.id == AiProviders.cloudflareText.id) {
+            val acct = ServiceKeys.cloudflareTextAccount().trim()
+            "${p.baseUrl.trimEnd('/')}/$acct/ai/v1/chat/completions"
+        } else p.chatUrl()
+
+    /**
+     * Records one Cloudflare-text request (its real duration and HTTP status) so
+     * the "مصرف Cloudflare" panel can show response time and API error state. Only
+     * the Cloudflare text provider is logged here.
+     */
+    private fun recordText(
+        ctx: android.content.Context?,
+        p: AiProvider,
+        ok: Boolean,
+        http: Int,
+        startedMs: Long,
+        model: String,
+        note: String = ""
+    ) {
+        if (ctx == null || p.id != AiProviders.cloudflareText.id) return
+        UsageLog.record(
+            ctx, UsageLog.Provider.CLOUDFLARE_TEXT, model, UsageLog.Kind.TEXT,
+            ok = ok, http = http, durationMs = System.currentTimeMillis() - startedMs, note = note
+        )
+    }
+
     // -------------------------------------------------- model capabilities
 
     /** What a provider's catalogue says about one model. */
@@ -263,7 +295,7 @@ object AiClient {
     ): ConnectResult = try {
         val body = probeBody(p, model)
         val req = Request.Builder()
-            .url(p.chatUrl())
+            .url(chatEndpoint(p))
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
             .post(body.toRequestBody("application/json".toMediaType()))
@@ -305,7 +337,7 @@ object AiClient {
         try {
             val body = probeBody(p, textModel())
             val req = Request.Builder()
-                .url(p.chatUrl())
+                .url(chatEndpoint(p))
                 .addHeader("Authorization", "Bearer $key")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toRequestBody("application/json".toMediaType()))
@@ -407,11 +439,67 @@ object AiClient {
         last to null
     }
 
+    /**
+     * Tests a Cloudflare text account before it is saved, with the account id
+     * supplied directly (it is not stored yet). Sends one tiny real request to
+     * the OpenAI-compatible endpoint so success means the model really answered.
+     */
+    suspend fun testCloudflareText(
+        account: String,
+        token: String,
+        model: String = AiProviders.cloudflareText.textModel
+    ): ConnectResult = withContext(Dispatchers.IO) {
+        val acc = account.trim()
+        val tok = token.trim()
+        if (acc.isBlank() || tok.isBlank()) return@withContext ConnectResult(
+            false, FailKind.NO_KEY, "شناسه حساب و توکن Cloudflare لازم است."
+        )
+        val url = "${AiProviders.cloudflareText.baseUrl.trimEnd('/')}/$acc/ai/v1/chat/completions"
+        try {
+            val body = buildJsonObject {
+                put("model", model)
+                put("max_tokens", 24)
+                put("messages", buildJsonArray {
+                    add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+                })
+            }.toString()
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $tok")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            http.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
+                else {
+                    val t = resp.body?.string().orEmpty()
+                    ConnectResult(false, classify(resp.code, t), cfTextDescribe(resp.code, t))
+                }
+            }
+        } catch (e: Exception) {
+            ConnectResult(false, FailKind.NETWORK, "اتصال برقرار نشد: ${networkReason(e)}")
+        }
+    }
+
+    /** Turns a Cloudflare text API error into an accurate Persian sentence. */
+    private fun cfTextDescribe(code: Int, raw: String): String {
+        val low = raw.lowercase()
+        return when {
+            code == 401 -> "توکن Cloudflare نامعتبر است."
+            code == 403 && (low.contains("worker") || low.contains("neural")) ->
+                "توکن به Workers AI دسترسی ندارد؛ دسترسی لازم را به توکن بده."
+            code == 403 -> "دسترسی به مدل با توکن فعلی باز نیست یا به پلن پولی نیاز دارد."
+            code == 429 -> "سهمیه یا محدودیت روزانهٔ Cloudflare تمام شده است."
+            code == 400 && low.contains("model") -> "این مدل روی حساب Cloudflare در دسترس نیست."
+            else -> "خطای Cloudflare (کد $code)."
+        }
+    }
+
     /** One real chat request against a specific model, without side effects. */
     private fun probeModelFor(provider: AiProvider, key: String, model: String): ConnectResult = try {
         val body = probeBody(provider, model)
         val req = Request.Builder()
-            .url(provider.chatUrl())
+            .url(chatEndpoint(provider))
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
             .post(body.toRequestBody("application/json".toMediaType()))
@@ -678,12 +766,14 @@ object AiClient {
     suspend fun chat(
         system: String,
         history: List<Pair<String, String>>,
-        userMessage: String
+        userMessage: String,
+        ctx: android.content.Context? = null
     ): Result<String> = complete(
         system = system,
         history = history,
         userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
-        model = textModel()
+        model = textModel(),
+        ctx = ctx
     )
 
     /** Chat with one image attached (vision). */
@@ -691,7 +781,8 @@ object AiClient {
         system: String,
         userMessage: String,
         imageBase64: String,
-        mime: String = "image/jpeg"
+        mime: String = "image/jpeg",
+        ctx: android.content.Context? = null
     ): Result<String> = complete(
         system = system,
         history = emptyList(),
@@ -702,7 +793,8 @@ object AiClient {
                 put("image_url", buildJsonObject { put("url", "data:$mime;base64,$imageBase64") })
             }
         ),
-        model = textModel()
+        model = textModel(),
+        ctx = ctx
     )
 
     /**
@@ -717,14 +809,23 @@ object AiClient {
         system: String,
         history: List<Pair<String, String>>,
         userParts: Array<kotlinx.serialization.json.JsonElement>,
-        model: String
+        model: String,
+        ctx: android.content.Context? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         if (!chatConfigured) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
         )
 
         val p = activeProvider()
+        // Cloudflare text needs an account id as well as a token; without it the
+        // request URL would be wrong, so fail early with the real reason.
+        if (p.id == AiProviders.cloudflareText.id && ServiceKeys.cloudflareTextAccount().isBlank()) {
+            return@withContext Result.failure(
+                AiException("شناسهٔ حساب Cloudflare متنی تنظیم نشده است.")
+            )
+        }
         val responses = p.apiStyle == ApiStyle.RESPONSES
+        val startedMs = System.currentTimeMillis()
 
         val messages = buildJsonArray {
             add(buildJsonObject { put("role", "system"); put("content", system) })
@@ -739,6 +840,7 @@ object AiClient {
 
         var lastError = "اتصال به هوش مصنوعی ناموفق بود."
         var usedFreeFallback = false
+        var lastHttp = 0
 
         // Try the configured model first, then genuinely free models. A paid
         // model on a free account answers 402; instead of failing the whole
@@ -762,7 +864,7 @@ object AiClient {
                     if (stopKey) return@repeat
                     try {
                         val req = Request.Builder()
-                            .url(p.chatUrl())
+                            .url(chatEndpoint(p))
                             .addHeader("Authorization", "Bearer $key")
                             .addHeader("Content-Type", "application/json")
                             .post(body.toRequestBody("application/json".toMediaType()))
@@ -770,6 +872,7 @@ object AiClient {
 
                         http.newCall(req).execute().use { resp ->
                             val text = resp.body?.string().orEmpty()
+                            lastHttp = resp.code
                             if (resp.isSuccessful) {
                                 val content: String?
                                 val truncated: Boolean
@@ -799,6 +902,7 @@ object AiClient {
                                 if (!content.isNullOrBlank() && !truncated) {
                                     if (candidate.model != model) usedFreeFallback = true
                                     activeTextModel = candidate.model
+                                    recordText(ctx, p, true, resp.code, startedMs, candidate.model)
                                     refreshBalanceQuietly()
                                     return@withContext Result.success(content.trim())
                                 }
@@ -826,6 +930,7 @@ object AiClient {
             }
             if (lastError.contains("اعتبار") || lastError.contains("نامعتبر")) continue
         }
+        recordText(ctx, p, false, lastHttp, startedMs, textModel(), note = lastError)
         Result.failure(AiException(lastError))
     }
 

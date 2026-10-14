@@ -145,7 +145,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val res = AiClient.chat(
             system = Prompts.base(),
             history = emptyList(),
-            userMessage = Prompts.skinTipPrompt(profile = p, today = ci, summary = summary)
+            userMessage = Prompts.skinTipPrompt(profile = p, today = ci, summary = summary),
+            ctx = getApplication<Application>()
         )
         _loadingSkinTip.value = false
         res.onSuccess { text ->
@@ -187,7 +188,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 phase = phase.title,
                 daysUntil = Health.daysUntilPeriod(p),
                 irregular = Health.cycleIsIrregular(p)
-            )
+            ),
+            ctx = getApplication<Application>()
         )
         _loadingCycleTip.value = false
         res.onSuccess { text ->
@@ -253,7 +255,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 overdueDays = Cycle.overdueDays(info),
                 irregular = info.irregular,
                 nextDate = Cycle.nextPeriodDate(info)
-            )
+            ),
+            ctx = getApplication<Application>()
         )
         _loadingCycleNote.value = false
         res.onSuccess { text ->
@@ -314,7 +317,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             history = emptyList(),
             userMessage = Prompts.conditionPrompt(
                 conditions, p.medications.trim(), p, topic, today = _todayCheckIn.value
-            )
+            ),
+            ctx = getApplication<Application>()
         )
         _loadingCondition.value = false
         res.onSuccess { text ->
@@ -849,7 +853,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 history = checkIns.value,
                 facts = smartFacts.value,
                 waterGoal = goal
-            )
+            ),
+            ctx = getApplication<Application>()
         )
         _loadingSuggestion.value = false
 
@@ -920,7 +925,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val res = AiClient.chat(
             system = Prompts.system(channel, p, ci, smartFacts.value),
             history = history,
-            userMessage = text
+            userMessage = text,
+            ctx = getApplication<Application>()
         )
         res.onSuccess { reply ->
             // The meal chats must only ever show a structured recipe. If the
@@ -1001,7 +1007,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val res = AiClient.chat(
                 system = Prompts.base(),
                 history = emptyList(),
-                userMessage = Prompts.pantrySuggestPrompt(text, servings)
+                userMessage = Prompts.pantrySuggestPrompt(text, servings),
+                ctx = getApplication<Application>()
             )
             _pantryLoading.value = false
             pantryRunning = false
@@ -1032,7 +1039,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val res = AiClient.chat(
             system = Prompts.base(),
             history = emptyList(),
-            userMessage = Prompts.learnPrompt(userLines, withContext(Dispatchers.IO) { dao.smartFacts() })
+            userMessage = Prompts.learnPrompt(userLines, withContext(Dispatchers.IO) { dao.smartFacts() }),
+            ctx = getApplication<Application>()
         )
         res.onSuccess { text ->
             val parsed = text.lines()
