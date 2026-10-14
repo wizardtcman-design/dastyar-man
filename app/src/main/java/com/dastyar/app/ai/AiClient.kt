@@ -740,17 +740,20 @@ object AiClient {
         ctx: android.content.Context? = null,
         modelOverride: String? = null,
         providerOverride: AiProvider? = null
-    ): Result<String> = complete(
-        system = system,
-        history = history,
-        userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
-        model = modelOverride?.takeIf { it.isNotBlank() }
-            ?: providerOverride?.let { ServiceKeys.modelFor(it) }?.ifBlank { it.textModel }
-            ?: textModel(),
-        ctx = ctx,
-        primaryOverride = modelOverride,
-        providerOverride = providerOverride
-    )
+    ): Result<String> {
+        val effectiveModel: String = modelOverride?.takeIf { it.isNotBlank() }
+            ?: providerOverride?.let { p -> ServiceKeys.modelFor(p).ifBlank { p.textModel }.toString() }
+            ?: textModel()
+        return complete(
+            system = system,
+            history = history,
+            userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
+            model = effectiveModel,
+            ctx = ctx,
+            primaryOverride = modelOverride,
+            providerOverride = providerOverride
+        )
+    }
 
     /** Chat with one image attached (vision). */
     suspend fun chatWithImage(
