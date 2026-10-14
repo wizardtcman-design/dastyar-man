@@ -34,7 +34,7 @@ object UsageLog {
     private const val MAX_ENTRIES = 500
 
     enum class Kind { GENERATE, EDIT, TEXT }
-    enum class Provider { CLOUDFLARE, POLLINATIONS, OPENROUTER, CLOUDFLARE_TEXT }
+    enum class Provider { CLOUDFLARE, POLLINATIONS, OPENROUTER, CLOUDFLARE_TEXT, ONEXAI }
 
     data class Entry(
         val timestamp: Long,

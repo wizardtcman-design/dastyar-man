@@ -33,6 +33,9 @@ object ServiceKeys {
     private const val XAI_KEY = "xai_key"
     private const val XAI_MODEL = "xai_text_model"
     private const val XAI_STATE = "xai_state"
+    // Chosen 1xAI image model for "generate image"; empty = automatic
+    // (Cloudflare -> Pollinations -> OpenRouter), the pre-existing behaviour.
+    private const val XAI_IMAGE_MODEL = "xai_image_model"
 
     // Atria (Atria Dawn Preview)
     private const val AT_KEY = "at_key"
@@ -78,6 +81,7 @@ object ServiceKeys {
     @Volatile private var xaiKey: String? = null
     @Volatile private var xaiTextModel: String = AiProviders.oneXai.textModel
     @Volatile private var xaiState: State = State.NOT_SET
+    @Volatile private var xaiImageModel: String = ""
 
     @Volatile private var atKey: String? = null
     @Volatile private var atTextModel: String = AiProviders.atria.textModel
@@ -175,6 +179,19 @@ object ServiceKeys {
     fun oneXaiTextModel(): String = xaiTextModel
     fun oneXaiState(): State = xaiState
     fun oneXaiReady(): Boolean = xaiState == State.CONNECTED && !xaiKey.isNullOrBlank()
+
+    /**
+     * The 1xAI image model chosen for the "generate image" box, or empty for the
+     * automatic Cloudflare -> Pollinations route. Only these two documented 1xAI
+     * image models are ever stored, so a stale or text model id can never leak
+     * into the image endpoint.
+     */
+    fun oneXaiImageModel(): String = xaiImageModel
+
+    fun setOneXaiImageModel(ctx: Context, model: String) {
+        xaiImageModel = model.takeIf { m -> OneXaiImage.models.any { it.first == m } }.orEmpty()
+        prefs(ctx).edit().putString(XAI_IMAGE_MODEL, xaiImageModel).apply()
+    }
 
     fun saveOneXai(ctx: Context, key: String, state: State = State.CONNECTED,
                    textModel: String? = null) {
@@ -608,6 +625,8 @@ object ServiceKeys {
         xaiKey = p.getString(XAI_KEY, null)?.trim()?.ifBlank { null }
         xaiTextModel = p.getString(XAI_MODEL, null)?.ifBlank { null } ?: AiProviders.oneXai.textModel
         xaiState = if (xaiKey == null) State.NOT_SET else stateOf(p.getString(XAI_STATE, null))
+        xaiImageModel = p.getString(XAI_IMAGE_MODEL, null)
+            ?.takeIf { m -> OneXaiImage.models.any { it.first == m } }.orEmpty()
 
         atKey = p.getString(AT_KEY, null)?.trim()?.ifBlank { null }
         atTextModel = p.getString(AT_MODEL, null)?.ifBlank { null } ?: AiProviders.atria.textModel

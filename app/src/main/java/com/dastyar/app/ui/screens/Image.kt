@@ -107,6 +107,10 @@ fun ImageScreen(vm: MainViewModel) {
     // edit-mode base image (bytes of the picture the user picked / re-picked)
     var baseBytes by remember { mutableStateOf<ByteArray?>(null) }
 
+    // Which 1xAI image model to use for generation ("" = automatic). Persisted
+    // so the choice survives navigation; only offered when a 1xAI key is set.
+    var imageModel by remember { mutableStateOf(ServiceKeys.oneXaiImageModel()) }
+
     // The Persian prompt -> English translation and the prompt sent to the image
     // model happen entirely behind the scenes (inside ImageEngine). The user
     // only sees their own Persian text and the result.
@@ -139,6 +143,12 @@ fun ImageScreen(vm: MainViewModel) {
                 prompt = prompt,
                 onPrompt = { prompt = it },
                 loading = loading,
+                oneXaiReady = ServiceKeys.oneXaiReady(),
+                imageModel = imageModel,
+                onImageModel = {
+                    imageModel = it
+                    ServiceKeys.setOneXaiImageModel(ctx, it)
+                },
                 onGenerate = {
                     if (loading) return@GenerateSection
                     if (prompt.isBlank()) { error = "لطفاً توضیح بده چه تصویری می‌خواهی."; return@GenerateSection }
@@ -148,7 +158,7 @@ fun ImageScreen(vm: MainViewModel) {
                         // The engine translates the current Persian text to
                         // English and sends that; the English prompt is never
                         // shown to or edited by the user.
-                        val res = ImageEngine.generate(ctx, prompt)
+                        val res = ImageEngine.generate(ctx, prompt, oneXaiImageModel = imageModel)
                         loading = false
                         res.onSuccess {
                             resultBytes = it.bytes; note = it.note
@@ -224,7 +234,7 @@ fun ImageScreen(vm: MainViewModel) {
                     if (loading) return@ResultCard
                     loading = true; error = null; note = null
                     scope.launch {
-                        val res = ImageEngine.generate(ctx, lastPrompt)
+                        val res = ImageEngine.generate(ctx, lastPrompt, oneXaiImageModel = imageModel)
                         loading = false
                         res.onSuccess {
                             resultBytes = it.bytes; note = it.note
@@ -352,6 +362,9 @@ private fun GenerateSection(
     prompt: String,
     onPrompt: (String) -> Unit,
     loading: Boolean,
+    oneXaiReady: Boolean,
+    imageModel: String,
+    onImageModel: (String) -> Unit,
     onGenerate: () -> Unit
 ) {
     // Order matters here: the ready-made prompts sit directly above the chat
@@ -369,8 +382,59 @@ private fun GenerateSection(
         accent = Purple
     )
 
+    // Small model chooser right inside the "make a picture" box. It only appears
+    // when a 1xAI key is configured, because these are the only extra image
+    // models the app is allowed to offer; without a key the box is unchanged.
+    if (oneXaiReady) {
+        Spacer(Modifier.height(8.dp))
+        ImageModelChooser(selected = imageModel, onSelect = onImageModel)
+    }
+
     Spacer(Modifier.height(14.dp))
     GradientButton(text = if (loading) "…" else "ساخت تصویر 🎨", enabled = !loading, onClick = onGenerate)
+}
+
+/**
+ * Compact dropdown for the image model. "خودکار" keeps the proven
+ * Cloudflare -> Pollinations route; the 1xAI entries are the two models 1xAI
+ * documents for its image endpoint. Editing never uses this chooser.
+ */
+@Composable
+private fun ImageModelChooser(selected: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val label = if (selected.isBlank()) "خودکار (Cloudflare / Pollinations)"
+    else com.dastyar.app.ai.OneXaiImage.models.firstOrNull { it.first == selected }?.second ?: selected
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("مدل ساخت تصویر:", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(6.dp))
+        Box {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Purple.copy(alpha = .10f))
+                    .border(1.dp, Purple.copy(alpha = .28f), RoundedCornerShape(12.dp))
+                    .clickable { open = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(label, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(4.dp))
+                Text("▾", fontSize = 11.5.sp, color = Purple)
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                DropdownMenuItem(
+                    text = { Text("خودکار (Cloudflare / Pollinations)", fontSize = 12.5.sp) },
+                    onClick = { onSelect(""); open = false }
+                )
+                com.dastyar.app.ai.OneXaiImage.models.forEach { (id, name) ->
+                    DropdownMenuItem(
+                        text = { Text(name, fontSize = 12.5.sp) },
+                        onClick = { onSelect(id); open = false }
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

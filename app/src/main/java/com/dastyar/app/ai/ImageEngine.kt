@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 object ImageEngine {
 
     /** Which provider actually produced the bytes. */
-    enum class Source { CLOUDFLARE, POLLINATIONS, OPENROUTER }
+    enum class Source { CLOUDFLARE, POLLINATIONS, OPENROUTER, ONEXAI }
 
     data class ImageOutcome(
         val bytes: ByteArray,
@@ -53,7 +53,13 @@ object ImageEngine {
          * rewritten behind the user's back. Null means "translate [prompt] now",
          * which is the normal one-tap path.
          */
-        englishOverride: String? = null
+        englishOverride: String? = null,
+        /**
+         * When the user picked a specific 1xAI image model, its id. Null / blank
+         * means "automatic", which keeps the exact Cloudflare-first behaviour
+         * that existed before 1xAI image generation was added.
+         */
+        oneXaiImageModel: String? = null
     ): Result<ImageOutcome> = withContext(Dispatchers.IO) {
         if (prompt.isBlank() && englishOverride.isNullOrBlank()) return@withContext Result.failure(
             AiException("توصیف تصویر خالی است.")
@@ -79,6 +85,38 @@ object ImageEngine {
                     "ساخت تصویر انجام نشد. لطفاً اتصال کلید هوش مصنوعی را بررسی کن و دوباره تلاش کن."
                 )
             )
+
+        // 0) 1xAI image generation, ONLY when the user explicitly chose a 1xAI
+        // image model and a 1xAI key is configured. Fully additive: with no
+        // 1xAI model selected this block is skipped and the priority below is
+        // exactly the old Cloudflare -> Pollinations -> OpenRouter chain, so the
+        // existing image providers and quota are untouched.
+        val xaiModel = oneXaiImageModel?.takeIf { it.isNotBlank() }
+        if (xaiModel != null) {
+            if (ServiceKeys.oneXaiReady()) {
+                val size = if (width > height) "1536x1024" else if (height > width) "1024x1536" else "1024x1024"
+                val t0 = System.currentTimeMillis()
+                val bytes = OneXaiImage.generate(
+                    apiKey = ServiceKeys.oneXaiKey().orEmpty(),
+                    model = xaiModel,
+                    prompt = englishPrompt,
+                    size = size
+                )
+                UsageLog.record(
+                    ctx, UsageLog.Provider.ONEXAI, xaiModel, UsageLog.Kind.GENERATE,
+                    bytes != null, OneXaiImage.lastHttp,
+                    System.currentTimeMillis() - t0, null, OneXaiImage.lastError
+                )
+                if (bytes != null) {
+                    return@withContext Result.success(
+                        ImageOutcome(bytes, Source.ONEXAI, "تولید تصویر با 1xAI ($xaiModel)")
+                    )
+                }
+                reasons += "1xAI: ${OneXaiImage.lastError}"
+            } else {
+                reasons += "1xAI: کلید تنظیم نشده است"
+            }
+        }
 
         // 1) Cloudflare, only when connected and not already out of quota today.
         // The stored model is resolved through generateModel(): if the account
