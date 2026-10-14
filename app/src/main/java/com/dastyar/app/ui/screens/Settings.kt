@@ -21,9 +21,7 @@ import androidx.compose.ui.graphics.Color
 import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.AiProviders
 import com.dastyar.app.ai.CloudflareClient
-import com.dastyar.app.ai.GatewayPrefs
 import com.dastyar.app.ai.PollinationsClient
-import com.dastyar.app.ai.ProviderGateway
 import com.dastyar.app.ai.QuotaGuard
 import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.ai.UsageLog
@@ -69,11 +67,6 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var showOrEdit by remember { mutableStateOf(false) }
     // Bumped after any save so status text and the picker re-read ServiceKeys.
     var keysVersion by remember { mutableStateOf(0) }
-    // Provider gateway (direct vs relay) settings.
-    var gwMode by remember { mutableStateOf(GatewayPrefs.mode(ctx)) }
-    var gwEndpoint by remember { mutableStateOf(GatewayPrefs.endpoint(ctx)) }
-    var gwToken by remember { mutableStateOf(GatewayPrefs.token(ctx)) }
-    var gwStatus by remember { mutableStateOf<String?>(null) }
     // Cloudflare card
     var cfAccount by remember { mutableStateOf("") }
     var cfToken by remember { mutableStateOf("") }
@@ -614,87 +607,6 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ---- provider gateway (direct vs relay) ----
-        DastyarCard(accent = Amber) {
-            SectionTitle("مسیر اتصال (Gateway)", "🛰️")
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "اگر در شبکه‌ات OpenRouter یا Groq مسدود است، می‌توانی درخواست‌ها را از یک " +
-                        "واسط امن (relay) خودت عبور بدهی. حالت «مستقیم» رفتار عادی است.",
-                fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(10.dp))
-            ChoiceDropdown(
-                label = "حالت اتصال",
-                options = listOf(
-                    DropdownOption("DIRECT", "مستقیم (پیش‌فرض)"),
-                    DropdownOption("PROXY", "از طریق واسط (relay)")
-                ),
-                selectedId = gwMode,
-                modifier = Modifier.fillMaxWidth()
-            ) { id ->
-                GatewayPrefs.setMode(ctx, id)
-                gwMode = id
-                ProviderGateway.reloadSettings()
-                gwStatus = null
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = gwEndpoint, onValueChange = { gwEndpoint = it.trim() },
-                label = { Text("آدرس واسط (مثلاً https://relay.example.com)") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp), singleLine = true
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = gwToken, onValueChange = { gwToken = it.trim() },
-                label = { Text("توکن واسط (X-Gateway-Token، اختیاری)") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp), singleLine = true
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ServiceButton("ذخیره", Modifier.weight(1f)) {
-                    GatewayPrefs.setEndpoint(ctx, gwEndpoint)
-                    GatewayPrefs.setToken(ctx, gwToken)
-                    ProviderGateway.reloadSettings()
-                    gwEndpoint = GatewayPrefs.endpoint(ctx)
-                    gwToken = GatewayPrefs.token(ctx)
-                    gwStatus = "ذخیره شد."
-                }
-                ServiceButton("پاک‌کردن", Modifier.weight(1f)) {
-                    GatewayPrefs.setEndpoint(ctx, "")
-                    GatewayPrefs.setToken(ctx, "")
-                    GatewayPrefs.setMode(ctx, "DIRECT")
-                    ProviderGateway.reloadSettings()
-                    gwMode = "DIRECT"; gwEndpoint = ""; gwToken = ""
-                    gwStatus = "به حالت مستقیم برگشت."
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "وضعیت: " + when {
-                    gwMode != "PROXY" -> "مستقیم"
-                    gwEndpoint.isBlank() -> "واسط تنظیم نشده"
-                    !gwEndpoint.startsWith("https://") -> "آدرس باید با https شروع شود"
-                    else -> "واسط فعال: فقط ارائه‌دهنده‌های مجاز عبور می‌کنند"
-                },
-                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            gwStatus?.let {
-                Spacer(Modifier.height(6.dp))
-                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "🔒 کلیدهای ارائه‌دهنده‌ها در حالت واسط به سرور فرستاده نمی‌شوند مگر خودت بخواهی؛ " +
-                        "واسط باید کلیدها را در Secrets خودش نگه دارد.",
-                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
 
         Spacer(Modifier.height(14.dp))

@@ -124,13 +124,13 @@ object AiClient {
      * hiccup never turns into "this model cannot make images".
      */
     private fun fetchCatalogue(provider: AiProvider, key: String): List<ModelCaps> {
-        val url = provider.routedModelsUrl() ?: return emptyList()
+        val url = provider.modelsUrl() ?: return emptyList()
         return try {
-            val builder = Request.Builder()
+            val req = Request.Builder()
                 .url(url)
+                .addHeader("Authorization", "Bearer $key")
                 .addHeader("Accept", "application/json")
-            ProviderGateway.applyAuth(builder, key)
-            val req = builder.get().build()
+                .get().build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return emptyList()
                 val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
@@ -267,11 +267,12 @@ object AiClient {
                 add(buildJsonObject { put("role", "user"); put("content", "سلام") })
             })
         }.toString()
-        val builder = Request.Builder()
-            .url(p.routedChatUrl())
+        val req = Request.Builder()
+            .url(p.chatUrl())
+            .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
-        ProviderGateway.applyAuth(builder, key)
-        val req = builder.post(body.toRequestBody("application/json".toMediaType())).build()
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
         http.newCall(req).execute().use { resp ->
             if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
             else {
@@ -314,11 +315,12 @@ object AiClient {
                     add(buildJsonObject { put("role", "user"); put("content", "سلام") })
                 })
             }.toString()
-            val builder = Request.Builder()
-                .url(p.routedChatUrl())
+            val req = Request.Builder()
+                .url(p.chatUrl())
+                .addHeader("Authorization", "Bearer $key")
                 .addHeader("Content-Type", "application/json")
-            ProviderGateway.applyAuth(builder, key)
-            val req = builder.post(body.toRequestBody("application/json".toMediaType())).build()
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
             http.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     report.append("✅ چت: پاسخ ۲۰۰ — سالم\n")
@@ -425,11 +427,12 @@ object AiClient {
                 add(buildJsonObject { put("role", "user"); put("content", "سلام") })
             })
         }.toString()
-        val builder = Request.Builder()
-            .url(provider.routedChatUrl())
+        val req = Request.Builder()
+            .url(provider.chatUrl())
+            .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
-        ProviderGateway.applyAuth(builder, key)
-        val req = builder.post(body.toRequestBody("application/json".toMediaType())).build()
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
         http.newCall(req).execute().use { resp ->
             if (resp.isSuccessful) ConnectResult(true, FailKind.NONE, "✅ اتصال برقرار است")
             else {
@@ -490,11 +493,11 @@ object AiClient {
 
         fun probe(key: String): Pair<Double?, Double?>? {
             fun get(url: String): kotlinx.serialization.json.JsonObject? = try {
-                val b = Request.Builder()
+                val req = Request.Builder()
                     .url(url)
+                    .addHeader("Authorization", "Bearer $key")
                     .addHeader("Accept", "application/json")
-                ProviderGateway.applyAuth(b, key)
-                val req = b.get().build()
+                    .get().build()
                 http.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) null else
                         json.parseToJsonElement(resp.body?.string().orEmpty())
@@ -506,7 +509,7 @@ object AiClient {
 
             var rem: Double? = null
             var used: Double? = null
-            provider.routedCreditsUrl()?.let { url ->
+            provider.creditsUrl()?.let { url ->
                 get(url)?.let { d ->
                     val total = jsonDouble(d, "total_credits")
                     val u = jsonDouble(d, "total_usage")
@@ -516,7 +519,7 @@ object AiClient {
                     }
                 }
             }
-            if (rem == null) provider.routedKeyInfoUrl()?.let { url ->
+            if (rem == null) provider.keyInfoUrl()?.let { url ->
                 get(url)?.let { d ->
                     val r = jsonDouble(d, "limit_remaining")
                     val limit = jsonDouble(d, "limit")
@@ -629,9 +632,6 @@ object AiClient {
 
         var lastError = "اتصال به هوش مصنوعی ناموفق بود."
         var usedFreeFallback = false
-        // True when the failure was a transport/network fault (not an HTTP
-        // rejection), which is the only case where trying the relay is useful.
-        var sawNetworkError = false
 
         // Try the configured model first, then genuinely free models. A paid
         // model on a free account answers 402; instead of failing the whole
@@ -652,11 +652,10 @@ object AiClient {
                 repeat(candidate.attempts) { attempt ->
                     if (stopKey) return@repeat
                     try {
-                        val builder = Request.Builder()
-                            .url(activeProvider().routedChatUrl())
+                        val req = Request.Builder()
+                            .url(activeProvider().chatUrl())
+                            .addHeader("Authorization", "Bearer $key")
                             .addHeader("Content-Type", "application/json")
-                        ProviderGateway.applyAuth(builder, key)
-                        val req = builder
                             .post(body.toRequestBody("application/json".toMediaType()))
                             .build()
 
@@ -699,10 +698,6 @@ object AiClient {
                             }
                         }
                     } catch (e: Exception) {
-                        // A transport fault, not an HTTP rejection. Only this
-                        // kind may be retried through the relay, because only a
-                        // blocked/unreachable host is fixed by a relay.
-                        sawNetworkError = true
                         lastError = "اتصال به هوش مصنوعی ناموفق بود. اینترنت را بررسی کن."
                     }
                     if (!stopKey && attempt < candidate.attempts - 1) {
@@ -712,114 +707,6 @@ object AiClient {
             }
             if (lastError.contains("اعتبار") || lastError.contains("نامعتبر")) continue
         }
-
-        // The direct path failed with a transport error. If the user configured
-        // a relay, try the whole chain once through it. Auth/quota rejections
-        // (401/402/403/429) never reach here, so the relay is never spammed for
-        // a problem a relay cannot fix.
-        if (sawNetworkError && ProviderGateway.proxyReady()) {
-            // A relay rejection that a relay cannot fix (401/402/403/429) stops
-            // the whole retry, so we never loop on an auth/quota problem.
-            var relayFinal = false
-            for (candidate in textModelChain(activeProvider())) {
-                if (relayFinal) break
-                val body = buildJsonObject {
-                    put("model", candidate.model)
-                    put("messages", messages)
-                    put("stream", false)
-                    put("temperature", 0.6)
-                    put("max_tokens", CHAT_MAX_TOKENS)
-                }.toString()
-                try {
-                    // Build the relay URL through the gateway so the provider's
-                    // FULL base path is preserved (e.g. Groq's "/openai/v1").
-                    // Hand-assembling host + "/chat/completions" dropped that
-                    // path and produced a 404 at the provider.
-                    val routedUrl = activeProvider().routedChatUrl()
-                    val builder = Request.Builder()
-                        .url(routedUrl)
-                        .addHeader("Content-Type", "application/json")
-                    ProviderGateway.applyAuth(builder, null)
-                    val req = builder
-                        .post(body.toRequestBody("application/json".toMediaType()))
-                        .build()
-                    http.newCall(req).execute().use { resp ->
-                        val text = resp.body?.string().orEmpty()
-                        if (resp.isSuccessful) {
-                            val choice = json.parseToJsonElement(text)
-                                .jsonObject["choices"]?.jsonArray
-                                ?.firstOrNull()?.jsonObject
-                            val content = choice?.get("message")?.jsonObject
-                                ?.get("content")?.jsonPrimitive?.contentOrNull
-                            val truncated = choice?.get("finish_reason")
-                                ?.jsonPrimitive?.contentOrNull == "length"
-                            if (!content.isNullOrBlank() && !truncated) {
-                                activeTextModel = candidate.model
-                                return@withContext Result.success(content.trim())
-                            }
-                            lastError = "پاسخ خالی از سرویس دریافت شد."
-                        } else {
-                            lastError = describeError(resp.code, text)
-                            if (resp.code == 401 || resp.code == 402 ||
-                                resp.code == 403 || resp.code == 429
-                            ) relayFinal = true
-                        }
-                    }
-                } catch (_: Exception) {
-                    lastError = "مسیر واسط هم پاسخ نداد. اگر VPN روشن است، خاموشش کن و دوباره تلاش کن."
-                }
-            }
-        }
-
-        // Last-resort, relay-only fallback: OpenRouter sits behind Cloudflare's
-        // bot management, which sometimes answers the relay with a policy block
-        // instead of reaching OpenRouter at all (see relayErrorHint). That is a
-        // host problem, not a key problem, so when it happens we retry the same
-        // request once against Groq through the same relay, which is not behind
-        // that protection. It never runs outside relay mode and never changes
-        // the user's saved provider.
-        if (ProviderGateway.proxyReady() &&
-            activeProvider().id == AiProviders.openRouter.id &&
-            lastError.contains("سیاست امنیتی")
-        ) {
-            val groq = AiProviders.groq
-            val groqChain = AiProviders.groqModels.map { it.first }
-            for (candidate in groqChain) {
-                val body = buildJsonObject {
-                    put("model", candidate)
-                    put("messages", messages)
-                    put("stream", false)
-                    put("temperature", 0.6)
-                    put("max_tokens", CHAT_MAX_TOKENS)
-                }.toString()
-                try {
-                    val builder = Request.Builder()
-                        .url(groq.routedChatUrl())
-                        .addHeader("Content-Type", "application/json")
-                    ProviderGateway.applyAuth(builder, null)
-                    val req = builder
-                        .post(body.toRequestBody("application/json".toMediaType()))
-                        .build()
-                    http.newCall(req).execute().use { resp ->
-                        val text = resp.body?.string().orEmpty()
-                        if (resp.isSuccessful) {
-                            val choice = json.parseToJsonElement(text)
-                                .jsonObject["choices"]?.jsonArray
-                                ?.firstOrNull()?.jsonObject
-                            val content = choice?.get("message")?.jsonObject
-                                ?.get("content")?.jsonPrimitive?.contentOrNull
-                            if (!content.isNullOrBlank()) {
-                                activeTextModel = candidate
-                                return@withContext Result.success(content.trim())
-                            }
-                        }
-                    }
-                } catch (_: Exception) {
-                    // Keep the original OpenRouter message; nothing to add.
-                }
-            }
-        }
-
         Result.failure(AiException(lastError))
     }
 
@@ -913,11 +800,11 @@ object AiClient {
     private fun freeTextModelsFor(provider: AiProvider, key: String): List<String> {
         if (key.isBlank()) return emptyList()
         return try {
-            val url = provider.routedModelsUrl() ?: return emptyList()
-            val b = Request.Builder().url(url)
+            val url = provider.modelsUrl() ?: return emptyList()
+            val req = Request.Builder().url(url)
+                .addHeader("Authorization", "Bearer $key")
                 .addHeader("Accept", "application/json")
-            ProviderGateway.applyAuth(b, key)
-            val req = b.get().build()
+                .get().build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return emptyList()
                 val root = json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
@@ -1077,11 +964,10 @@ object AiClient {
                     }
                 }.toString()
 
-                val builder = Request.Builder()
-                    .url(provider.routedChatUrl())
+                val req = Request.Builder()
+                    .url(provider.chatUrl())
+                    .addHeader("Authorization", "Bearer $key")
                     .addHeader("Content-Type", "application/json")
-                ProviderGateway.applyAuth(builder, key)
-                val req = builder
                     .post(body.toRequestBody("application/json".toMediaType()))
                     .build()
 
@@ -1141,11 +1027,6 @@ object AiClient {
      */
     private fun describeError(code: Int, raw: String, image: Boolean = false): String {
         val low = raw.lowercase()
-        // The relay's own errors (never a provider's) are recognised by their
-        // exact JSON codes, so a relay misconfiguration is not mistaken for a
-        // bad provider key. This keeps the two failure classes distinguishable.
-        val relayError = relayErrorHint(low)
-        if (relayError != null) return relayError
         val noCredit = low.contains("never purchased") || low.contains("insufficient credits") ||
                 low.contains("out of credits") || low.contains("exceed your available credits")
         return when (code) {
@@ -1172,36 +1053,6 @@ object AiClient {
             in 500..599 -> "سرویس موقتاً پاسخ نمی‌دهد؛ دوباره تلاش کن."
             else -> "خطای سرویس هوش مصنوعی (کد $code)."
         }
-    }
-
-    /**
-     * Recognises the relay Worker's own JSON error bodies and returns a Persian
-     * explanation specific to the relay, or null when the body is not one of
-     * them (so a real provider error is never re-labelled). The strings match
-     * `backend/relay-worker/src/index.js` exactly.
-     */
-    private fun relayErrorHint(low: String): String? = when {
-        low.contains("\"error\":\"host_not_allowed\"") ->
-            "واسط این سرویس را مجاز نمی‌داند. فهرست مجاز Worker را بررسی کن."
-        low.contains("\"error\":\"unauthorized\"") ->
-            "توکن واسط اشتباه است یا ارسال نشده؛ توکن را در تنظیمات دوباره بررسی کن."
-        low.contains("\"error\":\"server_not_configured\"") ->
-            "واسط درست تنظیم نشده (GATEWAY_TOKEN روی سرور تعریف نشده است)."
-        low.contains("\"error\":\"provider_not_configured\"") ->
-            "کلید این سرویس روی واسط تنظیم نشده است (Secret سرور)."
-        low.contains("\"error\":\"rate_limited\"") ->
-            "تعداد درخواست‌های واسط زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
-        low.contains("\"error\":\"upstream_timeout\"") ->
-            "واسط به سرویس اصلی نرسید (مهلت تمام شد)؛ دوباره تلاش کن."
-        low.contains("\"error\":\"upstream_unreachable\"") ->
-            "واسط نتوانست به سرویس اصلی وصل شود؛ بعداً دوباره تلاش کن."
-        // OpenRouter sits behind Cloudflare bot management, which sometimes
-        // answers a request with this exact policy block instead of reaching
-        // OpenRouter at all. It is neither a bad key nor an outage.
-        low.contains("access denied by security policy") ->
-            "سرویس OpenRouter موقتاً درخواست را از پشتِ Cloudflare رد کرد (سیاست امنیتی، نه کلید). " +
-                    "کمی بعد دوباره تلاش کن، یا ارائه‌دهندهٔ متن را روی Groq بگذار."
-        else -> null
     }
 
     // ----------------------------------------------------------------- tts
