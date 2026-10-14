@@ -307,11 +307,14 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
 
-    fun send(text: String) {
+    // [hideUser] is true for the app's own suggestion prompts: the prompt is
+    // sent to the model but never shown as a chat bubble. A message the user
+    // typed themselves is shown normally.
+    fun send(text: String, hideUser: Boolean = false) {
         val t = text.trim()
         if (t.isEmpty() || busy) return
         busy = true
-        vm.chat(meal.channel, t)
+        vm.chat(meal.channel, t, showUserMessage = !hideUser)
     }
 
     // Clear busy as soon as the assistant's reply reaches the history.
@@ -325,7 +328,10 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
     LaunchedEffect(meal.channel, messages.isEmpty()) {
         if (!autoAsked && messages.isEmpty() && !busy) {
             autoAsked = true
-            send(Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()))
+            send(
+                Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()),
+                hideUser = true
+            )
         }
     }
 
@@ -380,7 +386,9 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
             }
             items(messages, key = { it.id }) { m ->
                 if (m.role == "user") {
-                    UserBubble(m)
+                    // Internal suggestion prompts sent by an older build were
+                    // stored as user messages; they must never be shown either.
+                    if (!isInternalMealPrompt(m.content)) UserBubble(m)
                 } else {
                     // In the meal chats only the structured recipe is ever
                     // rendered. A model reply that is not a parseable recipe
@@ -425,7 +433,10 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                 .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
             GradientButton(meal.newLabel, enabled = !busy) {
-                send(Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()))
+                send(
+                    Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()),
+                    hideUser = true
+                )
             }
         }
 
@@ -704,6 +715,18 @@ private fun SavedRecipeCard(r: SavedRecipe, onDelete: () -> Unit) {
 }
 
 // --------------------------------------------------------------- parsing
+
+/**
+ * True when a stored user message is one of the app's own internal suggestion
+ * prompts rather than something the user typed. Both the shared cooking rules
+ * and the eager-chef opening line are unique to those prompts, so a message
+ * carrying them is hidden from the chat. Older builds stored such prompts as
+ * user messages, so this also cleans them from existing histories.
+ */
+private fun isInternalMealPrompt(text: String): Boolean =
+    text.contains("قالب پاسخ را دقیقاً") ||
+            text.contains("تو یک آشپز ایرانی") ||
+            text.contains("مواد موجود کاربر است")
 
 /** One parsed recipe block from the model's structured answer. */
 private data class Recipe(

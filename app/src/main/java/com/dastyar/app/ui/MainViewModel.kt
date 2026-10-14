@@ -882,9 +882,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ----------------------------------------------------------------- chat
 
-    fun chat(channel: String, text: String) = viewModelScope.launch {
-        val userMsg = ChatMessage(channel = channel, role = "user", content = text)
-        dao.addMessage(userMsg)
+    /**
+     * Sends one message to a chat channel and stores the assistant's reply.
+     *
+     * [showUserMessage] is false for the app's own internal prompts (the
+     * automatic lunch/dinner suggestion and the "new suggestion" button): the
+     * prompt text is still sent to the model, but it is never stored as a user
+     * message, so the raw instruction template can never appear in the chat.
+     * A message the user typed themselves keeps the default (true).
+     */
+    fun chat(channel: String, text: String, showUserMessage: Boolean = true) = viewModelScope.launch {
+        if (showUserMessage) {
+            val userMsg = ChatMessage(channel = channel, role = "user", content = text)
+            dao.addMessage(userMsg)
+        }
 
         val history = dao.recentChat(channel, 12).reversed().map { it.role to it.content }
         val p = profile.value
