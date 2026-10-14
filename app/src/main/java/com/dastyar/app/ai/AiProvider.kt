@@ -188,6 +188,25 @@ object AiProviders {
         apiStyle = ApiStyle.RESPONSES
     )
 
+    /**
+     * Cloudflare Workers AI as a text provider, serving Google's Gemma 4
+     * (`@cf/google/gemma-4-26b-a4b-it`), the model verified to answer Persian
+     * cleanly. It is an independent Cloudflare account: its Account ID + API
+     * Token are stored separately from the image account, so text never competes
+     * with image generation and the image settings/quota are left untouched.
+     *
+     * Text is reached through Cloudflare's OpenAI-compatible route
+     * (`/accounts/{id}/ai/v1/chat/completions`). The account id is part of the
+     * path, so [baseUrl] is only a prefix and the real URL is built at request
+     * time from the stored account. Text-only for the app's purposes.
+     */
+    val cloudflareText = AiProvider(
+        id = "cloudflare_text",
+        label = "Cloudflare (Gemma 4)",
+        baseUrl = "https://api.cloudflare.com/client/v4/accounts",
+        textModel = "@cf/google/gemma-4-26b-a4b-it"
+    )
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -201,9 +220,11 @@ object AiProviders {
      * user. Keeping this list short and explicit means the picker never offers a
      * provider that cannot do the job.
      */
-    val textProviders: List<AiProvider> = listOf(kie, openRouter, codeCraft, atria, groq, aion)
+    val textProviders: List<AiProvider> =
+        listOf(kie, openRouter, cloudflareText, codeCraft, atria, groq, aion)
 
-    val all: List<AiProvider> = listOf(kie, openRouter, codeCraft, atria, groq, aion, openAiCompatible)
+    val all: List<AiProvider> =
+        listOf(kie, openRouter, cloudflareText, codeCraft, atria, groq, aion, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

@@ -53,11 +53,18 @@ object ServiceKeys {
     private const val KE_MODEL = "ke_text_model"
     private const val KE_STATE = "ke_state"
 
-    // Cloudflare
+    // Cloudflare (image account)
     private const val CF_ACCOUNT = "cf_account"
     private const val CF_TOKEN = "cf_token"
     private const val CF_MODEL = "cf_model"
     private const val CF_STATE = "cf_state"
+
+    // Cloudflare (text account) -- a separate account for the text model, so the
+    // image account's settings and daily quota are never touched.
+    private const val CFT_ACCOUNT = "cft_account"
+    private const val CFT_TOKEN = "cft_token"
+    private const val CFT_MODEL = "cft_text_model"
+    private const val CFT_STATE = "cft_state"
 
     // Pollinations
     private const val PO_KEY = "po_key"
@@ -99,6 +106,11 @@ object ServiceKeys {
     @Volatile private var cfToken: String? = null
     @Volatile private var cfModel: String = CloudflareClient.DEFAULT_MODEL.id
     @Volatile private var cfState: State = State.NOT_SET
+
+    @Volatile private var cftAccount: String? = null
+    @Volatile private var cftToken: String? = null
+    @Volatile private var cftModel: String = AiProviders.cloudflareText.textModel
+    @Volatile private var cftState: State = State.NOT_SET
 
     @Volatile private var poKey: String? = null
     @Volatile private var poState: State = State.NOT_SET
@@ -392,6 +404,7 @@ object ServiceKeys {
             AiProviders.groq.id -> gqKey.orEmpty()
             AiProviders.aion.id -> alKey.orEmpty()
             AiProviders.kie.id -> keKey.orEmpty()
+            AiProviders.cloudflareText.id -> cftToken.orEmpty()
             else -> orKey.orEmpty()
         }
 
@@ -403,6 +416,7 @@ object ServiceKeys {
             AiProviders.groq.id -> gqTextModel
             AiProviders.aion.id -> alTextModel
             AiProviders.kie.id -> keTextModel
+            AiProviders.cloudflareText.id -> cftModel
             else -> orTextModel
         }
 
@@ -414,6 +428,7 @@ object ServiceKeys {
             AiProviders.groq.id -> gqState
             AiProviders.aion.id -> alState
             AiProviders.kie.id -> keState
+            AiProviders.cloudflareText.id -> cftState
             else -> orState
         }
 
@@ -425,6 +440,7 @@ object ServiceKeys {
             AiProviders.groq.id -> groqReady()
             AiProviders.aion.id -> aionReady()
             AiProviders.kie.id -> kieReady()
+            AiProviders.cloudflareText.id -> cloudflareTextReady()
             else -> openRouterReady()
         }
 
@@ -436,6 +452,11 @@ object ServiceKeys {
             AiProviders.groq.id -> saveGroq(ctx, key, state, model)
             AiProviders.aion.id -> saveAion(ctx, key, state, model)
             AiProviders.kie.id -> saveKie(ctx, key, state, model)
+            // Cloudflare text needs an account as well as a token; when one is
+            // already stored, saving a new key keeps it. The dedicated
+            // saveCloudflareText call is used by the screens so both are set.
+            AiProviders.cloudflareText.id ->
+                saveCloudflareText(ctx, cftAccount.orEmpty(), key, model, state)
             else -> saveOpenRouter(ctx, key, state)
         }
     }
@@ -447,6 +468,7 @@ object ServiceKeys {
             AiProviders.groq.id -> setGroqState(ctx, state)
             AiProviders.aion.id -> setAionState(ctx, state)
             AiProviders.kie.id -> setKieState(ctx, state)
+            AiProviders.cloudflareText.id -> setCloudflareTextState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
     }
@@ -458,6 +480,7 @@ object ServiceKeys {
             AiProviders.groq.id -> setGroqTextModel(ctx, model)
             AiProviders.aion.id -> setAionTextModel(ctx, model)
             AiProviders.kie.id -> setKieTextModel(ctx, model)
+            AiProviders.cloudflareText.id -> setCloudflareTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
     }
@@ -470,6 +493,7 @@ object ServiceKeys {
             AiProviders.groq.id -> clearGroq(ctx)
             AiProviders.aion.id -> clearAion(ctx)
             AiProviders.kie.id -> clearKie(ctx)
+            AiProviders.cloudflareText.id -> clearCloudflareText(ctx)
             else -> clearOpenRouter(ctx)
         }
     }
@@ -521,6 +545,60 @@ object ServiceKeys {
             .apply()
     }
 
+    // ------------------------------------------------ Cloudflare text account
+
+    /** The separate Cloudflare account used only for the text model. */
+    fun cloudflareTextAccount(): String = cftAccount.orEmpty()
+    fun cloudflareTextToken(): String = cftToken.orEmpty()
+    fun cloudflareTextModel(): String = cftModel
+    fun cloudflareTextState(): State = cftState
+    fun cloudflareTextConfigured(): Boolean =
+        !cftAccount.isNullOrBlank() && !cftToken.isNullOrBlank()
+    fun cloudflareTextReady(): Boolean =
+        cftState == State.CONNECTED && cloudflareTextConfigured()
+
+    fun saveCloudflareText(
+        ctx: Context,
+        account: String,
+        token: String,
+        model: String = cftModel,
+        state: State = State.CONNECTED
+    ) {
+        val a = account.trim()
+        val t = token.trim()
+        if (a.isBlank() || t.isBlank()) return
+        cftAccount = a
+        cftToken = t
+        cftModel = model.ifBlank { AiProviders.cloudflareText.textModel }
+        cftState = state
+        prefs(ctx).edit()
+            .putString(CFT_ACCOUNT, a)
+            .putString(CFT_TOKEN, t)
+            .putString(CFT_MODEL, cftModel)
+            .putString(CFT_STATE, state.name)
+            .apply()
+    }
+
+    fun setCloudflareTextState(ctx: Context, state: State) {
+        cftState = state
+        prefs(ctx).edit().putString(CFT_STATE, state.name).apply()
+    }
+
+    fun setCloudflareTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        cftModel = model
+        prefs(ctx).edit().putString(CFT_MODEL, model).apply()
+    }
+
+    fun clearCloudflareText(ctx: Context) {
+        cftAccount = null
+        cftToken = null
+        cftState = State.NOT_SET
+        prefs(ctx).edit()
+            .remove(CFT_ACCOUNT).remove(CFT_TOKEN).remove(CFT_STATE)
+            .apply()
+    }
+
     // -------------------------------------------------------- Pollinations
 
     fun pollinationsKey(): String? = poKey
@@ -554,7 +632,8 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, AL_KEY, KE_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
+            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, AL_KEY, KE_KEY,
+                CF_ACCOUNT, CF_TOKEN, CFT_ACCOUNT, CFT_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
 
@@ -594,11 +673,18 @@ object ServiceKeys {
         cfState = if (cfAccount == null || cfToken == null) State.NOT_SET
         else stateOf(p.getString(CF_STATE, null))
 
+        cftAccount = p.getString(CFT_ACCOUNT, null)?.trim()?.ifBlank { null }
+        cftToken = p.getString(CFT_TOKEN, null)?.trim()?.ifBlank { null }
+        cftModel = p.getString(CFT_MODEL, null)?.ifBlank { null }
+            ?: AiProviders.cloudflareText.textModel
+        cftState = if (cftAccount == null || cftToken == null) State.NOT_SET
+        else stateOf(p.getString(CFT_STATE, null))
+
         poKey = p.getString(PO_KEY, null)?.trim()?.ifBlank { null }
         poState = stateOf(p.getString(PO_STATE, null))
     }
 
     /** True when at least one real service is connected, so the gate can close. */
     fun anyConnected(): Boolean =
-        textReady() || cloudflareReady() || poState == State.CONNECTED
+        textReady() || cloudflareReady() || cloudflareTextReady() || poState == State.CONNECTED
 }

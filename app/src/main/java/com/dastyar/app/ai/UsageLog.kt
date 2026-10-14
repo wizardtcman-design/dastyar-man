@@ -33,8 +33,8 @@ object UsageLog {
     /** How many recent entries to keep; a week of use fits easily. */
     private const val MAX_ENTRIES = 500
 
-    enum class Kind { GENERATE, EDIT }
-    enum class Provider { CLOUDFLARE, POLLINATIONS, OPENROUTER }
+    enum class Kind { GENERATE, EDIT, TEXT }
+    enum class Provider { CLOUDFLARE, POLLINATIONS, OPENROUTER, CLOUDFLARE_TEXT }
 
     data class Entry(
         val timestamp: Long,
@@ -166,6 +166,37 @@ object UsageLog {
 
     fun clear(ctx: Context) {
         prefs(ctx).edit().remove(KEY_LOG).apply()
+    }
+
+    /**
+     * Real facts about the Cloudflare text model's own requests today: how many,
+     * how many failed, and the last request's HTTP status, duration and outcome.
+     * Used by the "مصرف Cloudflare" panel for response time and API error state.
+     */
+    data class TextSummary(
+        val requests: Int,
+        val failed: Int,
+        val lastOk: Boolean?,
+        val lastHttp: Int,
+        val lastDurationMs: Long,
+        val lastModel: String,
+        val lastNote: String
+    )
+
+    fun todayText(ctx: Context): TextSummary {
+        val list = today(ctx).filter {
+            it.provider == Provider.CLOUDFLARE_TEXT.name && it.kind == Kind.TEXT.name
+        }
+        val last = list.lastOrNull()
+        return TextSummary(
+            requests = list.size,
+            failed = list.count { !it.ok },
+            lastOk = last?.ok,
+            lastHttp = last?.http ?: 0,
+            lastDurationMs = last?.durationMs ?: 0L,
+            lastModel = last?.model.orEmpty(),
+            lastNote = last?.note.orEmpty()
+        )
     }
 
     private fun startOfToday(): Long {
