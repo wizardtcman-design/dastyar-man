@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -260,13 +261,7 @@ object AiClient {
         key: String,
         model: String
     ): ConnectResult = try {
-        val body = buildJsonObject {
-            put("model", model)
-            put("max_tokens", 24)
-            put("messages", buildJsonArray {
-                add(buildJsonObject { put("role", "user"); put("content", "سلام") })
-            })
-        }.toString()
+        val body = probeBody(p, model)
         val req = Request.Builder()
             .url(p.chatUrl())
             .addHeader("Authorization", "Bearer $key")
@@ -308,13 +303,7 @@ object AiClient {
         report.append("سرویس: ${p.label}\n")
         report.append("مدل متن: ${textModel()}\n\n")
         try {
-            val body = buildJsonObject {
-                put("model", textModel())
-                put("max_tokens", 8)
-                put("messages", buildJsonArray {
-                    add(buildJsonObject { put("role", "user"); put("content", "سلام") })
-                })
-            }.toString()
+            val body = probeBody(p, textModel())
             val req = Request.Builder()
                 .url(p.chatUrl())
                 .addHeader("Authorization", "Bearer $key")
@@ -420,13 +409,7 @@ object AiClient {
 
     /** One real chat request against a specific model, without side effects. */
     private fun probeModelFor(provider: AiProvider, key: String, model: String): ConnectResult = try {
-        val body = buildJsonObject {
-            put("model", model)
-            put("max_tokens", 24)
-            put("messages", buildJsonArray {
-                add(buildJsonObject { put("role", "user"); put("content", "سلام") })
-            })
-        }.toString()
+        val body = probeBody(provider, model)
         val req = Request.Builder()
             .url(provider.chatUrl())
             .addHeader("Authorization", "Bearer $key")
@@ -487,6 +470,37 @@ object AiClient {
      */
     suspend fun fetchBalance(): ServiceBalance = withContext(Dispatchers.IO) {
         val provider = activeProvider()
+
+        // kie.ai reports the balance as a plain number under `data` on a fixed
+        // endpoint that lives outside the model base URL, so it is read here.
+        if (provider.id == AiProviders.kie.id) {
+            val key = effectiveKey()
+            val remaining: Double? = if (key.isBlank()) null else try {
+                val req = Request.Builder()
+                    .url("https://api.kie.ai/api/v1/chat/credit")
+                    .addHeader("Authorization", "Bearer $key")
+                    .addHeader("Accept", "application/json")
+                    .get().build()
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) null else {
+                        val d = json.parseToJsonElement(resp.body?.string().orEmpty())
+                            .jsonObject["data"]
+                        d?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            ?: d?.jsonObject?.get("credit")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    }
+                }
+            } catch (e: Exception) {
+                null
+            }
+            val b = if (remaining == null) ServiceBalance.unsupported()
+            else ServiceBalance(
+                supported = true, remaining = remaining, usage = null,
+                currency = "کردیت", exhausted = remaining <= 0.0
+            )
+            lastBalance = b
+            return@withContext b
+        }
+
         if (provider.creditsPath.isBlank() && provider.keyInfoPath.isBlank()) {
             return@withContext ServiceBalance.unsupported()
         }
@@ -569,6 +583,96 @@ object AiClient {
 
     // ------------------------------------------------------------- balance end
 
+    // ------------------------------------------------------- responses API
+
+    private fun textPart(s: String): JsonElement =
+        buildJsonObject { put("type", "text"); put("text", s) }
+
+    /** Final-user content for a Responses request: a plain string when text-only. */
+    private fun responsesContent(parts: Array<JsonElement>): JsonElement {
+        val onlyText = parts.all { it.jsonObject["type"]?.jsonPrimitive?.contentOrNull == "text" }
+        if (onlyText) return JsonPrimitive(
+            parts.joinToString("\n") { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull.orEmpty() }
+        )
+        return buildJsonArray {
+            parts.forEach { part ->
+                val o = part.jsonObject
+                when (o["type"]?.jsonPrimitive?.contentOrNull) {
+                    "text" -> add(buildJsonObject {
+                        put("type", "input_text")
+                        put("text", o["text"]?.jsonPrimitive?.contentOrNull.orEmpty())
+                    })
+                    "image_url" -> add(buildJsonObject {
+                        put("type", "input_image")
+                        put(
+                            "image_url",
+                            o["image_url"]?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull.orEmpty()
+                        )
+                    })
+                }
+            }
+        }
+    }
+
+    /** Body for the OpenAI Responses endpoint (kie.ai's text path). */
+    private fun responsesBody(
+        model: String,
+        system: String,
+        history: List<Pair<String, String>>,
+        userParts: Array<JsonElement>,
+        maxTokens: Int
+    ): String = buildJsonObject {
+        put("model", model)
+        if (system.isNotBlank()) put("instructions", system)
+        put("input", buildJsonArray {
+            history.forEach { (role, content) ->
+                add(buildJsonObject {
+                    put("role", if (role == "system") "user" else role)
+                    put("content", content)
+                })
+            }
+            add(buildJsonObject { put("role", "user"); put("content", responsesContent(userParts)) })
+        })
+        put("stream", false)
+        put("max_output_tokens", maxTokens)
+    }.toString()
+
+    /**
+     * Reads the open text out of a Responses reply. The second value is true when
+     * the model stopped early (`status: incomplete`, i.e. it ran out of output
+     * tokens), so a cut-off answer is never shown as complete.
+     */
+    private fun parseResponses(raw: String): Pair<String?, Boolean> {
+        val root = json.parseToJsonElement(raw).jsonObject
+        val text = root["output"]?.jsonArray
+            ?.mapNotNull { it.jsonObject }
+            ?.filter { it["type"]?.jsonPrimitive?.contentOrNull == "message" }
+            ?.flatMap { it["content"]?.jsonArray ?: emptyList() }
+            ?.mapNotNull { c ->
+                val o = c.jsonObject
+                if (o["type"]?.jsonPrimitive?.contentOrNull == "output_text")
+                    o["text"]?.jsonPrimitive?.contentOrNull else null
+            }
+            ?.joinToString("")
+        val truncated = root["status"]?.jsonPrimitive?.contentOrNull == "incomplete"
+        return text to truncated
+    }
+
+    /** One tiny "سلام" probe body in the shape the provider speaks. */
+    private fun probeBody(p: AiProvider, model: String): String =
+        if (p.apiStyle == ApiStyle.RESPONSES)
+            responsesBody(
+                model, "تو یک دستیار فارسی هستی. کوتاه جواب بده.",
+                emptyList(), arrayOf(textPart("سلام")), 24
+            )
+        else buildJsonObject {
+            put("model", model)
+            put("max_tokens", 24)
+            put("messages", buildJsonArray {
+                add(buildJsonObject { put("role", "user"); put("content", "سلام") })
+            })
+        }.toString()
+
     // ---------------------------------------------------------------- chat
 
     suspend fun chat(
@@ -619,6 +723,9 @@ object AiClient {
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
         )
 
+        val p = activeProvider()
+        val responses = p.apiStyle == ApiStyle.RESPONSES
+
         val messages = buildJsonArray {
             add(buildJsonObject { put("role", "system"); put("content", system) })
             history.forEach { (role, content) ->
@@ -638,8 +745,10 @@ object AiClient {
         // feature, a free model of the same provider is used and its name is
         // returned so nothing is hidden. "Free" is decided by the catalogue's
         // own pricing, never guessed.
-        for (candidate in textModelChain(activeProvider())) {
-            val body = buildJsonObject {
+        for (candidate in textModelChain(p)) {
+            val body = if (responses)
+                responsesBody(candidate.model, system, history, userParts, CHAT_MAX_TOKENS)
+            else buildJsonObject {
                 put("model", candidate.model)
                 put("messages", messages)
                 put("stream", false)
@@ -647,13 +756,13 @@ object AiClient {
                 put("max_tokens", CHAT_MAX_TOKENS)
             }.toString()
 
-            for (key in candidateKeys(activeProvider())) {
+            for (key in candidateKeys(p)) {
                 var stopKey = false
                 repeat(candidate.attempts) { attempt ->
                     if (stopKey) return@repeat
                     try {
                         val req = Request.Builder()
-                            .url(activeProvider().chatUrl())
+                            .url(p.chatUrl())
                             .addHeader("Authorization", "Bearer $key")
                             .addHeader("Content-Type", "application/json")
                             .post(body.toRequestBody("application/json".toMediaType()))
@@ -662,21 +771,31 @@ object AiClient {
                         http.newCall(req).execute().use { resp ->
                             val text = resp.body?.string().orEmpty()
                             if (resp.isSuccessful) {
-                                val choice = json.parseToJsonElement(text)
-                                    .jsonObject["choices"]?.jsonArray
-                                    ?.firstOrNull()?.jsonObject
-                                val msg = choice?.get("message")?.jsonObject
-                                val content = msg?.get("content")?.jsonPrimitive?.contentOrNull
-                                // "length" means the model ran out of tokens, so
-                                // the answer is cut off. It must never be shown
-                                // as a complete reply.
-                                val truncated =
-                                    choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull == "length"
-                                // A model that returns an image replies with a
-                                // null content and the picture under
-                                // `message.images`; reading only `content`
-                                // would wrongly look empty.
-                                val hasImage = !msg?.get("images")?.jsonArray.isNullOrEmpty()
+                                val content: String?
+                                val truncated: Boolean
+                                val hasImage: Boolean
+                                if (responses) {
+                                    val parsed = parseResponses(text)
+                                    content = parsed.first
+                                    truncated = parsed.second
+                                    hasImage = false
+                                } else {
+                                    val choice = json.parseToJsonElement(text)
+                                        .jsonObject["choices"]?.jsonArray
+                                        ?.firstOrNull()?.jsonObject
+                                    val msg = choice?.get("message")?.jsonObject
+                                    content = msg?.get("content")?.jsonPrimitive?.contentOrNull
+                                    // "length" means the model ran out of tokens,
+                                    // so the answer is cut off. It must never be
+                                    // shown as a complete reply.
+                                    truncated = choice?.get("finish_reason")
+                                        ?.jsonPrimitive?.contentOrNull == "length"
+                                    // A model that returns an image replies with a
+                                    // null content and the picture under
+                                    // `message.images`; reading only `content`
+                                    // would wrongly look empty.
+                                    hasImage = !msg?.get("images")?.jsonArray.isNullOrEmpty()
+                                }
                                 if (!content.isNullOrBlank() && !truncated) {
                                     if (candidate.model != model) usedFreeFallback = true
                                     activeTextModel = candidate.model

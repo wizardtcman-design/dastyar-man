@@ -1,9 +1,20 @@
 package com.dastyar.app.ai
 
 /**
- * An AI service the app can talk to. Every provider exposes an OpenAI-compatible
+ * Which HTTP shape a provider's text endpoint speaks.
+ *
+ * [CHAT] is the classic OpenAI `/chat/completions` call (a `messages` array),
+ * shared by OpenRouter, OpenAI, Groq, CodeCraft, Atria, Aion and most others.
+ * [RESPONSES] is the newer OpenAI `/responses` call (an `instructions` string
+ * plus an `input` array), used by kie.ai's cheapest text models.
+ */
+enum class ApiStyle { CHAT, RESPONSES }
+
+/**
+ * An AI service the app can talk to. Most providers expose an OpenAI-compatible
  * `/chat/completions` endpoint, which is the common denominator OpenRouter,
- * OpenAI, Groq, Together, DeepSeek and most others share.
+ * OpenAI, Groq, Together, DeepSeek and most others share; a few expose the newer
+ * `/responses` endpoint instead ([ApiStyle.RESPONSES]).
  *
  * Adding a new provider is meant to be a one-line change to [AiProviders.all]:
  * no screen or feature code has to be touched.
@@ -39,11 +50,16 @@ data class AiProvider(
      * models really output images and whether they accept image input, instead
      * of trusting a hard-coded boolean.
      */
-    val modelsPath: String = ""
+    val modelsPath: String = "",
+    /** Which request/response shape the text endpoint speaks. */
+    val apiStyle: ApiStyle = ApiStyle.CHAT
 ) {
     val supportsImages: Boolean get() = imageModel.isNotBlank()
 
-    fun chatUrl(): String = "${baseUrl.trimEnd('/')}/chat/completions"
+    fun chatUrl(): String = when (apiStyle) {
+        ApiStyle.CHAT -> "${baseUrl.trimEnd('/')}/chat/completions"
+        ApiStyle.RESPONSES -> "${baseUrl.trimEnd('/')}/responses"
+    }
 
     fun creditsUrl(): String? =
         creditsPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
@@ -153,6 +169,25 @@ object AiProviders {
         modelsPath = "models"
     )
 
+    /**
+     * kie.ai is the sixth text provider: an aggregator that resells many model
+     * families (Gemini, Claude, GPT, Grok, Kimi, DeepSeek) far below list price
+     * and is by far the cheapest option for text. Its cheapest text model,
+     * GPT-6 Luna, is not on the classic `/chat/completions` route but on the
+     * OpenAI **Responses** API under `/openai/v1/responses`, so this provider
+     * carries [ApiStyle.RESPONSES] and the app sends `instructions` + `input`
+     * instead of `messages`. Verified with a real Persian cooking request: it
+     * follows the app's marker format and stays inside the token budget.
+     * Text-only -- it is offered for chat/text features and never for images.
+     */
+    val kie = AiProvider(
+        id = "kie",
+        label = "kie.ai (GPT-6 Luna)",
+        baseUrl = "https://api.kie.ai/openai/v1",
+        textModel = "gpt-6-luna",
+        apiStyle = ApiStyle.RESPONSES
+    )
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -166,9 +201,9 @@ object AiProviders {
      * user. Keeping this list short and explicit means the picker never offers a
      * provider that cannot do the job.
      */
-    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq, aion)
+    val textProviders: List<AiProvider> = listOf(kie, openRouter, codeCraft, atria, groq, aion)
 
-    val all: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq, aion, openAiCompatible)
+    val all: List<AiProvider> = listOf(kie, openRouter, codeCraft, atria, groq, aion, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

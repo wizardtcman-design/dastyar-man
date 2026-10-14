@@ -48,6 +48,11 @@ object ServiceKeys {
     private const val AL_MODEL = "al_text_model"
     private const val AL_STATE = "al_state"
 
+    // kie.ai (GPT-6 Luna)
+    private const val KE_KEY = "ke_key"
+    private const val KE_MODEL = "ke_text_model"
+    private const val KE_STATE = "ke_state"
+
     // Cloudflare
     private const val CF_ACCOUNT = "cf_account"
     private const val CF_TOKEN = "cf_token"
@@ -85,6 +90,10 @@ object ServiceKeys {
     @Volatile private var alKey: String? = null
     @Volatile private var alTextModel: String = AiProviders.aion.textModel
     @Volatile private var alState: State = State.NOT_SET
+
+    @Volatile private var keKey: String? = null
+    @Volatile private var keTextModel: String = AiProviders.kie.textModel
+    @Volatile private var keState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -315,6 +324,44 @@ object ServiceKeys {
         prefs(ctx).edit().remove(AL_KEY).remove(AL_MODEL).remove(AL_STATE).apply()
     }
 
+    // ------------------------------------------------------------- kie.ai
+
+    fun kieKey(): String? = keKey
+    fun kieTextModel(): String = keTextModel
+    fun kieState(): State = keState
+    fun kieReady(): Boolean = keState == State.CONNECTED && !keKey.isNullOrBlank()
+
+    fun saveKie(ctx: Context, key: String, state: State = State.CONNECTED,
+                textModel: String? = null) {
+        val clean = key.trim()
+        if (clean.isBlank()) return
+        keKey = clean
+        keState = state
+        textModel?.takeIf { it.isNotBlank() }?.let { keTextModel = it }
+        prefs(ctx).edit()
+            .putString(KE_KEY, clean)
+            .putString(KE_MODEL, keTextModel)
+            .putString(KE_STATE, state.name)
+            .apply()
+    }
+
+    fun setKieState(ctx: Context, state: State) {
+        keState = state
+        prefs(ctx).edit().putString(KE_STATE, state.name).apply()
+    }
+
+    fun setKieTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        keTextModel = model
+        prefs(ctx).edit().putString(KE_MODEL, model).apply()
+    }
+
+    fun clearKie(ctx: Context) {
+        keKey = null
+        keState = State.NOT_SET
+        prefs(ctx).edit().remove(KE_KEY).remove(KE_MODEL).remove(KE_STATE).apply()
+    }
+
     // ------------------------------------------------------ text provider
 
     /**
@@ -344,6 +391,7 @@ object ServiceKeys {
             AiProviders.atria.id -> atKey.orEmpty()
             AiProviders.groq.id -> gqKey.orEmpty()
             AiProviders.aion.id -> alKey.orEmpty()
+            AiProviders.kie.id -> keKey.orEmpty()
             else -> orKey.orEmpty()
         }
 
@@ -354,6 +402,7 @@ object ServiceKeys {
             AiProviders.atria.id -> atTextModel
             AiProviders.groq.id -> gqTextModel
             AiProviders.aion.id -> alTextModel
+            AiProviders.kie.id -> keTextModel
             else -> orTextModel
         }
 
@@ -364,6 +413,7 @@ object ServiceKeys {
             AiProviders.atria.id -> atState
             AiProviders.groq.id -> gqState
             AiProviders.aion.id -> alState
+            AiProviders.kie.id -> keState
             else -> orState
         }
 
@@ -374,6 +424,7 @@ object ServiceKeys {
             AiProviders.atria.id -> atriaReady()
             AiProviders.groq.id -> groqReady()
             AiProviders.aion.id -> aionReady()
+            AiProviders.kie.id -> kieReady()
             else -> openRouterReady()
         }
 
@@ -384,6 +435,7 @@ object ServiceKeys {
             AiProviders.atria.id -> saveAtria(ctx, key, state, model)
             AiProviders.groq.id -> saveGroq(ctx, key, state, model)
             AiProviders.aion.id -> saveAion(ctx, key, state, model)
+            AiProviders.kie.id -> saveKie(ctx, key, state, model)
             else -> saveOpenRouter(ctx, key, state)
         }
     }
@@ -394,6 +446,7 @@ object ServiceKeys {
             AiProviders.atria.id -> setAtriaState(ctx, state)
             AiProviders.groq.id -> setGroqState(ctx, state)
             AiProviders.aion.id -> setAionState(ctx, state)
+            AiProviders.kie.id -> setKieState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
     }
@@ -404,6 +457,7 @@ object ServiceKeys {
             AiProviders.atria.id -> setAtriaTextModel(ctx, model)
             AiProviders.groq.id -> setGroqTextModel(ctx, model)
             AiProviders.aion.id -> setAionTextModel(ctx, model)
+            AiProviders.kie.id -> setKieTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
     }
@@ -415,6 +469,7 @@ object ServiceKeys {
             AiProviders.atria.id -> clearAtria(ctx)
             AiProviders.groq.id -> clearGroq(ctx)
             AiProviders.aion.id -> clearAion(ctx)
+            AiProviders.kie.id -> clearKie(ctx)
             else -> clearOpenRouter(ctx)
         }
     }
@@ -499,7 +554,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, AL_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
+            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, AL_KEY, KE_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
 
@@ -526,6 +581,10 @@ object ServiceKeys {
         alKey = p.getString(AL_KEY, null)?.trim()?.ifBlank { null }
         alTextModel = p.getString(AL_MODEL, null)?.ifBlank { null } ?: AiProviders.aion.textModel
         alState = if (alKey == null) State.NOT_SET else stateOf(p.getString(AL_STATE, null))
+
+        keKey = p.getString(KE_KEY, null)?.trim()?.ifBlank { null }
+        keTextModel = p.getString(KE_MODEL, null)?.ifBlank { null } ?: AiProviders.kie.textModel
+        keState = if (keKey == null) State.NOT_SET else stateOf(p.getString(KE_STATE, null))
 
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
 

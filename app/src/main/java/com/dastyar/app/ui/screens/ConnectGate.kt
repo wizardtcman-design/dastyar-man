@@ -314,6 +314,7 @@ private fun gateKeyLabel(providerId: String): String = when (providerId) {
     AiProviders.codeCraft.id -> "CodeCraft API Key"
     AiProviders.atria.id -> "Atria API Key"
     AiProviders.aion.id -> "Aion Labs API Key"
+    AiProviders.kie.id -> "kie.ai API Key"
     else -> "OpenRouter API Key"
 }
 
@@ -322,6 +323,7 @@ private fun gateKeyHint(providerId: String): String = when (providerId) {
     AiProviders.codeCraft.id -> "cc_…"
     AiProviders.atria.id -> "atr_…"
     AiProviders.aion.id -> "alv2_…"
+    AiProviders.kie.id -> "کلید ۳۲ کاراکتری kie.ai"
     else -> "sk-or-v1-…"
 }
 

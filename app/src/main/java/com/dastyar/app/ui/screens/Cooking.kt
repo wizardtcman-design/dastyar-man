@@ -317,8 +317,13 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
         vm.chat(meal.channel, t, internalPrompt = internalPrompt)
     }
 
-    // Clear busy as soon as the assistant's reply reaches the history.
-    LaunchedEffect(messages.size) { if (busy) busy = false }
+    // Clear busy only once the model's own reply reaches the history. Clearing
+    // it on any new message would end the "waiting" state the moment our own
+    // prompt is stored, letting a second request start while the first is still
+    // in flight.
+    LaunchedEffect(messages) {
+        if (busy && messages.lastOrNull()?.role == "assistant") busy = false
+    }
 
     // The first time this meal page is opened with no history, ask for a
     // suggestion automatically so the user sees a dish without pressing the

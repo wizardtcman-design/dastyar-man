@@ -597,6 +597,16 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     },
                     fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            } else if (ServiceKeys.textProvider().id == AiProviders.kie.id) {
+                Text(
+                    when {
+                        balanceLoading -> "در حال دریافت اعتبار…"
+                        balance?.remaining != null ->
+                            "اعتبار kie.ai: ${"%.1f".format(balance!!.remaining!!)} کردیت"
+                        else -> "اعتبار kie.ai: قابل دریافت نیست"
+                    },
+                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             } else {
                 Text(
                     "اعتبار ${ServiceKeys.textProvider().label} از API قابل دریافت نیست؛ از داشبورد خودشان ببین.",

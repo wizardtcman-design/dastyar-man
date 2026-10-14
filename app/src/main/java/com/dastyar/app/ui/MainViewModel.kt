@@ -904,8 +904,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // so the request it receives is exactly the one it got before this
         // change: the conversation always starts with a user message and the
         // suggestion keeps working the way it always did.
-        val history = dao.recentChat(channel, 12).reversed()
-            .map { (if (it.role == "internal") "user" else it.role) to it.content }
+        //
+        // The message we just stored is dropped from the history: it is passed
+        // again below as `userMessage`, so keeping it here would send the very
+        // same turn to the model twice and double the prompt (which is what made
+        // the long cooking prompt heavy and unreliable on small models).
+        val raw = dao.recentChat(channel, 12).reversed()
+        val priorTurns = if (raw.lastOrNull()?.content == text) raw.dropLast(1) else raw
+        val history = priorTurns.map {
+            (if (it.role == "internal") "user" else it.role) to it.content
+        }
         val p = profile.value
         val ci = _todayCheckIn.value
 
@@ -921,7 +929,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // stored or rendered. A clean marker makes the UI show a retry.
             val isMeal = channel == "lunch" || channel == "dinner"
             val looksLikeRecipe = reply.contains("###") ||
-                    reply.contains("نام:") || reply.contains("مواد:")
+                    reply.contains("نام:") || reply.contains("مواد:") ||
+                    reply.contains("مراحل:") || reply.contains("طرز تهیه")
             val content = if (isMeal && !looksLikeRecipe) MEAL_INVALID_REPLY else reply
             dao.addMessage(ChatMessage(channel = channel, role = "assistant", content = content))
         }.onFailure { e ->
