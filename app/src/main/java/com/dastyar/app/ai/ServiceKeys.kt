@@ -10,7 +10,7 @@ import android.content.Context
  * Each service keeps its own state, so one service being broken never marks
  * another as disconnected:
  *   - Text provider -> chat / text features; 1xAI, OpenRouter, Cloudflare,
- *                      Atria, Groq or Aion, chosen by the user, each with its
+ *                      Atria or Groq, chosen by the user, each with its
  *                      own key and model
  *   - Cloudflare AI -> image generation and editing
  *   - Pollinations  -> image fallback (key optional)
@@ -44,10 +44,7 @@ object ServiceKeys {
     private const val GQ_MODEL = "gq_text_model"
     private const val GQ_STATE = "gq_state"
 
-    // Aion Labs (Aion 2.0)
-    private const val AL_KEY = "al_key"
-    private const val AL_MODEL = "al_text_model"
-    private const val AL_STATE = "al_state"
+    // (CodeCraft, kie.ai and Aion Labs were removed; their key slots are gone.)
 
     // Cloudflare (image account)
     private const val CF_ACCOUNT = "cf_account"
@@ -89,10 +86,6 @@ object ServiceKeys {
     @Volatile private var gqKey: String? = null
     @Volatile private var gqTextModel: String = AiProviders.groq.textModel
     @Volatile private var gqState: State = State.NOT_SET
-
-    @Volatile private var alKey: String? = null
-    @Volatile private var alTextModel: String = AiProviders.aion.textModel
-    @Volatile private var alState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -290,44 +283,6 @@ object ServiceKeys {
         prefs(ctx).edit().remove(GQ_KEY).remove(GQ_MODEL).remove(GQ_STATE).apply()
     }
 
-    // -------------------------------------------------------------- Aion Labs
-
-    fun aionKey(): String? = alKey
-    fun aionTextModel(): String = alTextModel
-    fun aionState(): State = alState
-    fun aionReady(): Boolean = alState == State.CONNECTED && !alKey.isNullOrBlank()
-
-    fun saveAion(ctx: Context, key: String, state: State = State.CONNECTED,
-                 textModel: String? = null) {
-        val clean = key.trim()
-        if (clean.isBlank()) return
-        alKey = clean
-        alState = state
-        textModel?.takeIf { it.isNotBlank() }?.let { alTextModel = it }
-        prefs(ctx).edit()
-            .putString(AL_KEY, clean)
-            .putString(AL_MODEL, alTextModel)
-            .putString(AL_STATE, state.name)
-            .apply()
-    }
-
-    fun setAionState(ctx: Context, state: State) {
-        alState = state
-        prefs(ctx).edit().putString(AL_STATE, state.name).apply()
-    }
-
-    fun setAionTextModel(ctx: Context, model: String) {
-        if (model.isBlank()) return
-        alTextModel = model
-        prefs(ctx).edit().putString(AL_MODEL, model).apply()
-    }
-
-    fun clearAion(ctx: Context) {
-        alKey = null
-        alState = State.NOT_SET
-        prefs(ctx).edit().remove(AL_KEY).remove(AL_MODEL).remove(AL_STATE).apply()
-    }
-
     // ------------------------------------------------------ text provider
 
     /**
@@ -356,7 +311,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> xaiKey.orEmpty()
             AiProviders.atria.id -> atKey.orEmpty()
             AiProviders.groq.id -> gqKey.orEmpty()
-            AiProviders.aion.id -> alKey.orEmpty()
             AiProviders.cloudflareText.id -> cftToken.orEmpty()
             else -> orKey.orEmpty()
         }
@@ -367,7 +321,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> xaiTextModel
             AiProviders.atria.id -> atTextModel
             AiProviders.groq.id -> gqTextModel
-            AiProviders.aion.id -> alTextModel
             AiProviders.cloudflareText.id -> cftModel
             else -> orTextModel
         }
@@ -378,7 +331,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> xaiState
             AiProviders.atria.id -> atState
             AiProviders.groq.id -> gqState
-            AiProviders.aion.id -> alState
             AiProviders.cloudflareText.id -> cftState
             else -> orState
         }
@@ -389,7 +341,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> oneXaiReady()
             AiProviders.atria.id -> atriaReady()
             AiProviders.groq.id -> groqReady()
-            AiProviders.aion.id -> aionReady()
             AiProviders.cloudflareText.id -> cloudflareTextReady()
             else -> openRouterReady()
         }
@@ -400,7 +351,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> saveOneXai(ctx, key, state, model)
             AiProviders.atria.id -> saveAtria(ctx, key, state, model)
             AiProviders.groq.id -> saveGroq(ctx, key, state, model)
-            AiProviders.aion.id -> saveAion(ctx, key, state, model)
             // Cloudflare text needs an account as well as a token; when one is
             // already stored, saving a new key keeps it. The dedicated
             // saveCloudflareText call is used by the screens so both are set.
@@ -415,7 +365,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> setOneXaiState(ctx, state)
             AiProviders.atria.id -> setAtriaState(ctx, state)
             AiProviders.groq.id -> setGroqState(ctx, state)
-            AiProviders.aion.id -> setAionState(ctx, state)
             AiProviders.cloudflareText.id -> setCloudflareTextState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
@@ -426,7 +375,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> setOneXaiTextModel(ctx, model)
             AiProviders.atria.id -> setAtriaTextModel(ctx, model)
             AiProviders.groq.id -> setGroqTextModel(ctx, model)
-            AiProviders.aion.id -> setAionTextModel(ctx, model)
             AiProviders.cloudflareText.id -> setCloudflareTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
@@ -438,7 +386,6 @@ object ServiceKeys {
             AiProviders.oneXai.id -> clearOneXai(ctx)
             AiProviders.atria.id -> clearAtria(ctx)
             AiProviders.groq.id -> clearGroq(ctx)
-            AiProviders.aion.id -> clearAion(ctx)
             AiProviders.cloudflareText.id -> clearCloudflareText(ctx)
             else -> clearOpenRouter(ctx)
         }
@@ -619,7 +566,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, XAI_KEY, AT_KEY, GQ_KEY, AL_KEY,
+            listOf(OR_KEY, XAI_KEY, AT_KEY, GQ_KEY,
                 CF_ACCOUNT, CF_TOKEN, CFT_ACCOUNT, CFT_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
@@ -643,10 +590,6 @@ object ServiceKeys {
         gqKey = p.getString(GQ_KEY, null)?.trim()?.ifBlank { null }
         gqTextModel = p.getString(GQ_MODEL, null)?.ifBlank { null } ?: AiProviders.groq.textModel
         gqState = if (gqKey == null) State.NOT_SET else stateOf(p.getString(GQ_STATE, null))
-
-        alKey = p.getString(AL_KEY, null)?.trim()?.ifBlank { null }
-        alTextModel = p.getString(AL_MODEL, null)?.ifBlank { null } ?: AiProviders.aion.textModel
-        alState = if (alKey == null) State.NOT_SET else stateOf(p.getString(AL_STATE, null))
 
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
 

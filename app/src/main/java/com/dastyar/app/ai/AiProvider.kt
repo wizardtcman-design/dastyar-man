@@ -4,7 +4,7 @@ package com.dastyar.app.ai
  * Which HTTP shape a provider's text endpoint speaks.
  *
  * [CHAT] is the classic OpenAI `/chat/completions` call (a `messages` array),
- * used by 1xAI, OpenRouter, OpenAI, Groq, Atria and Aion.
+ * used by 1xAI, OpenRouter, OpenAI, Groq and Atria.
  * [RESPONSES] is the newer OpenAI `/responses` call (an `instructions` string
  * plus an `input` array); the machinery is kept for any provider that needs it.
  */
@@ -192,25 +192,6 @@ object AiProviders {
     )
 
     /**
-     * Aion Labs is the fifth text provider. It is OpenAI-compatible
-     * (`/chat/completions`, `Authorization: Bearer`, `/models`) and text-only,
-     * so it is served entirely by the shared text path and is offered for
-     * chat/text features only.
-     *
-     * The model is the live catalogue's general-purpose "Aion 2.0" (a DeepSeek
-     * V3.2 variant). It was verified with a real Persian chat request: it follows
-     * the app's marker formats (recipes, structured lines) and stays within the
-     * app's token budget. Its reasoning runs in a hidden field and is not shown.
-     */
-    val aion = AiProvider(
-        id = "aion",
-        label = "Aion Labs (Aion 2.0)",
-        baseUrl = "https://api.aionlabs.ai/v1",
-        textModel = "aion-labs/aion-2.0",
-        modelsPath = "models"
-    )
-
-    /**
      * Cloudflare Workers AI as a text provider, serving Google's Gemma 4
      * (`@cf/google/gemma-4-26b-a4b-it`), the model verified to answer Persian
      * cleanly. It is an independent Cloudflare account: its Account ID + API
@@ -243,10 +224,10 @@ object AiProviders {
      * provider that cannot do the job.
      */
     val textProviders: List<AiProvider> =
-        listOf(oneXai, openRouter, cloudflareText, atria, groq, aion)
+        listOf(oneXai, openRouter, cloudflareText, atria, groq)
 
     val all: List<AiProvider> =
-        listOf(oneXai, openRouter, cloudflareText, atria, groq, aion, openAiCompatible)
+        listOf(oneXai, openRouter, cloudflareText, atria, groq, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter
