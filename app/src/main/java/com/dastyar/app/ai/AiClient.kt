@@ -419,7 +419,7 @@ object AiClient {
         // only), so a valid free-account key is not rejected just because the
         // default model is paid. The first model that answers is remembered.
         var last = ConnectResult(false, FailKind.PROVIDER, "اتصال برقرار نشد.")
-        for (candidate in textModelChain(provider, key)) {
+        for (candidate in testModelChain(provider, key)) {
             val r = probeModelFor(provider, key, candidate.model)
             if (r.ok) {
                 // Text-only providers have no image models, so never probe for one.
@@ -939,7 +939,7 @@ object AiClient {
      * used by the connection test so a free-account key is judged by what it
      * can really reach.
      */
-    private fun textModelChain(provider: AiProvider, key: String): List<ModelAttempt> {
+    private fun testModelChain(provider: AiProvider, key: String): List<ModelAttempt> {
         val free = if (provider.id == AiProviders.openRouter.id)
             freeTextModelsFor(provider, key) else emptyList()
         return buildChain(provider, provider.textModel, free)
