@@ -27,6 +27,10 @@ private data class TabItem(val route: String, val label: String, val icon: Image
 fun MainScaffold(vm: MainViewModel) {
     var tab by remember { mutableStateOf("home") }
     val todayCheckIn by vm.todayCheckIn.collectAsState()
+    // Collected so the overlay re-evaluates the moment a check-in is completed
+    // (or the day rolls over); the value itself is decided inside
+    // shouldAskCheckIn, which reads the durable completion marker.
+    val completedDay by vm.completedDay.collectAsState()
 
     // Detect a new day while the app stays open or is brought back from the
     // background: on every resume, reload today's check-in. If the date rolled
@@ -88,7 +92,8 @@ fun MainScaffold(vm: MainViewModel) {
     // The daily check-in is only offered once the user finished onboarding and
     // only when today's row does not exist yet. On the onboarding day the
     // questionnaire already became the day-one record, so it is never asked twice.
-    val needsCheckIn = vm.shouldAskCheckIn(vm.profile.value, todayCheckIn)
+    val needsCheckIn = completedDay != vm.today &&
+            vm.shouldAskCheckIn(vm.profile.value, todayCheckIn)
 
     val tabs = listOf(
         TabItem("home", "خانه", Icons.Filled.Home),

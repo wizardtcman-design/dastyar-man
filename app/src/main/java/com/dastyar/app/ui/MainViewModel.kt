@@ -8,6 +8,7 @@ import com.dastyar.app.ai.Prompts
 import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.data.CheckIn
+import com.dastyar.app.data.CheckInPrefs
 import com.dastyar.app.data.Cycle
 import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.DastyarDatabase
@@ -63,6 +64,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- transient UI state ----
     private val _todayCheckIn = MutableStateFlow<CheckIn?>(null)
     val todayCheckIn: StateFlow<CheckIn?> = _todayCheckIn.asStateFlow()
+
+    /**
+     * The local day the daily check-in was last completed, read synchronously
+     * from disk at start-up. It is the fast, reliable answer to "should the
+     * questions appear today?" while the database read is still in flight, so a
+     * finished check-in never makes the questions reappear on the next open.
+     */
+    private val _completedDay = MutableStateFlow(CheckInPrefs.doneDay(app))
+    val completedDay: StateFlow<String?> = _completedDay.asStateFlow()
 
     private val _suggestion = MutableStateFlow<DailySuggestion?>(null)
     val suggestion: StateFlow<DailySuggestion?> = _suggestion.asStateFlow()
@@ -401,7 +411,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Loads today's check-in and today's cached suggestion (if any). */
     suspend fun refreshToday() {
         val t = Dates.today()
-        _todayCheckIn.value = dao.checkIn(t)
+        val row = dao.checkIn(t)
+        _todayCheckIn.value = row
+        // A real row for today means today is done: keep the durable marker in
+        // step so the decision does not depend on this read finishing in time.
+        if (row != null) {
+            if (_completedDay.value != t) _completedDay.value = t
+            CheckInPrefs.markDone(getApplication(), t)
+        }
         _suggestion.value = dao.suggestion(t)
     }
 
@@ -445,7 +462,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (isFirstOnboarding) {
             val first = onboardingAsCheckIn(p, Dates.today())
             dao.saveCheckIn(first)
-            withContext(Dispatchers.Main) { _todayCheckIn.value = first }
+            // Day one is genuinely recorded, so today is done: set the durable
+            // marker too, so the daily questions are never asked again today.
+            CheckInPrefs.markDone(getApplication(), first.date)
+            withContext(Dispatchers.Main) {
+                _completedDay.value = first.date
+                _todayCheckIn.value = first
+            }
         }
         // Seed the period history with the questionnaire's own period date, so
         // the very first cycle already exists in the history the ring learns
@@ -651,18 +674,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun shouldAskCheckIn(profile: Profile?, todayCheckIn: CheckIn?): Boolean {
         if (profile?.onboardingDone != true) return false
-        return todayCheckIn == null
+        val today = Dates.today()
+        // Done if the durable marker says today is finished, or a row for today
+        // really exists. The day is recomputed every call, so tomorrow the
+        // questions come back on their own.
+        if (_completedDay.value == today) return false
+        return todayCheckIn?.date != today
     }
 
     /**
      * Saves a check-in for a specific date. Because [CheckIn.date] is the
      * primary key, saving twice on the same day updates the same row.
+     *
+     * The row is always stored under today's local day, so a draft that outlived
+     * midnight can never be written under the wrong date. The durable completion
+     * marker is set only AFTER the write actually succeeds: a failed save leaves
+     * the questions available instead of silently marking the day done.
      */
     fun saveCheckIn(c: CheckIn) = viewModelScope.launch(Dispatchers.IO) {
-        dao.saveCheckIn(c)
-        withContext(Dispatchers.Main) {
-            _todayCheckIn.value = c
-            _toast.value = "وضعیت امروز ذخیره شد ✅"
+        val today = Dates.today()
+        val row = c.copy(date = today)
+        try {
+            dao.saveCheckIn(row)
+            CheckInPrefs.markDone(getApplication(), today)
+            withContext(Dispatchers.Main) {
+                _completedDay.value = today
+                _todayCheckIn.value = row
+                _toast.value = "وضعیت امروز ذخیره شد ✅"
+            }
+        } catch (_: Exception) {
+            withContext(Dispatchers.Main) {
+                _toast.value = "ذخیره نشد؛ لطفاً دوباره تلاش کن"
+            }
         }
     }
 
@@ -1191,9 +1234,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         dao.clearWeights()
         dao.clearFacts()
         if (!keepProfile) dao.saveProfile(Profile(id = 1, onboardingDone = false))
+        CheckInPrefs.clear(getApplication())
         withContext(Dispatchers.Main) {
             _suggestion.value = null
             _todayCheckIn.value = null
+            _completedDay.value = null
             _toast.value = "اطلاعات پاک شد"
         }
     }

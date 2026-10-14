@@ -34,8 +34,17 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
 
     var draft by remember { mutableStateOf<CheckIn?>(null) }
     LaunchedEffect(todayStr, checkIns) {
-        if (draft == null) {
-            draft = checkIns.firstOrNull { it.date == todayStr } ?: CheckIn(date = todayStr)
+        // Initialize from today's row, and re-initialize if the day rolls over
+        // while the screen is open. A draft must never keep yesterday's date,
+        // or saving it would not register under today and the questions would
+        // keep coming back. The user's in-progress edits for the current day are
+        // left untouched.
+        val current = draft
+        val existing = checkIns.firstOrNull { it.date == todayStr }
+        when {
+            current == null -> draft = existing ?: CheckIn(date = todayStr)
+            current?.date != todayStr -> draft = existing ?: CheckIn(date = todayStr)
+            else -> Unit
         }
     }
 
