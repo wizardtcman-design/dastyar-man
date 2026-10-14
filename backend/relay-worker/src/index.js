@@ -50,7 +50,7 @@ const DEFAULT_RATE_PER_MIN = 60;
 
 // Bumped whenever the routing/allow-list logic changes, so `/health` proves
 // which revision is deployed (e.g. whether api.groq.com is really in the map).
-const RELAY_VERSION = "1.3.0";
+const RELAY_VERSION = "1.4.0";
 
 // ---------------------------------------------------------------------------
 // Tiny in-memory rate limiter. A Worker isolate may be recycled, so this is a
@@ -204,21 +204,29 @@ export default {
       }
     }
 
+    // Cloudflare's bot management in front of OpenRouter sometimes answers a
+    // request from a datacenter/workerd fingerprint with this exact 403 even
+    // though the same request succeeds a moment later. Retry a few times with
+    // a small backoff so a transient fingerprint challenge does not surface as
+    // a hard failure for the user.
+    const BOT_BLOCK = "access denied by security policy";
+    async function callWithBotRetry() {
+      let resp = await callUpstream();
+      let attempt = 0;
+      while (resp.status === 403 && attempt < 2) {
+        const peek = await resp.clone().text().catch(() => "");
+        if (!peek.toLowerCase().includes(BOT_BLOCK)) return resp;
+        attempt++;
+        safeLog({ stage: "botblock", host, attempt });
+        await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 400)));
+        resp = await callUpstream();
+      }
+      return resp;
+    }
+
     let upstream;
     try {
-      upstream = await callUpstream();
-      // Cloudflare's bot management sometimes answers a first request from a
-      // datacenter/workerd fingerprint with this exact 403 even though the same
-      // request succeeds moments later. Retry once before giving up, so a
-      // transient fingerprint challenge does not surface as a hard failure.
-      if (upstream.status === 403) {
-        const peek = await upstream.clone().text().catch(() => "");
-        if (peek.toLowerCase().includes("access denied by security policy")) {
-          safeLog({ stage: "botblock", host, attempt: 1 });
-          await new Promise((r) => setTimeout(r, 350));
-          upstream = await callUpstream();
-        }
-      }
+      upstream = await callWithBotRetry();
     } catch (e) {
       const aborted = e && e.name === "AbortError";
       return json(aborted ? 504 : 502, {

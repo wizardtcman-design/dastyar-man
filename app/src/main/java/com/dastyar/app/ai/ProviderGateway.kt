@@ -145,4 +145,81 @@ object ProviderGateway {
             builder.addHeader("Authorization", "Bearer $providerKey")
         }
     }
+
+    /**
+     * Runs a real, read-only probe against the configured relay and returns a
+     * short human report (never a secret). It answers the only question the UI
+     * cannot: does THIS phone actually reach the relay, and what does the relay
+     * say back? It distinguishes "cannot reach the relay at all" (a network
+     * block) from a relay auth/allow-list rejection, so a failure is no longer
+     * a silent generic message.
+     */
+    fun testRelay(): String {
+        if (modeCache != Mode.PROXY) return "حالت روی «مستقیم» است؛ واسط آزمایش نشد."
+        val base = endpointCache
+        if (!base.startsWith("https://")) return "آدرس واسط نامعتبر است (باید با https شروع شود)."
+
+        val http = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val out = StringBuilder()
+        // Never print the token itself; only whether one is set and its length,
+        // which is enough to spot a missing/extra-character paste.
+        val baseHost = runCatching { java.net.URI(base).host }.getOrNull().orEmpty()
+        out.append("واسط: $baseHost\n")
+        out.append("توکن: ").append(
+            if (tokenCache.isBlank()) "تنظیم نشده ✗" else "تنظیم شده (${tokenCache.length} کاراکتر)"
+        ).append("\n\n")
+
+        try {
+            // 1) health (no auth): proves the phone can reach the relay at all.
+            val hReq = okhttp3.Request.Builder().url("$base/health").get().build()
+            http.newCall(hReq).execute().use { r ->
+                val body = r.body?.string().orEmpty().take(120)
+                out.append("۱) دسترسی به واسط: کد ${r.code}\n")
+                out.append("   پاسخ: $body\n\n")
+            }
+        } catch (e: Exception) {
+            out.append("۱) دسترسی به واسط: ناموفق (${e.javaClass.simpleName})\n")
+            out.append("   ⇒ این گوشی حتی به واسط هم نمی‌رسد (احتمالاً workers.dev مسدود است).")
+            return out.toString().trim()
+        }
+
+        // 2) authenticated probe to every relayable provider, so one tap shows
+        //    exactly which service the relay can and cannot reach.
+        for (p in listOf(AiProviders.openRouter, AiProviders.groq)) {
+            val host = runCatching { java.net.URI(p.baseUrl).host }.getOrNull().orEmpty()
+            val path = if (host == "api.groq.com") "/openai/v1/models" else "/api/v1/models"
+            try {
+                val b = okhttp3.Request.Builder()
+                    .url("$base/proxy/$host$path")
+                    .get()
+                    .addHeader("Accept", "application/json")
+                if (tokenCache.isNotBlank()) b.addHeader("X-Gateway-Token", tokenCache)
+                b.addHeader("X-Gateway-Mode", "relay")
+                http.newCall(b.build()).execute().use { r ->
+                    val body = r.body?.string().orEmpty().take(140)
+                    out.append("۲) ${p.label}: کد ${r.code}\n")
+                    out.append("   ${body}\n")
+                    out.append("   ⇒ ").append(senseCode(r.code, body)).append("\n\n")
+                }
+            } catch (e: Exception) {
+                out.append("۲) ${p.label}: خطا (${e.javaClass.simpleName})\n\n")
+            }
+        }
+        return out.toString().trim()
+    }
+
+    /** Turns a relay/browser probe result into one plain sentence. */
+    private fun senseCode(code: Int, body: String): String = when {
+        code in 200..299 -> "سالم؛ واسط به سرویس می‌رسد."
+        code == 401 -> "توکن واسط اشتباه است (با GATEWAY_TOKEN یکی نیست)."
+        code == 403 && body.contains("security policy", true) ->
+            "Cloudflare جلوی درخواست را گرفت (سیاست امنیتی، نه کلید)."
+        code == 403 -> "این میزبان در فهرست مجاز Worker نیست."
+        code == 502 -> "کلید این سرویس روی Worker تنظیم نشده."
+        code == 429 -> "محدودیت نرخ؛ کمی بعد دوباره تلاش کن."
+        else -> "کد غیرمنتظره؛ متن پاسخ بالا را ببین."
+    }
 }
