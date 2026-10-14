@@ -182,6 +182,27 @@ object PeriodReminder {
     /** Stable per-offset id, so re-scheduling replaces rather than duplicates. */
     fun notificationId(daysBefore: Int): Int = 9002 + daysBefore
 
+    private fun firedKey(event: Event) = "fired_" + event.name
+
+    /**
+     * True when this cycle event already produced its notification today.
+     *
+     * This is the single protection against the repeat bug: re-scheduling runs
+     * on every app start, on boot, after a data change and from the receiver
+     * itself, so without this a "due today" event was re-armed and re-shown
+     * every few seconds. The record is a date string in SharedPreferences, so it
+     * survives the app closing, a reboot and a re-schedule.
+     */
+    fun hasFiredToday(ctx: Context, event: Event): Boolean =
+        prefs(ctx).getString(firedKey(event), null) == com.dastyar.app.data.Dates.today()
+
+    /** Records that this event's notification went out today. */
+    fun markFired(ctx: Context, event: Event) {
+        prefs(ctx).edit()
+            .putString(firedKey(event), com.dastyar.app.data.Dates.today())
+            .apply()
+    }
+
     /**
      * (Re)schedules every cycle alarm from the user's learned cycle data. A
      * null profile reloads from the database. Cancels everything first so an old
@@ -252,6 +273,10 @@ object PeriodReminder {
                 daysFromToday == 0 && (slot.forceToday || slot.day > rawDay) -> 0
                 else -> continue
             }
+            // An event that already notified today is never (re)armed: this is
+            // what stops the "period due" notification from firing again on every
+            // app start, re-schedule or receiver re-arm within the same day.
+            if (hasFiredToday(ctx, slot.event)) continue
             val trigger = triggerIn(ctx, fireIn) ?: continue
             val pi = pendingIntent(ctx, slot.event)
             try {

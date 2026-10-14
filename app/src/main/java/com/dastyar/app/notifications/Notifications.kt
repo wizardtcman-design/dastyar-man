@@ -233,6 +233,10 @@ class PeriodReminderReceiver : BroadcastReceiver() {
         }
 
         if (!NotificationHelper.canPost(context)) return
+        // Record the fire BEFORE showing and before this receiver re-arms the
+        // schedule below, so the same event can never loop or be re-shown later
+        // the same day (app start, reboot or re-schedule).
+        PeriodReminder.markFired(context, event)
         NotificationHelper.show(
             context,
             event.id,
@@ -240,7 +244,8 @@ class PeriodReminderReceiver : BroadcastReceiver() {
             body,
             NotificationHelper.CHANNEL_PERIOD
         )
-        // Re-arm the whole schedule so the next cycle's events are ready.
+        // Re-arm the whole schedule so the next cycle's events are ready. The
+        // event that just fired is skipped by the "fired today" guard.
         PeriodReminder.scheduleNext(context)
     }
 }
