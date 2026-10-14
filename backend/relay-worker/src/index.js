@@ -48,6 +48,10 @@ const MAX_BODY_BYTES = 256 * 1024;      // 256 KiB request body
 const UPSTREAM_TIMEOUT_MS = 120 * 1000; // 2 minutes
 const DEFAULT_RATE_PER_MIN = 60;
 
+// Bumped whenever the routing/allow-list logic changes, so `/health` proves
+// which revision is deployed (e.g. whether api.groq.com is really in the map).
+const RELAY_VERSION = "1.1.0";
+
 // ---------------------------------------------------------------------------
 // Tiny in-memory rate limiter. A Worker isolate may be recycled, so this is a
 // best-effort guard, not a billing system. It stops naive abuse and runaway
@@ -88,8 +92,9 @@ export default {
     const url = new URL(request.url);
 
     // Health check: no auth, no provider call, no secrets leaked.
+    // `version` lets you prove which code revision is actually deployed.
     if (url.pathname === "/health") {
-      return json(200, { ok: true, service: "dastyar-relay" });
+      return json(200, { ok: true, service: "dastyar-relay", version: RELAY_VERSION });
     }
 
     // Only the /proxy/<host>/<path> shape is served.

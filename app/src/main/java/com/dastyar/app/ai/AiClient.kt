@@ -731,9 +731,11 @@ object AiClient {
                     put("max_tokens", CHAT_MAX_TOKENS)
                 }.toString()
                 try {
-                    val routedUrl = ProviderGateway.endpoint() +
-                            "/proxy/" + relayHostOf(activeProvider()) +
-                            "/chat/completions"
+                    // Build the relay URL through the gateway so the provider's
+                    // FULL base path is preserved (e.g. Groq's "/openai/v1").
+                    // Hand-assembling host + "/chat/completions" dropped that
+                    // path and produced a 404 at the provider.
+                    val routedUrl = activeProvider().routedChatUrl()
                     val builder = Request.Builder()
                         .url(routedUrl)
                         .addHeader("Content-Type", "application/json")
@@ -771,10 +773,6 @@ object AiClient {
 
         Result.failure(AiException(lastError))
     }
-
-    /** The host of a provider, used to build a relay path. */
-    private fun relayHostOf(p: AiProvider): String =
-        runCatching { java.net.URI(p.baseUrl).host }.getOrNull() ?: ""
 
     /** One model to try, how many times, and whether it is a free one. */
     private data class ModelAttempt(val model: String, val attempts: Int, val free: Boolean)
@@ -1094,6 +1092,11 @@ object AiClient {
      */
     private fun describeError(code: Int, raw: String, image: Boolean = false): String {
         val low = raw.lowercase()
+        // The relay's own errors (never a provider's) are recognised by their
+        // exact JSON codes, so a relay misconfiguration is not mistaken for a
+        // bad provider key. This keeps the two failure classes distinguishable.
+        val relayError = relayErrorHint(low)
+        if (relayError != null) return relayError
         val noCredit = low.contains("never purchased") || low.contains("insufficient credits") ||
                 low.contains("out of credits") || low.contains("exceed your available credits")
         return when (code) {
@@ -1120,6 +1123,30 @@ object AiClient {
             in 500..599 -> "سرویس موقتاً پاسخ نمی‌دهد؛ دوباره تلاش کن."
             else -> "خطای سرویس هوش مصنوعی (کد $code)."
         }
+    }
+
+    /**
+     * Recognises the relay Worker's own JSON error bodies and returns a Persian
+     * explanation specific to the relay, or null when the body is not one of
+     * them (so a real provider error is never re-labelled). The strings match
+     * `backend/relay-worker/src/index.js` exactly.
+     */
+    private fun relayErrorHint(low: String): String? = when {
+        low.contains("\"error\":\"host_not_allowed\"") ->
+            "واسط این سرویس را مجاز نمی‌داند. فهرست مجاز Worker را بررسی کن."
+        low.contains("\"error\":\"unauthorized\"") ->
+            "توکن واسط اشتباه است یا ارسال نشده؛ توکن را در تنظیمات دوباره بررسی کن."
+        low.contains("\"error\":\"server_not_configured\"") ->
+            "واسط درست تنظیم نشده (GATEWAY_TOKEN روی سرور تعریف نشده است)."
+        low.contains("\"error\":\"provider_not_configured\"") ->
+            "کلید این سرویس روی واسط تنظیم نشده است (Secret سرور)."
+        low.contains("\"error\":\"rate_limited\"") ->
+            "تعداد درخواست‌های واسط زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
+        low.contains("\"error\":\"upstream_timeout\"") ->
+            "واسط به سرویس اصلی نرسید (مهلت تمام شد)؛ دوباره تلاش کن."
+        low.contains("\"error\":\"upstream_unreachable\"") ->
+            "واسط نتوانست به سرویس اصلی وصل شود؛ بعداً دوباره تلاش کن."
+        else -> null
     }
 
     // ----------------------------------------------------------------- tts
