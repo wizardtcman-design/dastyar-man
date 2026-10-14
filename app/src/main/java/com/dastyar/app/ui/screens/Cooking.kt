@@ -307,14 +307,14 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
 
-    // [hideUser] is true for the app's own suggestion prompts: the prompt is
-    // sent to the model but never shown as a chat bubble. A message the user
-    // typed themselves is shown normally.
-    fun send(text: String, hideUser: Boolean = false) {
+    // [internalPrompt] is true for the app's own suggestion prompts: the prompt is
+    // sent to the model but stored as an internal turn, so it is never shown as
+    // a chat bubble. A message the user typed themselves is shown normally.
+    fun send(text: String, internalPrompt: Boolean = false) {
         val t = text.trim()
         if (t.isEmpty() || busy) return
         busy = true
-        vm.chat(meal.channel, t, showUserMessage = !hideUser)
+        vm.chat(meal.channel, t, internalPrompt = internalPrompt)
     }
 
     // Clear busy as soon as the assistant's reply reaches the history.
@@ -330,7 +330,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
             autoAsked = true
             send(
                 Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()),
-                hideUser = true
+                internalPrompt = true
             )
         }
     }
@@ -385,7 +385,10 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                 )
             }
             items(messages, key = { it.id }) { m ->
-                if (m.role == "user") {
+                if (m.role == "internal") {
+                    // The app's own suggestion prompt: kept so the model sees a
+                    // full conversation, but never rendered.
+                } else if (m.role == "user") {
                     // Internal suggestion prompts sent by an older build were
                     // stored as user messages; they must never be shown either.
                     if (!isInternalMealPrompt(m.content)) UserBubble(m)
@@ -435,7 +438,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
             GradientButton(meal.newLabel, enabled = !busy) {
                 send(
                     Prompts.mealSuggestPrompt(meal.title.removePrefix("پیشنهاد "), 4, emptyList()),
-                    hideUser = true
+                    internalPrompt = true
                 )
             }
         }

@@ -885,19 +885,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Sends one message to a chat channel and stores the assistant's reply.
      *
-     * [showUserMessage] is false for the app's own internal prompts (the
-     * automatic lunch/dinner suggestion and the "new suggestion" button): the
-     * prompt text is still sent to the model, but it is never stored as a user
-     * message, so the raw instruction template can never appear in the chat.
-     * A message the user typed themselves keeps the default (true).
+     * [internalPrompt] is true for the app's own suggestion prompts (the automatic
+     * lunch/dinner suggestion and the "new suggestion" button). Such a prompt is
+     * stored with the role "internal", never "user", so it can never be shown as
+     * a user bubble; the raw instruction template stays invisible in the UI.
+     * A message the user typed themselves is a normal "user" message.
      */
-    fun chat(channel: String, text: String, showUserMessage: Boolean = true) = viewModelScope.launch {
-        if (showUserMessage) {
-            val userMsg = ChatMessage(channel = channel, role = "user", content = text)
-            dao.addMessage(userMsg)
-        }
+    fun chat(channel: String, text: String, internalPrompt: Boolean = false) = viewModelScope.launch {
+        dao.addMessage(
+            ChatMessage(
+                channel = channel,
+                role = if (internalPrompt) "internal" else "user",
+                content = text
+            )
+        )
 
-        val history = dao.recentChat(channel, 12).reversed().map { it.role to it.content }
+        // An internal turn is presented to the model as an ordinary user turn,
+        // so the request it receives is exactly the one it got before this
+        // change: the conversation always starts with a user message and the
+        // suggestion keeps working the way it always did.
+        val history = dao.recentChat(channel, 12).reversed()
+            .map { (if (it.role == "internal") "user" else it.role) to it.content }
         val p = profile.value
         val ci = _todayCheckIn.value
 
