@@ -307,6 +307,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
 
     // [internalPrompt] is true for the app's own suggestion prompts: the prompt is
     // sent to the model but stored as an internal turn, so it is never shown as
@@ -397,7 +398,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                 } else if (m.role == "user") {
                     // Internal suggestion prompts sent by an older build were
                     // stored as user messages; they must never be shown either.
-                    if (!isInternalMealPrompt(m.content)) UserBubble(m)
+                    if (!isInternalMealPrompt(m.content)) UserBubble(m, onDelete = { pendingDelete = m })
                 } else {
                     // In the meal chats only the structured recipe is ever
                     // rendered. A model reply that is not a parseable recipe
@@ -411,6 +412,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                                 accent = meal.accent,
                                 busy = busy,
                                 fullText = m.content,
+                                onDelete = { pendingDelete = m },
                                 onSave = { vm.saveRecipe(d.name, meal.title, d.raw) }
                             )
                         }
@@ -420,6 +422,7 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                         // copyable for the user.
                         MessageActionBox(
                             text = m.content,
+                            onDelete = { pendingDelete = m },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
@@ -520,6 +523,23 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } }
         )
     }
+
+    // Single-message delete confirmation: only the chosen message is removed.
+    pendingDelete?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("حذف پیام", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = { Text("این پیام از گفتگو حذف شود؟", fontSize = 14.sp) },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteMessage(msg.id); pendingDelete = null }) {
+                    Text("حذف", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("انصراف") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -542,10 +562,11 @@ private fun ChatOverflowMenu(onClear: () -> Unit) {
 }
 
 @Composable
-private fun UserBubble(m: ChatMessage) {
+private fun UserBubble(m: ChatMessage, onDelete: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         MessageActionBox(
             text = m.content,
+            onDelete = onDelete,
             modifier = Modifier
                 .widthIn(max = 290.dp)
                 .clip(RoundedCornerShape(16.dp))
@@ -568,8 +589,16 @@ private fun RecipeCard(
     accent: Color,
     busy: Boolean,
     fullText: String,
+    onDelete: (() -> Unit)? = null,
     onSave: () -> Unit
 ) {
+    MessageActionBox(
+        text = fullText,
+        onDelete = onDelete,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(Shape.card)
+    ) {
     DastyarCard(accent = accent) {
         Row(verticalAlignment = Alignment.Top) {
             Text(
@@ -684,6 +713,7 @@ private fun RecipeCard(
             shape = RoundedCornerShape(14.dp)
         ) {
             Text("♡ ذخیره", fontSize = 12.5.sp)
+        }
         }
     }
 }

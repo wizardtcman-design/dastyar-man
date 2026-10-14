@@ -500,6 +500,7 @@ private fun ChatPanel(
     val messages by vm.chatFlow(channel).collectAsState(initial = emptyList())
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
     val listState = rememberLazyListState()
 
     // Reads messages.size so it re-runs when a reply arrives: scroll to the
@@ -540,7 +541,7 @@ private fun ChatPanel(
                     )
                 }
             }
-            items(messages) { m -> MessageBubble(m, accent) }
+            items(messages) { m -> MessageBubble(m, accent, onDelete = { pendingDelete = m }) }
             if (busy) {
                 item {
                     Text(
@@ -639,11 +640,29 @@ private fun ChatPanel(
             }
         }
     }
+
+    // Delete confirmation for a single message. Only this row is removed; the
+    // rest of the conversation is left exactly as it is.
+    pendingDelete?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("حذف پیام", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = { Text("این پیام از گفتگو حذف شود؟", fontSize = 14.sp) },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteMessage(msg.id); pendingDelete = null }) {
+                    Text("حذف", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("انصراف") }
+            }
+        )
+    }
 }
 
 /** A user or assistant message bubble. RTL flows from the right by nature. */
 @Composable
-private fun MessageBubble(m: ChatMessage, accent: Color) {
+private fun MessageBubble(m: ChatMessage, accent: Color, onDelete: () -> Unit) {
     val isUser = m.role == "user"
     Row(
         Modifier.fillMaxWidth(),
@@ -651,6 +670,7 @@ private fun MessageBubble(m: ChatMessage, accent: Color) {
     ) {
         MessageActionBox(
             text = m.content,
+            onDelete = onDelete,
             modifier = Modifier
                 .widthIn(max = 290.dp)
                 .clip(RoundedCornerShape(18.dp))

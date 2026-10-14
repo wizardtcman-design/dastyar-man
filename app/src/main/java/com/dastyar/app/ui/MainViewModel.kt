@@ -963,6 +963,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearChat(channel: String) = viewModelScope.launch(Dispatchers.IO) { dao.clearChat(channel) }
 
+    /**
+     * Removes a single message from its conversation. History is stored locally
+     * in Room with no server copy, so deleting the row is the complete operation:
+     * the chat flow re-emits and the message is gone for good, even after the app
+     * is restarted. Other messages and other conversations are untouched.
+     */
+    fun deleteMessage(id: Long) = viewModelScope.launch(Dispatchers.IO) { dao.deleteMessage(id) }
+
     // ------------------------------------------------------- saved images
 
     val savedImages: StateFlow<List<SavedImage>> = dao.savedImagesFlow()

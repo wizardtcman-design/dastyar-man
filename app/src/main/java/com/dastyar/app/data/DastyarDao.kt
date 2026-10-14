@@ -111,6 +111,9 @@ interface DastyarDao {
     @Query("DELETE FROM chat_messages WHERE channel = :channel")
     suspend fun clearChat(channel: String)
 
+    @Query("DELETE FROM chat_messages WHERE id = :id")
+    suspend fun deleteMessage(id: Long)
+
     // ---- Suggestions ----
     @Query("SELECT * FROM daily_suggestions WHERE date = :date")
     suspend fun suggestion(date: String): DailySuggestion?
