@@ -50,7 +50,7 @@ const DEFAULT_RATE_PER_MIN = 60;
 
 // Bumped whenever the routing/allow-list logic changes, so `/health` proves
 // which revision is deployed (e.g. whether api.groq.com is really in the map).
-const RELAY_VERSION = "1.1.0";
+const RELAY_VERSION = "1.2.0";
 
 // ---------------------------------------------------------------------------
 // Tiny in-memory rate limiter. A Worker isolate may be recycled, so this is a
@@ -76,6 +76,20 @@ function json(status, obj) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+/**
+ * Secret-free diagnostic log. It records ONLY non-sensitive routing facts
+ * (method, path, host, whether a token was present, its length, upstream
+ * status) and never a token or API-key VALUE. This is what makes a real
+ * phone-side failure diagnosable from Cloudflare's live logs.
+ */
+function safeLog(fields) {
+  try {
+    console.log(JSON.stringify({ diag: true, ...fields }));
+  } catch (_) {
+    // Logging must never break a request.
+  }
 }
 
 // Constant-time-ish string compare so a token cannot be guessed byte by byte.
@@ -109,7 +123,9 @@ export default {
       return json(500, { error: "server_not_configured" });
     }
     const provided = request.headers.get("X-Gateway-Token") || "";
-    if (!safeEqual(provided, expected)) {
+    const authOk = safeEqual(provided, expected);
+    safeLog({ stage: "auth", ok: authOk, method: request.method, path: url.pathname, hasToken: provided.length > 0, tokenLen: provided.length });
+    if (!authOk) {
       return json(401, { error: "unauthorized" });
     }
 
@@ -128,11 +144,12 @@ export default {
     const host = rest.slice(0, slash);
     const path = rest.slice(slash); // keeps the leading "/"
 
+    safeLog({ stage: "routing", ok: true, method: request.method, path: url.pathname, host, pathAfterHost: path });
     const provider = PROVIDERS[host];
-    if (!provider) return json(403, { error: "host_not_allowed" });
+    if (!provider) { safeLog({ stage: "host_check", ok: false, host }); return json(403, { error: "host_not_allowed" }); }
 
     const apiKey = env[provider.secret];
-    if (!apiKey) return json(502, { error: "provider_not_configured", provider: host });
+    if (!apiKey) { safeLog({ stage: "secret", ok: false, host, secret: provider.secret }); return json(502, { error: "provider_not_configured", provider: host }); }
 
     // ---- method + body ----
     const method = request.method.toUpperCase();
@@ -178,6 +195,7 @@ export default {
       });
     }
     clearTimeout(timer);
+    safeLog({ stage: "upstream", ok: upstream.status < 400, host, path, status: upstream.status });
 
     // Stream the provider's response straight back, preserving status and the
     // content type (so streaming/SSE and JSON both pass through unchanged).

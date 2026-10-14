@@ -74,6 +74,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var gwEndpoint by remember { mutableStateOf(GatewayPrefs.endpoint(ctx)) }
     var gwToken by remember { mutableStateOf(GatewayPrefs.token(ctx)) }
     var gwStatus by remember { mutableStateOf<String?>(null) }
+    var gwTestResult by remember { mutableStateOf<String?>(null) }
     // Cloudflare card
     var cfAccount by remember { mutableStateOf("") }
     var cfToken by remember { mutableStateOf("") }
@@ -674,6 +675,22 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     gwMode = "DIRECT"; gwEndpoint = ""; gwToken = ""
                     gwStatus = "به حالت مستقیم برگشت."
                 }
+            }
+            Spacer(Modifier.height(8.dp))
+            ServiceButton("آزمایش واسط", Modifier.fillMaxWidth()) {
+                GatewayPrefs.setEndpoint(ctx, gwEndpoint)
+                GatewayPrefs.setToken(ctx, gwToken)
+                ProviderGateway.reloadSettings()
+                gwTestResult = "در حال آزمایش…"
+                scope.launch {
+                    gwTestResult = kotlinx.coroutines.withContext(
+                        kotlinx.coroutines.Dispatchers.IO
+                    ) { ProviderGateway.testRelay() }
+                }
+            }
+            gwTestResult?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(6.dp))
             Text(
