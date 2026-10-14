@@ -43,6 +43,11 @@ object ServiceKeys {
     private const val GQ_MODEL = "gq_text_model"
     private const val GQ_STATE = "gq_state"
 
+    // Aion Labs (Aion 2.0)
+    private const val AL_KEY = "al_key"
+    private const val AL_MODEL = "al_text_model"
+    private const val AL_STATE = "al_state"
+
     // Cloudflare
     private const val CF_ACCOUNT = "cf_account"
     private const val CF_TOKEN = "cf_token"
@@ -76,6 +81,10 @@ object ServiceKeys {
     @Volatile private var gqKey: String? = null
     @Volatile private var gqTextModel: String = AiProviders.groq.textModel
     @Volatile private var gqState: State = State.NOT_SET
+
+    @Volatile private var alKey: String? = null
+    @Volatile private var alTextModel: String = AiProviders.aion.textModel
+    @Volatile private var alState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -268,6 +277,44 @@ object ServiceKeys {
         prefs(ctx).edit().remove(GQ_KEY).remove(GQ_MODEL).remove(GQ_STATE).apply()
     }
 
+    // -------------------------------------------------------------- Aion Labs
+
+    fun aionKey(): String? = alKey
+    fun aionTextModel(): String = alTextModel
+    fun aionState(): State = alState
+    fun aionReady(): Boolean = alState == State.CONNECTED && !alKey.isNullOrBlank()
+
+    fun saveAion(ctx: Context, key: String, state: State = State.CONNECTED,
+                 textModel: String? = null) {
+        val clean = key.trim()
+        if (clean.isBlank()) return
+        alKey = clean
+        alState = state
+        textModel?.takeIf { it.isNotBlank() }?.let { alTextModel = it }
+        prefs(ctx).edit()
+            .putString(AL_KEY, clean)
+            .putString(AL_MODEL, alTextModel)
+            .putString(AL_STATE, state.name)
+            .apply()
+    }
+
+    fun setAionState(ctx: Context, state: State) {
+        alState = state
+        prefs(ctx).edit().putString(AL_STATE, state.name).apply()
+    }
+
+    fun setAionTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        alTextModel = model
+        prefs(ctx).edit().putString(AL_MODEL, model).apply()
+    }
+
+    fun clearAion(ctx: Context) {
+        alKey = null
+        alState = State.NOT_SET
+        prefs(ctx).edit().remove(AL_KEY).remove(AL_MODEL).remove(AL_STATE).apply()
+    }
+
     // ------------------------------------------------------ text provider
 
     /**
@@ -296,6 +343,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> ccKey.orEmpty()
             AiProviders.atria.id -> atKey.orEmpty()
             AiProviders.groq.id -> gqKey.orEmpty()
+            AiProviders.aion.id -> alKey.orEmpty()
             else -> orKey.orEmpty()
         }
 
@@ -305,6 +353,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> ccTextModel
             AiProviders.atria.id -> atTextModel
             AiProviders.groq.id -> gqTextModel
+            AiProviders.aion.id -> alTextModel
             else -> orTextModel
         }
 
@@ -314,6 +363,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> ccState
             AiProviders.atria.id -> atState
             AiProviders.groq.id -> gqState
+            AiProviders.aion.id -> alState
             else -> orState
         }
 
@@ -323,6 +373,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> codeCraftReady()
             AiProviders.atria.id -> atriaReady()
             AiProviders.groq.id -> groqReady()
+            AiProviders.aion.id -> aionReady()
             else -> openRouterReady()
         }
 
@@ -332,6 +383,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> saveCodeCraft(ctx, key, state, model)
             AiProviders.atria.id -> saveAtria(ctx, key, state, model)
             AiProviders.groq.id -> saveGroq(ctx, key, state, model)
+            AiProviders.aion.id -> saveAion(ctx, key, state, model)
             else -> saveOpenRouter(ctx, key, state)
         }
     }
@@ -341,6 +393,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> setCodeCraftState(ctx, state)
             AiProviders.atria.id -> setAtriaState(ctx, state)
             AiProviders.groq.id -> setGroqState(ctx, state)
+            AiProviders.aion.id -> setAionState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
     }
@@ -350,6 +403,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> setCodeCraftTextModel(ctx, model)
             AiProviders.atria.id -> setAtriaTextModel(ctx, model)
             AiProviders.groq.id -> setGroqTextModel(ctx, model)
+            AiProviders.aion.id -> setAionTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
     }
@@ -360,6 +414,7 @@ object ServiceKeys {
             AiProviders.codeCraft.id -> clearCodeCraft(ctx)
             AiProviders.atria.id -> clearAtria(ctx)
             AiProviders.groq.id -> clearGroq(ctx)
+            AiProviders.aion.id -> clearAion(ctx)
             else -> clearOpenRouter(ctx)
         }
     }
@@ -444,7 +499,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
+            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, AL_KEY, CF_ACCOUNT, CF_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
 
@@ -467,6 +522,10 @@ object ServiceKeys {
         gqKey = p.getString(GQ_KEY, null)?.trim()?.ifBlank { null }
         gqTextModel = p.getString(GQ_MODEL, null)?.ifBlank { null } ?: AiProviders.groq.textModel
         gqState = if (gqKey == null) State.NOT_SET else stateOf(p.getString(GQ_STATE, null))
+
+        alKey = p.getString(AL_KEY, null)?.trim()?.ifBlank { null }
+        alTextModel = p.getString(AL_MODEL, null)?.ifBlank { null } ?: AiProviders.aion.textModel
+        alState = if (alKey == null) State.NOT_SET else stateOf(p.getString(AL_STATE, null))
 
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
 

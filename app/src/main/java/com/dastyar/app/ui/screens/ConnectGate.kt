@@ -313,6 +313,7 @@ private fun gateMask(v: String?): String {
 private fun gateKeyLabel(providerId: String): String = when (providerId) {
     AiProviders.codeCraft.id -> "CodeCraft API Key"
     AiProviders.atria.id -> "Atria API Key"
+    AiProviders.aion.id -> "Aion Labs API Key"
     else -> "OpenRouter API Key"
 }
 
@@ -320,6 +321,7 @@ private fun gateKeyLabel(providerId: String): String = when (providerId) {
 private fun gateKeyHint(providerId: String): String = when (providerId) {
     AiProviders.codeCraft.id -> "cc_…"
     AiProviders.atria.id -> "atr_…"
+    AiProviders.aion.id -> "alv2_…"
     else -> "sk-or-v1-…"
 }
 

@@ -134,6 +134,25 @@ object AiProviders {
         "openai/gpt-oss-20b" to "GPT-OSS 20B (سریع‌تر)"
     )
 
+    /**
+     * Aion Labs is the fifth text provider. It is OpenAI-compatible
+     * (`/chat/completions`, `Authorization: Bearer`, `/models`) and text-only,
+     * so it is served entirely by the shared text path and is offered for
+     * chat/text features only.
+     *
+     * The model is the live catalogue's general-purpose "Aion 2.0" (a DeepSeek
+     * V3.2 variant). It was verified with a real Persian chat request: it follows
+     * the app's marker formats (recipes, structured lines) and stays within the
+     * app's token budget. Its reasoning runs in a hidden field and is not shown.
+     */
+    val aion = AiProvider(
+        id = "aion",
+        label = "Aion Labs (Aion 2.0)",
+        baseUrl = "https://api.aionlabs.ai/v1",
+        textModel = "aion-labs/aion-2.0",
+        modelsPath = "models"
+    )
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -147,9 +166,9 @@ object AiProviders {
      * user. Keeping this list short and explicit means the picker never offers a
      * provider that cannot do the job.
      */
-    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq)
+    val textProviders: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq, aion)
 
-    val all: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq, openAiCompatible)
+    val all: List<AiProvider> = listOf(openRouter, codeCraft, atria, groq, aion, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter
