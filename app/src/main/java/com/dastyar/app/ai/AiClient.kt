@@ -771,6 +771,55 @@ object AiClient {
             }
         }
 
+        // Last-resort, relay-only fallback: OpenRouter sits behind Cloudflare's
+        // bot management, which sometimes answers the relay with a policy block
+        // instead of reaching OpenRouter at all (see relayErrorHint). That is a
+        // host problem, not a key problem, so when it happens we retry the same
+        // request once against Groq through the same relay, which is not behind
+        // that protection. It never runs outside relay mode and never changes
+        // the user's saved provider.
+        if (ProviderGateway.proxyReady() &&
+            activeProvider().id == AiProviders.openRouter.id &&
+            lastError.contains("سیاست امنیتی")
+        ) {
+            val groq = AiProviders.groq
+            val groqChain = AiProviders.groqModels.map { it.first }
+            for (candidate in groqChain) {
+                val body = buildJsonObject {
+                    put("model", candidate)
+                    put("messages", messages)
+                    put("stream", false)
+                    put("temperature", 0.6)
+                    put("max_tokens", CHAT_MAX_TOKENS)
+                }.toString()
+                try {
+                    val builder = Request.Builder()
+                        .url(groq.routedChatUrl())
+                        .addHeader("Content-Type", "application/json")
+                    ProviderGateway.applyAuth(builder, null)
+                    val req = builder
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .build()
+                    http.newCall(req).execute().use { resp ->
+                        val text = resp.body?.string().orEmpty()
+                        if (resp.isSuccessful) {
+                            val choice = json.parseToJsonElement(text)
+                                .jsonObject["choices"]?.jsonArray
+                                ?.firstOrNull()?.jsonObject
+                            val content = choice?.get("message")?.jsonObject
+                                ?.get("content")?.jsonPrimitive?.contentOrNull
+                            if (!content.isNullOrBlank()) {
+                                activeTextModel = candidate
+                                return@withContext Result.success(content.trim())
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Keep the original OpenRouter message; nothing to add.
+                }
+            }
+        }
+
         Result.failure(AiException(lastError))
     }
 
@@ -1146,6 +1195,12 @@ object AiClient {
             "واسط به سرویس اصلی نرسید (مهلت تمام شد)؛ دوباره تلاش کن."
         low.contains("\"error\":\"upstream_unreachable\"") ->
             "واسط نتوانست به سرویس اصلی وصل شود؛ بعداً دوباره تلاش کن."
+        // OpenRouter sits behind Cloudflare bot management, which sometimes
+        // answers a request with this exact policy block instead of reaching
+        // OpenRouter at all. It is neither a bad key nor an outage.
+        low.contains("access denied by security policy") ->
+            "سرویس OpenRouter موقتاً درخواست را از پشتِ Cloudflare رد کرد (سیاست امنیتی، نه کلید). " +
+                    "کمی بعد دوباره تلاش کن، یا ارائه‌دهندهٔ متن را روی Groq بگذار."
         else -> null
     }
 

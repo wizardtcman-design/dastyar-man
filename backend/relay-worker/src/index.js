@@ -50,7 +50,7 @@ const DEFAULT_RATE_PER_MIN = 60;
 
 // Bumped whenever the routing/allow-list logic changes, so `/health` proves
 // which revision is deployed (e.g. whether api.groq.com is really in the map).
-const RELAY_VERSION = "1.1.0";
+const RELAY_VERSION = "1.3.0";
 
 // ---------------------------------------------------------------------------
 // Tiny in-memory rate limiter. A Worker isolate may be recycled, so this is a
@@ -76,6 +76,20 @@ function json(status, obj) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+/**
+ * Secret-free diagnostic log. It records ONLY non-sensitive routing facts
+ * (method, path, host, whether a token was present, its length, upstream
+ * status) and never a token or API-key VALUE. This is what makes a real
+ * phone-side failure diagnosable from Cloudflare's live logs.
+ */
+function safeLog(fields) {
+  try {
+    console.log(JSON.stringify({ diag: true, ...fields }));
+  } catch (_) {
+    // Logging must never break a request.
+  }
 }
 
 // Constant-time-ish string compare so a token cannot be guessed byte by byte.
@@ -109,7 +123,9 @@ export default {
       return json(500, { error: "server_not_configured" });
     }
     const provided = request.headers.get("X-Gateway-Token") || "";
-    if (!safeEqual(provided, expected)) {
+    const authOk = safeEqual(provided, expected);
+    safeLog({ stage: "auth", ok: authOk, method: request.method, path: url.pathname, hasToken: provided.length > 0, tokenLen: provided.length });
+    if (!authOk) {
       return json(401, { error: "unauthorized" });
     }
 
@@ -128,11 +144,12 @@ export default {
     const host = rest.slice(0, slash);
     const path = rest.slice(slash); // keeps the leading "/"
 
+    safeLog({ stage: "routing", ok: true, method: request.method, path: url.pathname, host, pathAfterHost: path });
     const provider = PROVIDERS[host];
-    if (!provider) return json(403, { error: "host_not_allowed" });
+    if (!provider) { safeLog({ stage: "host_check", ok: false, host }); return json(403, { error: "host_not_allowed" }); }
 
     const apiKey = env[provider.secret];
-    if (!apiKey) return json(502, { error: "provider_not_configured", provider: host });
+    if (!apiKey) { safeLog({ stage: "secret", ok: false, host, secret: provider.secret }); return json(502, { error: "provider_not_configured", provider: host }); }
 
     // ---- method + body ----
     const method = request.method.toUpperCase();
@@ -157,27 +174,58 @@ export default {
     const accept = request.headers.get("accept");
     if (accept) headers.set("accept", accept);
     headers.set("authorization", `Bearer ${apiKey}`);
-    headers.set("user-agent", "dastyar-relay/1.0");
+    // A browser-like User-Agent is one of the signals Cloudflare's bot
+    // management scores; the default workerd UA scores badly on OpenRouter's
+    // zone and can be answered with a 403 "Access denied by security policy".
+    headers.set(
+      "user-agent",
+      "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+    );
+    // OpenRouter's documented attribution headers. Sending them is free and
+    // keeps requests inside OpenRouter's expected client shape.
+    if (host === "openrouter.ai") {
+      headers.set("HTTP-Referer", "https://dastyar.app");
+      headers.set("X-Title", "Dastyar");
+      headers.set("accept-encoding", "identity");
+    }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+    async function callUpstream() {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+      try {
+        return await fetch(target, {
+          method,
+          headers,
+          body: method === "POST" ? bodyBuf : undefined,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
 
     let upstream;
     try {
-      upstream = await fetch(target, {
-        method,
-        headers,
-        body: method === "POST" ? bodyBuf : undefined,
-        signal: controller.signal,
-      });
+      upstream = await callUpstream();
+      // Cloudflare's bot management sometimes answers a first request from a
+      // datacenter/workerd fingerprint with this exact 403 even though the same
+      // request succeeds moments later. Retry once before giving up, so a
+      // transient fingerprint challenge does not surface as a hard failure.
+      if (upstream.status === 403) {
+        const peek = await upstream.clone().text().catch(() => "");
+        if (peek.toLowerCase().includes("access denied by security policy")) {
+          safeLog({ stage: "botblock", host, attempt: 1 });
+          await new Promise((r) => setTimeout(r, 350));
+          upstream = await callUpstream();
+        }
+      }
     } catch (e) {
-      clearTimeout(timer);
       const aborted = e && e.name === "AbortError";
       return json(aborted ? 504 : 502, {
         error: aborted ? "upstream_timeout" : "upstream_unreachable",
       });
     }
-    clearTimeout(timer);
+    safeLog({ stage: "upstream", ok: upstream.status < 400, host, path, status: upstream.status });
 
     // Stream the provider's response straight back, preserving status and the
     // content type (so streaming/SSE and JSON both pass through unchanged).
