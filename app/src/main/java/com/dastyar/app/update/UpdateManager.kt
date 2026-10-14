@@ -12,6 +12,8 @@ import com.dastyar.app.BuildConfig
 import com.dastyar.app.MainActivity
 import com.dastyar.app.R
 import com.dastyar.app.notifications.NotificationHelper
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * The single entry point for the update feature. It:
@@ -30,11 +32,23 @@ object UpdateManager {
     /** Notification id for "update available" (stable, so it replaces itself). */
     const val ID_UPDATE = 9101
 
-    /** At most one check per day; the app is checked on launch and on resume. */
-    const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    /**
+     * The minimum gap between two automatic checks. Kept short so a release
+     * published while the app is installed is noticed within minutes rather
+     * than hours; a manual "بررسی دوباره" always bypasses it (force = true).
+     */
+    const val CHECK_INTERVAL_MS = 15 * 60 * 1000L
 
     /** Extra the notification / update screen reads to know a check was asked. */
     const val EXTRA_OPEN_UPDATE = "open_update"
+
+    /**
+     * Serialises checks: launch, resume and the background worker can all fire
+     * at once, and without this the same release would be fetched and could be
+     * notified more than once. Holding it also stops concurrent callers from
+     * each paying the interval as a network round-trip.
+     */
+    private val checkMutex = Mutex()
 
     fun createChannel(ctx: Context) {
         val mgr = ctx.getSystemService(NotificationManager::class.java)
@@ -63,7 +77,32 @@ object UpdateManager {
      * [force] = true from the update screen's own "بررسی دوباره" button so a
      * manual check always goes to the network.
      */
-    suspend fun checkForUpdate(ctx: Context, force: Boolean = false): UpdateInfo? {
+    suspend fun checkForUpdate(ctx: Context, force: Boolean = false): UpdateInfo? =
+        checkMutex.withLock { runCheckLocked(ctx, force) }
+
+    /**
+     * Like [checkForUpdate] but also posts the notification once per version.
+     * Used from the background worker, on app launch and on every resume.
+     */
+    suspend fun checkAndNotify(ctx: Context): UpdateInfo? =
+        checkMutex.withLock {
+            val update = runCheckLocked(ctx, force = false) ?: return@withLock null
+            // One notification per version. If the permission was still missing,
+            // the version is NOT marked as notified, so the alert can still
+            // appear later once the user grants notification access.
+            if (update.version != UpdatePrefs.notifiedVersion(ctx)) {
+                val posted = notify(ctx, update)
+                if (posted) UpdatePrefs.setNotifiedVersion(ctx, update.version)
+            }
+            update
+        }
+
+    /**
+     * The interval-gated core shared by both entry points above. It is called
+     * while [checkMutex] is held, so it must never lock again; it also never
+     * touches the notification, only decides whether a newer version exists.
+     */
+    private suspend fun runCheckLocked(ctx: Context, force: Boolean): UpdateInfo? {
         val now = System.currentTimeMillis()
         if (!force && now - UpdatePrefs.lastCheckMs(ctx) < CHECK_INTERVAL_MS) {
             return null
@@ -76,22 +115,6 @@ object UpdateManager {
         // A version the user chose to skip is never offered again.
         if (latest.version == UpdatePrefs.skippedVersion(ctx)) return null
         return latest
-    }
-
-    /**
-     * Like [checkForUpdate] but also posts the notification once per version.
-     * Used from the background worker and on app launch.
-     */
-    suspend fun checkAndNotify(ctx: Context): UpdateInfo? {
-        val update = checkForUpdate(ctx, force = false) ?: return null
-        // One notification per version. If the permission was still missing, the
-        // version is NOT marked as notified, so the alert can still appear later
-        // once the user grants notification access.
-        if (update.version != UpdatePrefs.notifiedVersion(ctx)) {
-            val posted = notify(ctx, update)
-            if (posted) UpdatePrefs.setNotifiedVersion(ctx, update.version)
-        }
-        return update
     }
 
     /**

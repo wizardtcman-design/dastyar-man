@@ -19,6 +19,8 @@ import com.dastyar.app.data.SavedRecipe
 import com.dastyar.app.data.SmartFact
 import com.dastyar.app.data.Task
 import com.dastyar.app.data.WeightEntry
+import com.dastyar.app.update.UpdateInfo
+import com.dastyar.app.update.UpdateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -361,11 +363,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Requests that the UI open the in-app update screen. */
     fun requestOpenUpdate() { _openUpdate.value = _openUpdate.value + 1 }
 
+    // ---- update banner: a newer release the user should be told about ----
+    // Set whenever a newer version exists, independent of notification
+    // permission, so the UI can show a tappable in-app bar as a fallback.
+    private val _updateBanner = MutableStateFlow<UpdateInfo?>(null)
+    val updateBanner: StateFlow<UpdateInfo?> = _updateBanner.asStateFlow()
+
+    /**
+     * Checks GitHub for a newer release and, when one exists, posts the
+     * one-per-version notification AND exposes it via [updateBanner] so an
+     * in-app bar can offer the update even when notifications are disabled.
+     * Safe on every launch and resume: the interval and mutex in [UpdateManager]
+     * make it a no-op most of the time.
+     */
+    fun checkForUpdates() = viewModelScope.launch {
+        val update = UpdateManager.checkAndNotify(getApplication<Application>())
+        if (update != null) _updateBanner.value = update
+    }
+
+    fun dismissUpdateBanner() { _updateBanner.value = null }
+
     init {
         viewModelScope.launch {
             refreshToday()
             profile.collect { p -> if (p != null) refreshToday() }
         }
+        // Look for a new release as soon as the app opens; onAppResumed() repeats
+        // this (interval-gated) every time the user returns to the app.
+        checkForUpdates()
     }
 
     /** Loads today's check-in and today's cached suggestion (if any). */

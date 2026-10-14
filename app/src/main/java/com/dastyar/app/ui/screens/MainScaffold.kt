@@ -1,5 +1,6 @@
 package com.dastyar.app.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
@@ -35,6 +36,10 @@ fun MainScaffold(vm: MainViewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 vm.onAppResumed()
+                // Re-check GitHub on every return to the app, not just at
+                // launch: a release published while the app sat in the
+                // background is picked up as soon as the user comes back.
+                vm.checkForUpdates()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -59,6 +64,10 @@ fun MainScaffold(vm: MainViewModel) {
     LaunchedEffect(openUpdate) {
         if (openUpdate > 0) showUpdate = true
     }
+
+    // A newer release found by the launch/resume check. Shown as an in-app bar
+    // so the update is visible even when notifications are turned off.
+    val updateInfo by vm.updateBanner.collectAsState()
 
     // One-time "دستیار من به‌روز شد" note per version: if the running version
     // has not been announced to this user yet, fetch its release notes and show
@@ -166,6 +175,17 @@ fun MainScaffold(vm: MainViewModel) {
                 "tasks" -> TasksScreen(vm)
                 "checkin" -> CheckInScreen(vm, onDone = { tab = "home" })
             }
+
+            // In-app "new version" bar. Tapping it opens the update screen the
+            // notification would have opened, so the user always has a way in.
+            updateInfo?.let { info ->
+                UpdateBanner(
+                    version = info.version,
+                    onClick = { showUpdate = true },
+                    onDismiss = { vm.dismissUpdateBanner() },
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
+            }
         }
     }
 
@@ -242,6 +262,63 @@ fun MainScaffold(vm: MainViewModel) {
                 ) {
                     Text("بعداً", fontSize = 13.sp)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The in-app "نسخه تازه" bar shown at the top of the screen when a newer release
+ * exists. It is the fallback for users whose notifications are off, and it opens
+ * the same update screen the notification would. Dismissing it only hides the
+ * bar for this session; the next resume check can show it again.
+ */
+@Composable
+private fun UpdateBanner(
+    version: String,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primary,
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            Modifier
+                .clickable { onClick() }
+                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.SystemUpdate,
+                contentDescription = null,
+                tint = Color.White
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "نسخه تازه $version",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Text(
+                    "برای دیدن تغییرات و نصب، بزن.",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 12.sp
+                )
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "بستن",
+                    tint = Color.White
+                )
             }
         }
     }

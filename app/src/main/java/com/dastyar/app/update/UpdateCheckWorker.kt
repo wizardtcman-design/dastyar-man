@@ -11,9 +11,10 @@ import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 
 /**
- * A once-a-day background check so the user still hears about a new version
- * even if they only open the app briefly. It reuses [UpdateManager]
- * transparently, so it posts the same notification the launch check would.
+ * A periodic background safety net so the user still hears about a new version
+ * even if they rarely open the app. It reuses [UpdateManager] transparently, so
+ * it posts the same notification the launch/resume check would, and the shared
+ * interval + one-per-version rule keep it from duplicating that alert.
  *
  * WorkManager (not an alarm) is used on purpose: it is exact-timing-free,
  * survives reboots and app updates, and needs no special permission.
@@ -35,17 +36,21 @@ class UpdateCheckWorker(
     companion object {
         private const val NAME = "dastyar_update_check"
 
-        /** Schedules the daily check, replacing any existing schedule. */
+        /**
+         * Schedules the periodic check. UPDATE (not KEEP) is used so that an app
+         * update resets the schedule with the current interval instead of
+         * inheriting whatever an older installed build first enqueued.
+         */
         fun schedule(ctx: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
-            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(24, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(6, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
             WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
                 NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 request
             )
         }

@@ -79,13 +79,11 @@ class MainActivity : FragmentActivity() {
                         if (openUpdate && profile?.onboardingDone == true) vm.requestOpenUpdate()
                     }
 
-                    // A silent, non-blocking update check on launch. It only
-                    // posts a notification; it never interrupts the user.
-                    LaunchedEffect(Unit) {
-                        runCatching {
-                            com.dastyar.app.update.UpdateManager.checkAndNotify(this@MainActivity)
-                        }
-                    }
+                    // The silent, non-blocking update check now lives in
+                    // MainViewModel.checkForUpdates() (run at VM init and on
+                    // every resume): it posts the one-per-version notification
+                    // AND exposes any newer release for the in-app banner, so a
+                    // single place decides everything and nothing is duplicated.
 
                     // First run: the app has no built-in key, so the user
                     // connects their own before anything else. The flag is held
