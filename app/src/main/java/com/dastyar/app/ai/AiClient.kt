@@ -246,7 +246,7 @@ object AiClient {
             val p = activeProvider()
             var lastResult = ConnectResult(false, FailKind.PROVIDER, "اتصال برقرار نشد.")
             var lastFree = ""
-        for (candidate in textModelChain(p, primaryOverride)) {
+            for (candidate in textModelChain(p)) {
                 val r = probeModel(ctx, p, key, candidate.model)
                 if (r.ok) {
                     // The chain may have fallen back to a free model: remember
@@ -820,7 +820,7 @@ object AiClient {
         // feature, a free model of the same provider is used and its name is
         // returned so nothing is hidden. "Free" is decided by the catalogue's
         // own pricing, never guessed.
-        for (candidate in textModelChain(p)) {
+        for (candidate in textModelChain(p, primaryOverride)) {
             val body = if (responses)
                 responsesBody(candidate.model, system, history, userParts, CHAT_MAX_TOKENS)
             else buildJsonObject {
