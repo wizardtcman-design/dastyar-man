@@ -6,11 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,83 +27,111 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dastyar.app.ai.AiProvider
 import com.dastyar.app.ai.ServiceKeys
 
 /**
- * The compact chat model chooser shown directly above a chat composer.
+ * The tiny model chooser shown inside the chat input box (a small caption under
+ * the field, like professional chat clients).
  *
- * It always shows which model the next message will use, so the user never has
- * to open Settings to know. When the active provider offers more than one model
- * the chip opens a short menu; picking one applies to this conversation only and
- * is remembered per channel, so changing it in one chat never affects another.
- * With a single-model provider the chip is a quiet, non-interactive label.
+ * The caption always names the model the next message will use. Tapping it opens
+ * a menu that lists every model of every text provider the user has actually
+ * configured, grouped under a provider heading (1xAI, Groq, ...). Choosing one
+ * applies to this conversation only; it is remembered per channel and the next
+ * message is really sent to that provider + model, without opening Settings.
+ *
+ * When no provider is ready yet, the app's current provider is shown so the
+ * caption still tells the truth.
  */
 @Composable
-fun ChatModelBar(
+fun ChatModelCaption(
     channel: String,
     accent: Color,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
-    val provider = ServiceKeys.textProvider()
-    val options = provider.pickerModels
     var version by remember { mutableIntStateOf(0) }
     var open by remember { mutableStateOf(false) }
 
-    // Re-reads after a choice; the provider is read fresh on every composition.
-    val current = remember(version, provider.id) {
-        ServiceKeys.conversationModel(channel).ifBlank { ServiceKeys.textModel() }
+    // Re-reads after a choice; provider readiness is read fresh each composition.
+    val groups: List<Pair<AiProvider, List<Pair<String, String>>>> = remember(version) {
+        val ready = ServiceKeys.readyTextProviders()
+            .ifEmpty { listOf(ServiceKeys.textProvider()) }
+        ready.map { it to it.pickerModels }
     }
-    val label = options.firstOrNull { it.first == current }?.second ?: current
-    val canChoose = options.size > 1
+    val choice = remember(version) { ServiceKeys.conversationChoice(channel) }
+    val activeProvider = ServiceKeys.textProvider()
+    val currentProvider = choice?.first ?: activeProvider
+    val currentModel = choice?.second
+        ?: ServiceKeys.modelFor(activeProvider).ifBlank { activeProvider.textModel }
+    val label = groups.asSequence()
+        .flatMap { it.second.asSequence() }
+        .firstOrNull { it.first == currentModel }
+        ?.second
+        ?: currentModel
 
     Row(
-        modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
+        modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
             "مدل:",
-            fontSize = 10.5.sp,
+            fontSize = 10.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Box {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = accent.copy(alpha = .12f),
-                modifier = if (canChoose) Modifier.clickable { open = true } else Modifier
+            Row(
+                Modifier
+                    .clickable { open = true }
+                    .padding(vertical = 1.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (canChoose) Text("⌄", fontSize = 12.sp, color = accent)
-                }
+                Text(
+                    label,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = accent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 220.dp)
+                )
+                Text("⌄", fontSize = 10.sp, color = accent)
             }
-            if (canChoose) {
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    options.forEach { (id, text) ->
+            DropdownMenu(
+                expanded = open,
+                onDismissRequest = { open = false },
+                modifier = Modifier.widthIn(min = 230.dp, max = 320.dp)
+            ) {
+                groups.forEachIndexed { gi, (provider, models) ->
+                    if (gi > 0) HorizontalDivider()
+                    DropdownMenuItem(
+                        enabled = false,
+                        text = {
+                            Text(
+                                provider.label,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        onClick = {}
+                    )
+                    models.forEach { (id, text) ->
+                        val isCurrent = provider.id == currentProvider.id && id == currentModel
                         DropdownMenuItem(
                             text = {
-                                Text(
-                                    (if (id == current) "✓ " else "") + text,
-                                    fontSize = 12.5.sp
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        (if (isCurrent) "✓ " else "") + text,
+                                        fontSize = 12.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             },
                             onClick = {
-                                ServiceKeys.setConversationModel(ctx, channel, id)
+                                ServiceKeys.setConversationChoice(ctx, channel, provider, id)
                                 version++
                                 open = false
                             }

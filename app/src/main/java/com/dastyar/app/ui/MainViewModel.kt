@@ -923,15 +923,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val p = profile.value
         val ci = _todayCheckIn.value
 
-        // The model picked for this conversation (empty = the provider default).
-        val modelOverride = ServiceKeys.conversationModel(channel).ifBlank { null }
+        // The provider + model picked for this conversation (null = app default).
+        val choice = ServiceKeys.conversationChoice(channel)
 
         val res = AiClient.chat(
             system = Prompts.system(channel, p, ci, smartFacts.value),
             history = history,
             userMessage = text,
             ctx = getApplication<Application>(),
-            modelOverride = modelOverride
+            modelOverride = choice?.second,
+            providerOverride = choice?.first
         )
         res.onSuccess { reply ->
             // The meal chats must only ever show a structured recipe. If the
@@ -946,12 +947,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             dao.addMessage(ChatMessage(channel = channel, role = "assistant", content = content))
         }.onFailure { e ->
             // The failing model's name is shown too, so the user can pick another
-            // one from the chooser right above the composer and retry.
-            val used = modelOverride ?: ServiceKeys.textModel()
+            // one from the chooser inside the input box and retry.
+            val used = choice?.second
+                ?: ServiceKeys.modelFor(choice?.first ?: ServiceKeys.textProvider())
             dao.addMessage(
                 ChatMessage(
                     channel = channel, role = "assistant",
-                    content = "⚠️ ${e.message}\n(مدل: $used — از انتخابگر مدل بالا می‌توانی مدل دیگری بگیری)"
+                    content = "⚠️ ${e.message}\n(مدل: $used — از انتخابگر مدل داخل کادر پیام می‌توانی مدل دیگری بگیری)"
                 )
             )
         }

@@ -738,14 +738,18 @@ object AiClient {
         history: List<Pair<String, String>>,
         userMessage: String,
         ctx: android.content.Context? = null,
-        modelOverride: String? = null
+        modelOverride: String? = null,
+        providerOverride: AiProvider? = null
     ): Result<String> = complete(
         system = system,
         history = history,
         userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
-        model = modelOverride?.takeIf { it.isNotBlank() } ?: textModel(),
+        model = modelOverride?.takeIf { it.isNotBlank() }
+            ?: providerOverride?.let { ServiceKeys.modelFor(it) }?.ifBlank { it.textModel }
+            ?: textModel(),
         ctx = ctx,
-        primaryOverride = modelOverride
+        primaryOverride = modelOverride,
+        providerOverride = providerOverride
     )
 
     /** Chat with one image attached (vision). */
@@ -775,7 +779,7 @@ object AiClient {
      * nothing to fall back to.
      */
     private fun candidateKeys(p: AiProvider): List<String> =
-        ServiceKeys.textKey().takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+        ServiceKeys.keyFor(p).takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
 
     private suspend fun complete(
         system: String,
@@ -783,13 +787,14 @@ object AiClient {
         userParts: Array<kotlinx.serialization.json.JsonElement>,
         model: String,
         ctx: android.content.Context? = null,
-        primaryOverride: String? = null
+        primaryOverride: String? = null,
+        providerOverride: AiProvider? = null
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (!chatConfigured) return@withContext Result.failure(
+        // A conversation may pick a specific provider; otherwise the app default.
+        val p = providerOverride ?: activeProvider()
+        if (candidateKeys(p).isEmpty()) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
         )
-
-        val p = activeProvider()
         // Cloudflare text needs an account id as well as a token; without it the
         // request URL would be wrong, so fail early with the real reason.
         if (p.id == AiProviders.cloudflareText.id && ServiceKeys.cloudflareTextAccount().isBlank()) {
@@ -903,7 +908,7 @@ object AiClient {
             }
             if (lastError.contains("اعتبار") || lastError.contains("نامعتبر")) continue
         }
-        recordText(ctx, p, false, lastHttp, startedMs, textModel(), note = lastError)
+        recordText(ctx, p, false, lastHttp, startedMs, model, note = lastError)
         Result.failure(AiException(lastError))
     }
 
@@ -918,7 +923,7 @@ object AiClient {
      */
     private fun textModelChain(provider: AiProvider, primaryOverride: String? = null): List<ModelAttempt> {
         val primary = primaryOverride?.takeIf { it.isNotBlank() }
-            ?: ServiceKeys.textModel().ifBlank { provider.textModel }
+            ?: ServiceKeys.modelFor(provider).ifBlank { provider.textModel }
         // Groq has no free-model catalogue: instead it carries a fixed, fast
         // same-provider fallback (the 20B model) that is used only when the
         // chosen model is rate-limited or busy. It is tried after the primary
@@ -930,7 +935,8 @@ object AiClient {
         // The free-model fallback exists because OpenRouter free accounts cannot
         // reach paid models. Other providers are paid gateways with no free
         // tier, so their configured model is the only one tried.
-        val free = if (provider.id == AiProviders.openRouter.id) freeTextModels() else emptyList()
+        val free = if (provider.id == AiProviders.openRouter.id)
+            freeTextModelsFor(provider, ServiceKeys.keyFor(provider)) else emptyList()
         return buildChain(provider, primary, free)
     }
 
@@ -976,22 +982,6 @@ object AiClient {
             if (m != primary) chain += ModelAttempt(m, 1, free = fallbackIsFree)
         }
         return chain
-    }
-
-    /**
-     * Free text models reported by the provider's own catalogue. Cached after
-     * the first lookup so chat does not fetch the list on every message.
-     */
-    @Volatile
-    private var freeModelsCache: List<String>? = null
-
-    private fun freeTextModels(): List<String> {
-        freeModelsCache?.let { return it }
-        val key = effectiveKey()
-        if (key.isBlank()) return emptyList()
-        val list = freeTextModelsFor(activeProvider(), key)
-        freeModelsCache = list
-        return list
     }
 
     /** Free text model ids for a provider + key, read from its catalogue. */

@@ -585,26 +585,30 @@ private fun ChatPanel(
             }
         }
 
-        // model chooser — shows which model the next message uses and, when the
-        // provider has several, lets the user switch it for this conversation
-        // without leaving the chat.
-        ChatModelBar(channel = channel, accent = accent)
-
-        // composer — always the last row, pinned above the keyboard
+        // composer — always the last row, pinned above the keyboard. The model
+        // chooser lives inside this box, as a small caption under the field, so
+        // the model can be changed right where the message is written.
         Row(
             Modifier
                 .fillMaxWidth()
                 .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 10.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("پیامت را بنویس…", fontSize = 13.sp) },
-                shape = RoundedCornerShape(20.dp),
-                maxLines = 4
-            )
+            Column(Modifier.weight(1f)) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("پیامت را بنویس…", fontSize = 13.sp) },
+                    shape = RoundedCornerShape(20.dp),
+                    maxLines = 4
+                )
+                ChatModelCaption(
+                    channel = channel,
+                    accent = accent,
+                    modifier = Modifier.padding(start = 6.dp, top = 3.dp)
+                )
+            }
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier

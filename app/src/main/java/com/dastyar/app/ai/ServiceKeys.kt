@@ -305,9 +305,9 @@ object ServiceKeys {
         prefs(ctx).edit().putString(TEXT_PROVIDER, p.id).apply()
     }
 
-    /** The key of the selected text provider, or empty when none is set. */
-    fun textKey(): String =
-        when (textProvider().id) {
+    /** The key of any text provider, or empty when that provider has none. */
+    fun keyFor(provider: AiProvider): String =
+        when (provider.id) {
             AiProviders.oneXai.id -> xaiKey.orEmpty()
             AiProviders.atria.id -> atKey.orEmpty()
             AiProviders.groq.id -> gqKey.orEmpty()
@@ -315,15 +315,31 @@ object ServiceKeys {
             else -> orKey.orEmpty()
         }
 
-    /** The stored chat model of the selected text provider. */
-    fun textModel(): String =
-        when (textProvider().id) {
+    /** The stored chat model of any text provider. */
+    fun modelFor(provider: AiProvider): String =
+        when (provider.id) {
             AiProviders.oneXai.id -> xaiTextModel
             AiProviders.atria.id -> atTextModel
             AiProviders.groq.id -> gqTextModel
             AiProviders.cloudflareText.id -> cftModel
             else -> orTextModel
         }
+
+    /** True when a specific text provider is connected and verified. */
+    fun isReady(provider: AiProvider): Boolean =
+        when (provider.id) {
+            AiProviders.oneXai.id -> oneXaiReady()
+            AiProviders.atria.id -> atriaReady()
+            AiProviders.groq.id -> groqReady()
+            AiProviders.cloudflareText.id -> cloudflareTextReady()
+            else -> openRouterReady()
+        }
+
+    /** The key of the selected text provider, or empty when none is set. */
+    fun textKey(): String = keyFor(textProvider())
+
+    /** The stored chat model of the selected text provider. */
+    fun textModel(): String = modelFor(textProvider())
 
     /** State of the selected text provider. */
     fun textState(): State =
@@ -336,14 +352,15 @@ object ServiceKeys {
         }
 
     /** True when the selected text provider is connected and verified. */
-    fun textReady(): Boolean =
-        when (textProvider().id) {
-            AiProviders.oneXai.id -> oneXaiReady()
-            AiProviders.atria.id -> atriaReady()
-            AiProviders.groq.id -> groqReady()
-            AiProviders.cloudflareText.id -> cloudflareTextReady()
-            else -> openRouterReady()
-        }
+    fun textReady(): Boolean = isReady(textProvider())
+
+    /**
+     * The text providers the user has actually configured and verified, in the
+     * order shown to the user. Only these appear in the in-chat model chooser, so
+     * a removed or unconfigured provider is never offered.
+     */
+    fun readyTextProviders(): List<AiProvider> =
+        AiProviders.textProviders.filter { isReady(it) }
 
     /** Saves a key + model for whichever provider serves text right now. */
     fun saveTextProvider(ctx: Context, key: String, model: String, state: State = State.CONNECTED) {
@@ -398,24 +415,33 @@ object ServiceKeys {
     @Volatile private var conversationModels: Map<String, String> = emptyMap()
 
     /**
-     * The model the user picked for one conversation (a chat channel), or an
-     * empty string when the conversation should use the provider's default.
+     * The provider + model the user picked for one conversation (a chat
+     * channel), or null when the conversation should use the app defaults.
      *
-     * The stored value is tied to the provider it was chosen on, so a model
-     * picked on 1xAI is ignored instead of being sent to a different provider
-     * after the text provider is switched in Settings.
+     * Both are stored together so a choice made in one conversation is fully
+     * independent: switching a model in one chat never changes another, and a
+     * provider that was later removed simply stops being offered.
      */
-    fun conversationModel(channel: String): String {
-        val stored = conversationModels[channel] ?: return ""
+    fun conversationChoice(channel: String): Pair<AiProvider, String>? {
+        val stored = conversationModels[channel] ?: return null
         val sep = stored.indexOf('\u001F')
-        if (sep <= 0) return ""
+        if (sep <= 0) return null
         val providerId = stored.substring(0, sep)
         val model = stored.substring(sep + 1)
-        return if (providerId == textProvider().id && model.isNotBlank()) model else ""
+        if (model.isBlank()) return null
+        val provider = AiProviders.all.firstOrNull { it.id == providerId } ?: return null
+        return provider to model
     }
 
-    /** Remembers the chat model for one conversation; blank clears it. */
-    fun setConversationModel(ctx: Context, channel: String, model: String) {
+    /**
+     * The model of the conversation's own choice, or empty when the conversation
+     * uses the default. Kept for screens that only need the model name.
+     */
+    fun conversationModel(channel: String): String =
+        conversationChoice(channel)?.second.orEmpty()
+
+    /** Remembers the provider + model for one conversation. */
+    fun setConversationChoice(ctx: Context, channel: String, provider: AiProvider, model: String) {
         val key = CHAT_MODEL_PREFIX + channel
         val clean = model.trim()
         val map = conversationModels.toMutableMap()
@@ -424,7 +450,7 @@ object ServiceKeys {
             map.remove(channel)
             e.remove(key)
         } else {
-            val value = textProvider().id + '\u001F' + clean
+            val value = provider.id + '\u001F' + clean
             map[channel] = value
             e.putString(key, value)
         }

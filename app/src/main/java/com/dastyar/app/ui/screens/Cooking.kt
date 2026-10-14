@@ -448,24 +448,28 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
             }
         }
 
-        // model chooser — same behaviour as the other chat screens
-        ChatModelBar(channel = meal.channel, accent = meal.accent)
-
-        // composer — pinned above the keyboard
+        // composer — pinned above the keyboard; the model chooser sits inside it
         Row(
             Modifier
                 .fillMaxWidth()
                 .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 10.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("سؤالت را بنویس…", fontSize = 13.sp) },
-                shape = RoundedCornerShape(20.dp),
-                maxLines = 4
-            )
+            Column(Modifier.weight(1f)) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("سؤالت را بنویس…", fontSize = 13.sp) },
+                    shape = RoundedCornerShape(20.dp),
+                    maxLines = 4
+                )
+                ChatModelCaption(
+                    channel = meal.channel,
+                    accent = meal.accent,
+                    modifier = Modifier.padding(start = 6.dp, top = 3.dp)
+                )
+            }
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier
