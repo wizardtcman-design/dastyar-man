@@ -203,6 +203,7 @@ private fun CookingHome(
                     r = d,
                     accent = Green,
                     busy = busy,
+                    fullText = pantryText ?: d.raw,
                     onSave = { vm.saveRecipe(d.name, "خانگی", d.raw) }
                 )
                 Spacer(Modifier.height(10.dp))

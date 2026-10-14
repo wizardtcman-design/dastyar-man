@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -113,7 +114,7 @@ fun CopyMessageButton(
     Box(
         modifier
             .size(32.dp)
-            .combinedClickable(enabled = hasText, onClick = { copyMessageText(context, text) }),
+            .clickable(enabled = hasText) { copyMessageText(context, text) },
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         Icon(
