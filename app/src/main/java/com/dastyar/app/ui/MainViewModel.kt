@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dastyar.app.ai.AiClient
 import com.dastyar.app.ai.Prompts
+import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.data.CheckIn
 import com.dastyar.app.data.Cycle
@@ -922,11 +923,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val p = profile.value
         val ci = _todayCheckIn.value
 
+        // The model picked for this conversation (empty = the provider default).
+        val modelOverride = ServiceKeys.conversationModel(channel).ifBlank { null }
+
         val res = AiClient.chat(
             system = Prompts.system(channel, p, ci, smartFacts.value),
             history = history,
             userMessage = text,
-            ctx = getApplication<Application>()
+            ctx = getApplication<Application>(),
+            modelOverride = modelOverride
         )
         res.onSuccess { reply ->
             // The meal chats must only ever show a structured recipe. If the
@@ -940,8 +945,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val content = if (isMeal && !looksLikeRecipe) MEAL_INVALID_REPLY else reply
             dao.addMessage(ChatMessage(channel = channel, role = "assistant", content = content))
         }.onFailure { e ->
+            // The failing model's name is shown too, so the user can pick another
+            // one from the chooser right above the composer and retry.
+            val used = modelOverride ?: ServiceKeys.textModel()
             dao.addMessage(
-                ChatMessage(channel = channel, role = "assistant", content = "⚠️ ${e.message}")
+                ChatMessage(
+                    channel = channel, role = "assistant",
+                    content = "⚠️ ${e.message}\n(مدل: $used — از انتخابگر مدل بالا می‌توانی مدل دیگری بگیری)"
+                )
             )
         }
     }

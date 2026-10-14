@@ -61,7 +61,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
     var showTimePicker by remember { mutableStateOf(false) }
     var balance by remember { mutableStateOf<AiClient.ServiceBalance?>(null) }
     var balanceLoading by remember { mutableStateOf(false) }
-    // Text-provider card (OpenRouter or CodeCraft)
+    // Text-provider card (the chat/text service)
     var textProviderId by remember { mutableStateOf(ServiceKeys.textProviderId()) }
     var orStatus by remember { mutableStateOf<String?>(null) }
     var orNewKey by remember { mutableStateOf("") }
@@ -475,7 +475,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         // ---- three AI services, managed independently ----
 
-        // Text-provider card: pick OpenRouter or CodeCraft and manage its key.
+        // Text-provider card: pick the chat/text service and manage its key.
         DastyarCard(accent = Purple) {
             SectionTitle("سرویس متن (چت)", "💬")
             Spacer(Modifier.height(6.dp))
@@ -510,13 +510,14 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             Text("مدل چت: ${ServiceKeys.textModel()}", fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            // Groq lets the user pick between its two models. The one not picked
-            // stays available as the automatic fallback when the picked model is
-            // rate-limited.
-            if (ServiceKeys.textProvider().id == AiProviders.groq.id) {
+            // Every provider that offers more than one model gets a picker here;
+            // the chosen one becomes the default for chats that have no per-chat
+            // choice. Groq's unpicked model stays as its automatic fallback.
+            val picker = ServiceKeys.textProvider().pickerModels
+            if (picker.size > 1) {
                 Spacer(Modifier.height(8.dp))
-                Text("انتخاب مدل Groq:", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                AiProviders.groqModels.forEach { (id, label) ->
+                Text("انتخاب مدل:", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                picker.forEach { (id, label) ->
                     val on = ServiceKeys.textModel() == id
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -524,7 +525,7 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
                             .clickable {
-                                ServiceKeys.setGroqTextModel(ctx, id)
+                                ServiceKeys.setTextModel(ctx, id)
                                 keysVersion++
                             }
                     ) {
@@ -534,10 +535,12 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                             else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Text(
-                    "اگر مدل انتخابی مشغول یا محدود شود، برنامه خودکار از مدل دیگر Groq استفاده می‌کند.",
-                    fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (ServiceKeys.textProvider().id == AiProviders.groq.id) {
+                    Text(
+                        "اگر مدل انتخابی مشغول یا محدود شود، برنامه خودکار از مدل دیگر Groq استفاده می‌کند.",
+                        fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             if (ServiceKeys.textProvider().id == AiProviders.openRouter.id) {
                 Text(
@@ -676,9 +679,8 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                                             supportsEdit = caps?.supportsEdit ?: false
                                         )
                                     } else {
-                                        // CodeCraft and Atria are text-only: save the
-                                        // key for the selected provider through the
-                                        // shared path.
+                                        // Text-only providers: save the key for the
+                                        // selected provider through the shared path.
                                         ServiceKeys.saveTextProvider(
                                             ctx, orNewKey.trim(), provider.textModel
                                         )
@@ -702,16 +704,6 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         balanceLoading -> "در حال دریافت اعتبار…"
                         balance?.remaining != null -> "اعتبار OpenRouter: ${money(balance!!.remaining!!)}"
                         else -> "اعتبار OpenRouter: قابل دریافت نیست"
-                    },
-                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else if (ServiceKeys.textProvider().id == AiProviders.kie.id) {
-                Text(
-                    when {
-                        balanceLoading -> "در حال دریافت اعتبار…"
-                        balance?.remaining != null ->
-                            "اعتبار kie.ai: ${"%.1f".format(balance!!.remaining!!)} کردیت"
-                        else -> "اعتبار kie.ai: قابل دریافت نیست"
                     },
                     fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

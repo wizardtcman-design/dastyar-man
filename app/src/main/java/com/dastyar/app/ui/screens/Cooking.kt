@@ -448,6 +448,9 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
             }
         }
 
+        // model chooser — same behaviour as the other chat screens
+        ChatModelBar(channel = meal.channel, accent = meal.accent)
+
         // composer — pinned above the keyboard
         Row(
             Modifier

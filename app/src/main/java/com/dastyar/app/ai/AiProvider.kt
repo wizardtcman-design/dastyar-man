@@ -4,9 +4,9 @@ package com.dastyar.app.ai
  * Which HTTP shape a provider's text endpoint speaks.
  *
  * [CHAT] is the classic OpenAI `/chat/completions` call (a `messages` array),
- * shared by OpenRouter, OpenAI, Groq, CodeCraft, Atria, Aion and most others.
+ * used by 1xAI, OpenRouter, OpenAI, Groq, Atria and Aion.
  * [RESPONSES] is the newer OpenAI `/responses` call (an `instructions` string
- * plus an `input` array), used by kie.ai's cheapest text models.
+ * plus an `input` array); the machinery is kept for any provider that needs it.
  */
 enum class ApiStyle { CHAT, RESPONSES }
 
@@ -52,9 +52,24 @@ data class AiProvider(
      */
     val modelsPath: String = "",
     /** Which request/response shape the text endpoint speaks. */
-    val apiStyle: ApiStyle = ApiStyle.CHAT
+    val apiStyle: ApiStyle = ApiStyle.CHAT,
+    /**
+     * The models the chat picker offers for this provider, as (id, label) pairs
+     * with the recommended default first. A short, curated list is used on
+     * purpose: it keeps the picker usable on a phone and only lists models that
+     * were checked against the provider's own catalogue. Empty means the
+     * provider has a single model ([textModel]) and no chooser is shown.
+     */
+    val modelOptions: List<Pair<String, String>> = emptyList()
 ) {
     val supportsImages: Boolean get() = imageModel.isNotBlank()
+
+    /**
+     * The models offered in the chat model picker: the curated [modelOptions]
+     * when present, otherwise just this provider's single [textModel].
+     */
+    val pickerModels: List<Pair<String, String>>
+        get() = if (modelOptions.isNotEmpty()) modelOptions else listOf(textModel to textModel)
 
     fun chatUrl(): String = when (apiStyle) {
         ApiStyle.CHAT -> "${baseUrl.trimEnd('/')}/chat/completions"
@@ -89,21 +104,56 @@ object AiProviders {
         supportsImageEdit = true,
         creditsPath = "credits",
         keyInfoPath = "key",
-        modelsPath = "models"
+        modelsPath = "models",
+        modelOptions = listOf(
+            "google/gemini-2.5-flash-lite" to "Gemini 2.5 Flash Lite (پیش‌فرض، ارزان)",
+            "google/gemini-2.5-flash" to "Gemini 2.5 Flash",
+            "openai/gpt-4o-mini" to "GPT-4o mini"
+        )
     )
 
     /**
-     * CodeCraft API is the second text provider the user can pick. It is
-     * OpenAI-compatible and exposes a model catalogue, but no image generation:
-     * every model it lists outputs text only, so it is offered for chat/text
-     * features and never for images.
+     * 1xAI (1xai.ir) is the app's main OpenAI-compatible text provider: a
+     * Toman-billed proxy that reaches OpenAI, Anthropic, Google and DeepSeek
+     * models from inside Iran (no VPN, no foreign card), at the provider's USD
+     * list price + a flat 20% markup. It is one key and one base URL
+     * (`https://1xai.ir/v1`), and it also exposes `/v1/models` and
+     * `/v1/usage/summary`.
+     *
+     * The default is `gemini-2.5-flash-lite`, the cheapest current chat model on
+     * 1xAI's own catalogue (≈۳۱٬۰۰۰ تومان ورودی / ۱۲۳٬۰۰۰ تومان خروجی per 1M
+     * tokens) with a 1M-token context and solid Persian. Every model in
+     * [modelOptions] was read from the official list at https://1xai.ir/models —
+     * all are cheap, Persian-capable chat models. Text-only for the app.
      */
-    val codeCraft = AiProvider(
-        id = "codecraft",
-        label = "CodeCraft API",
-        baseUrl = "https://codecraftapi.com/v1",
-        textModel = "gemini-3.6-flash",
-        modelsPath = "models"
+    val oneXai = AiProvider(
+        id = "1xai",
+        label = "1xAI",
+        baseUrl = "https://1xai.ir/v1",
+        textModel = "gemini-2.5-flash-lite",
+        modelsPath = "models",
+        modelOptions = listOf(
+            "gemini-2.5-flash-lite" to "Gemini 2.5 Flash Lite — پیش‌فرض، ارزان‌ترین مناسب",
+            "gemini-3.1-flash-lite" to "Gemini 3.1 Flash Lite — ارزان و نسل جدید",
+            "gemini-2.5-flash" to "Gemini 2.5 Flash — سریع و متعادل",
+            "gemma-4-26b-a4b-it" to "Gemma 4 26B — ارزان، فارسی روان",
+            "gemma-4-31b-it" to "Gemma 4 31B — ارزان، فارسی روان",
+            "gpt-4o-mini" to "GPT-4o mini — اقتصادی و خوش‌کیفیت",
+            "gpt-5-nano" to "GPT-5 nano — ارزان‌ترین OpenAI",
+            "gpt-5.4-mini" to "GPT-5.4 mini — سریع‌تر و باکیفیت",
+            "deepseek-chat" to "DeepSeek Chat — ارزان با فارسی خوب",
+            "claude-haiku-4-5" to "Claude Haiku 4.5 — سریع و ارزان"
+        )
+    )
+
+    /**
+     * The models the Groq card offers, main first. The fallback model is a
+     * normal, user-selectable choice here; the app additionally uses it
+     * automatically when the main model is rate-limited.
+     */
+    val groqModels = listOf(
+        "openai/gpt-oss-120b" to "GPT-OSS 120B (دقیق‌تر)",
+        "openai/gpt-oss-20b" to "GPT-OSS 20B (سریع‌تر)"
     )
 
     /**
@@ -137,17 +187,8 @@ object AiProviders {
         label = "Groq (GPT-OSS)",
         baseUrl = "https://api.groq.com/openai/v1",
         textModel = "openai/gpt-oss-120b",
-        modelsPath = "models"
-    )
-
-    /**
-     * The models the Groq card offers, main first. The fallback model is a
-     * normal, user-selectable choice here; the app additionally uses it
-     * automatically when the main model is rate-limited.
-     */
-    val groqModels = listOf(
-        "openai/gpt-oss-120b" to "GPT-OSS 120B (دقیق‌تر)",
-        "openai/gpt-oss-20b" to "GPT-OSS 20B (سریع‌تر)"
+        modelsPath = "models",
+        modelOptions = groqModels
     )
 
     /**
@@ -167,25 +208,6 @@ object AiProviders {
         baseUrl = "https://api.aionlabs.ai/v1",
         textModel = "aion-labs/aion-2.0",
         modelsPath = "models"
-    )
-
-    /**
-     * kie.ai is the sixth text provider: an aggregator that resells many model
-     * families (Gemini, Claude, GPT, Grok, Kimi, DeepSeek) far below list price
-     * and is by far the cheapest option for text. Its cheapest text model,
-     * GPT-6 Luna, is not on the classic `/chat/completions` route but on the
-     * OpenAI **Responses** API under `/openai/v1/responses`, so this provider
-     * carries [ApiStyle.RESPONSES] and the app sends `instructions` + `input`
-     * instead of `messages`. Verified with a real Persian cooking request: it
-     * follows the app's marker format and stays inside the token budget.
-     * Text-only -- it is offered for chat/text features and never for images.
-     */
-    val kie = AiProvider(
-        id = "kie",
-        label = "kie.ai (GPT-6 Luna)",
-        baseUrl = "https://api.kie.ai/openai/v1",
-        textModel = "gpt-6-luna",
-        apiStyle = ApiStyle.RESPONSES
     )
 
     /**
@@ -221,10 +243,10 @@ object AiProviders {
      * provider that cannot do the job.
      */
     val textProviders: List<AiProvider> =
-        listOf(kie, openRouter, cloudflareText, codeCraft, atria, groq, aion)
+        listOf(oneXai, openRouter, cloudflareText, atria, groq, aion)
 
     val all: List<AiProvider> =
-        listOf(kie, openRouter, cloudflareText, codeCraft, atria, groq, aion, openAiCompatible)
+        listOf(oneXai, openRouter, cloudflareText, atria, groq, aion, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

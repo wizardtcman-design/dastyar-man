@@ -57,7 +57,7 @@ object AiClient {
 
     /**
      * The provider that currently serves chat/text. It is whichever the user
-     * picked (OpenRouter or CodeCraft); screens never care which one, so a new
+     * picked (1xAI, OpenRouter, ...); screens never care which one, so a new
      * provider only needs an [AiProviders] entry.
      */
     fun activeProvider(): AiProvider = ServiceKeys.textProvider()
@@ -246,7 +246,7 @@ object AiClient {
             val p = activeProvider()
             var lastResult = ConnectResult(false, FailKind.PROVIDER, "اتصال برقرار نشد.")
             var lastFree = ""
-            for (candidate in textModelChain(p)) {
+        for (candidate in textModelChain(p, primaryOverride)) {
                 val r = probeModel(ctx, p, key, candidate.model)
                 if (r.ok) {
                     // The chain may have fallen back to a free model: remember
@@ -255,7 +255,7 @@ object AiClient {
                         ServiceKeys.setTextModel(ctx, candidate.model)
                     }
                     // Image capabilities are only meaningful for OpenRouter,
-                    // whose chat endpoint can also return images. CodeCraft and
+                    // whose chat endpoint can also return images. Text-only
                     // Atria have no image models at all, so never probe them for
                     // one.
                     if (p.supportsImages || p.id == AiProviders.openRouter.id) {
@@ -422,7 +422,7 @@ object AiClient {
         for (candidate in textModelChain(provider, key)) {
             val r = probeModelFor(provider, key, candidate.model)
             if (r.ok) {
-                // CodeCraft and Atria have no image models, so never probe for one.
+                // Text-only providers have no image models, so never probe for one.
                 val caps = if (provider.id == AiProviders.openRouter.id)
                     resolveImageModel(provider, key) else null
                 val dc = if (caps != null)
@@ -558,36 +558,6 @@ object AiClient {
      */
     suspend fun fetchBalance(): ServiceBalance = withContext(Dispatchers.IO) {
         val provider = activeProvider()
-
-        // kie.ai reports the balance as a plain number under `data` on a fixed
-        // endpoint that lives outside the model base URL, so it is read here.
-        if (provider.id == AiProviders.kie.id) {
-            val key = effectiveKey()
-            val remaining: Double? = if (key.isBlank()) null else try {
-                val req = Request.Builder()
-                    .url("https://api.kie.ai/api/v1/chat/credit")
-                    .addHeader("Authorization", "Bearer $key")
-                    .addHeader("Accept", "application/json")
-                    .get().build()
-                http.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) null else {
-                        val d = json.parseToJsonElement(resp.body?.string().orEmpty())
-                            .jsonObject["data"]
-                        d?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                            ?: d?.jsonObject?.get("credit")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                    }
-                }
-            } catch (e: Exception) {
-                null
-            }
-            val b = if (remaining == null) ServiceBalance.unsupported()
-            else ServiceBalance(
-                supported = true, remaining = remaining, usage = null,
-                currency = "کردیت", exhausted = remaining <= 0.0
-            )
-            lastBalance = b
-            return@withContext b
-        }
 
         if (provider.creditsPath.isBlank() && provider.keyInfoPath.isBlank()) {
             return@withContext ServiceBalance.unsupported()
@@ -767,13 +737,15 @@ object AiClient {
         system: String,
         history: List<Pair<String, String>>,
         userMessage: String,
-        ctx: android.content.Context? = null
+        ctx: android.content.Context? = null,
+        modelOverride: String? = null
     ): Result<String> = complete(
         system = system,
         history = history,
         userParts = arrayOf(buildJsonObject { put("type", "text"); put("text", userMessage) }),
-        model = textModel(),
-        ctx = ctx
+        model = modelOverride?.takeIf { it.isNotBlank() } ?: textModel(),
+        ctx = ctx,
+        primaryOverride = modelOverride
     )
 
     /** Chat with one image attached (vision). */
@@ -810,7 +782,8 @@ object AiClient {
         history: List<Pair<String, String>>,
         userParts: Array<kotlinx.serialization.json.JsonElement>,
         model: String,
-        ctx: android.content.Context? = null
+        ctx: android.content.Context? = null,
+        primaryOverride: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         if (!chatConfigured) return@withContext Result.failure(
             AiException("کلید هوش مصنوعی تنظیم نشده است.")
@@ -943,8 +916,9 @@ object AiClient {
      * primary cannot answer (paid model on a free account), so quality is kept
      * whenever it is available.
      */
-    private fun textModelChain(provider: AiProvider): List<ModelAttempt> {
-        val primary = ServiceKeys.textModel().ifBlank { provider.textModel }
+    private fun textModelChain(provider: AiProvider, primaryOverride: String? = null): List<ModelAttempt> {
+        val primary = primaryOverride?.takeIf { it.isNotBlank() }
+            ?: ServiceKeys.textModel().ifBlank { provider.textModel }
         // Groq has no free-model catalogue: instead it carries a fixed, fast
         // same-provider fallback (the 20B model) that is used only when the
         // chosen model is rate-limited or busy. It is tried after the primary
@@ -954,7 +928,7 @@ object AiClient {
             return buildChain(provider, primary, others, fallbackIsFree = false)
         }
         // The free-model fallback exists because OpenRouter free accounts cannot
-        // reach paid models. CodeCraft and Atria are paid gateways with no free
+        // reach paid models. Other providers are paid gateways with no free
         // tier, so their configured model is the only one tried.
         val free = if (provider.id == AiProviders.openRouter.id) freeTextModels() else emptyList()
         return buildChain(provider, primary, free)

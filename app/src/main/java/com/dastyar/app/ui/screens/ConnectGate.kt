@@ -190,8 +190,8 @@ fun ConnectGate(onConnected: () -> Unit) {
                                     supportsEdit = caps?.supportsEdit ?: false
                                 )
                             } else {
-                                // CodeCraft and Atria are text-only: save the key for
-                                // the selected provider through the shared path.
+                                // Text-only providers: save the key for the
+                                // selected provider through the shared path.
                                 ServiceKeys.saveTextProvider(
                                     ctx, keyInput.trim(), provider.textModel
                                 )
@@ -354,19 +354,17 @@ private fun gateMask(v: String?): String {
 
 /** The key-field label for the selected text provider. */
 private fun gateKeyLabel(providerId: String): String = when (providerId) {
-    AiProviders.codeCraft.id -> "CodeCraft API Key"
+    AiProviders.oneXai.id -> "کلید 1xAI"
     AiProviders.atria.id -> "Atria API Key"
     AiProviders.aion.id -> "Aion Labs API Key"
-    AiProviders.kie.id -> "kie.ai API Key"
     else -> "OpenRouter API Key"
 }
 
 /** An example of the selected provider's key format. */
 private fun gateKeyHint(providerId: String): String = when (providerId) {
-    AiProviders.codeCraft.id -> "cc_…"
+    AiProviders.oneXai.id -> "1xai-…"
     AiProviders.atria.id -> "atr_…"
     AiProviders.aion.id -> "alv2_…"
-    AiProviders.kie.id -> "کلید ۳۲ کاراکتری kie.ai"
     else -> "sk-or-v1-…"
 }
 

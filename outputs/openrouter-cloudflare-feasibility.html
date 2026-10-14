@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>امکان‌سنجی: دسترسی OpenRouter بدون فیلترشکن</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fff;--subtle:#fafafa;--muted:#f4f4f5;--line:#e4e4e7;--faint:#a1a1aa;--soft:#71717a;--text2:#52525b;--text:#18181b;--good:#15803d;--bad:#b91c1c;--warn:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 Vazirmatn,system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+main{max-width:1040px;margin:0 auto;padding:48px 24px 72px}
+h1{font-size:29px;line-height:1.35;letter-spacing:-.02em;margin:0 0 12px;font-weight:700}
+h2{font-size:19px;margin:40px 0 12px;font-weight:600}
+h3{font-size:15px;margin:22px 0 8px;font-weight:600}
+p{margin:0 0 12px;color:var(--text2)}
+a{color:var(--text);text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:2px}
+.meta{font-size:13px;color:var(--soft);margin-bottom:24px}
+.lead{font-size:17px;color:var(--text);max-width:780px}
+.picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.pick{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--bg)}
+.pick .label{font-size:12px;font-weight:600;color:var(--soft)}
+.pick .name{font-weight:600;margin:4px 0;font-size:16px}
+.pick p{font-size:14px;margin:6px 0 0}
+.callout{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--subtle);margin:14px 0}
+.callout.warn{border-color:#fde68a;background:#fffbeb}
+.callout.bad{border-color:#fecaca;background:#fef2f2}
+.callout.good{border-color:#bbf7d0;background:#f0fdf4}
+.callout strong{color:var(--text)}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin:12px 0}
+table{width:100%;border-collapse:collapse;font-size:14px;min-width:620px}
+th,td{padding:10px 12px;text-align:right;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--subtle);font-weight:600;font-size:12px;color:var(--soft);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.tag{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;background:var(--muted);color:var(--text2);white-space:nowrap}
+.tag.ok{background:#f0fdf4;color:var(--good)}
+.tag.bad{background:#fef2f2;color:var(--bad)}
+.tag.check{background:#fffbeb;color:var(--warn)}
+ul,ol{margin:0;padding-right:20px;color:var(--text2)}
+li{margin:5px 0}
+code{background:var(--muted);padding:1px 6px;border-radius:6px;font-size:13px;font-variant-numeric:normal;direction:ltr;display:inline;overflow-wrap:anywhere}
+pre{background:#18181b;color:#e4e4e7;padding:14px 16px;border-radius:12px;overflow-x:auto;max-width:100%;font-size:13px;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-word}
+h1,h2,h3,p,li{overflow-wrap:break-word}
+.sources{font-size:13px}
+.sources li{word-break:break-word}
+footer{margin-top:48px;font-size:12px;color:var(--faint)}
+@media (max-width:600px){main{padding:28px 16px 48px}h1{font-size:23px}.lead{font-size:16px}}
+</style>
+</head>
+<body>
+<main>
+  <h1>امکان‌سنجی: دسترسی به هوش مصنوعی «دستیار من» بدون فیلترشکن</h1>
+  <div class="meta">بررسی نسخه v1.0.74 · تاریخ ۱۲ اکتبر ۲۰۲۶ · فقط بررسی، <strong>هیچ فایلی تغییر نکرد</strong></div>
+
+  <p class="lead">
+    <strong>نتیجه‌ی کوتاه:</strong> مشکل از کدِ اپ نیست؛ مشکل فیلترینگ شبکه‌ای روی دامنه/آی‌پی <code>openrouter.ai</code> است.
+    ساخت سرور واسط با Cloudflare Workers <strong>فنی است</strong>، اما دو مانع جدی دارد که آن را برای هدف «کار بدون فیلترشکن» نامطمئن می‌کند:
+    (۱) خودِ دامنه‌های Cloudflare و <code>workers.dev</code> هم در ایران فیلتر می‌شوند، پس کاربر باز هم بدون فیلترشکن به سرور واسط نمی‌رسد؛
+    (۲) شرایط استفاده‌ی OpenRouter صراحتاً استفاده از VPN/پروکسی برای دور زدن محدودیت مدل‌ها را ممنوع کرده و نقض مادی قرارداد است.
+  </p>
+
+  <h2>۱) چرا OpenRouter بدون فیلترشکن وصل نمی‌شود؟</h2>
+  <p>سه لایه می‌تواند دخیل باشد؛ شواهد به فیلترینگ شبکه‌ای اشاره می‌کند، نه باگ کد:</p>
+  <ul>
+    <li><strong>فیلترینگ دامنه/IP در ایران:</strong> دامنه‌های OpenRouter و محدوده‌ی Cloudflare در IranFilter مسدود/مسموم می‌شوند. با فیلترشکن، ترافیک از IP خارجی خارج می‌شود و اتصال برقرار می‌شود — دقیقاً همان رفتاری که تو دیدی.</li>
+    <li><strong>از سمت OpenRouter/مدل‌ها:</strong> OpenRouter گزارش می‌کند «کشور مبدأ درخواست» را به مدل می‌دهد (بند ۶.۸ شرایط استفاده) و برخی مدل‌ها برای برخی کشورها «Restricted» هستند.</li>
+    <li><strong>کد اپ:</strong> بررسی شد؛ آدرس پایه، هدر <code>Authorization: Bearer</code> و مسیر <code>/chat/completions</code> درست است (تست زنده: بدون کلید → 401 سالم). پس کد علت قطع نیست.</li>
+  </ul>
+  <div class="callout good">
+    <strong>شواهد تست زنده (از مرورگر ابری با پروکسی خارجی):</strong>
+    <code>GET openrouter.ai/api/v1/models</code> → <span class="tag ok">۲۰۰</span> · بدون کلید → <span class="tag ok">۴۰۱ (پاسخ JSON سالم)</span>.
+    یعنی وقتی IP خارجی است، سرویس کامل کار می‌کند.
+  </div>
+
+  <h2>۲) آیا Cloudflare Workers می‌تواند واسط امن بسازد؟</h2>
+  <div class="picks">
+    <div class="pick">
+      <div class="label">از نظر فنی</div>
+      <div class="name"><span class="tag ok">شدنی است</span></div>
+      <p>Worker می‌تواند درخواست را بگیرد، کلید را نگه دارد و به OpenRouter بفرستد. OpenRouter رسماً «Cloudflare AI Gateway» را پشتیبانی می‌کند.</p>
+    </div>
+    <div class="pick">
+      <div class="label">از نظر دسترسی کاربر ایرانی</div>
+      <div class="name"><span class="tag bad">مشکل دارد</span></div>
+      <p>خودِ <code>workers.dev</code> و آی‌پی‌های Cloudflare در ایران فیلتر/مسموم می‌شوند. اگر کاربر به واسط نرسد، کل راه‌حل بی‌فایده است.</p>
+    </div>
+    <div class="pick">
+      <div class="label">از نظر قانونی</div>
+      <div class="name"><span class="tag bad">نقض شرایط</span></div>
+      <p>بند ۵.۷ شرایط استفاده‌ی OpenRouter: استفاده از VPN/پروکسی برای دسترسی به مدل‌های محدود ممنوع و «نقض مادی» است.</p>
+    </div>
+  </div>
+
+  <h3>موانع دقیق (با منبع رسمی)</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>مانع</th><th>وضعیت</th><th>مبنا</th></tr></thead>
+      <tbody>
+        <tr><td>دامنه‌ی <code>workers.dev</code> در ایران مسدود است</td><td><span class="tag bad">تأییدشده</span></td><td>گزارش net4people/bbs#215 (مسدودسازی و DNS poisoning)</td></tr>
+        <tr><td>برخی آی‌پی‌های Cloudflare در ایران فیلتر می‌شوند</td><td><span class="tag bad">تأییدشده</span></td><td>انجمن رسمی Cloudflare + مطالعه IRBlock (USENIX Security 2025)</td></tr>
+        <tr><td>محدودیت‌های جدید Cloudflare روی Workerها</td><td><span class="tag check">هشدار</span></td><td>MahsaNet (سپتامبر ۲۰۲۵): سقف روزانه و rate-limit زودتر پر می‌شود</td></tr>
+        <tr><td>منع استفاده از پروکسی توسط OpenRouter</td><td><span class="tag bad">تأییدشده</span></td><td>بند ۵.۷ شرایط استفاده‌ی OpenRouter</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>۳) رایگان‌بودن واقعی و محدودیت‌ها</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>مورد</th><th>پلن رایگان</th><th>هزینه/سقف</th></tr></thead>
+      <tbody>
+        <tr><td>Cloudflare Workers — درخواست</td><td>۱۰۰٬۰۰۰ درخواست در روز</td><td>رایگان؛ عبور از سقف → خطای 1027</td></tr>
+        <tr><td>Cloudflare Workers — CPU</td><td>۱۰ میلی‌ثانیه CPU در هر فراخوانی</td><td>برای پروکسی ساده کافی است (شبکه CPU مصرف نمی‌کند)</td></tr>
+        <tr><td>Cloudflare AI Gateway — هسته</td><td>رایگان روی همه‌ی پلن‌ها</td><td>تحلیل، کش، rate-limit رایگان</td></tr>
+        <tr><td>AI Gateway — لاگ</td><td>۱۰۰٬۰۰۰ لاگ کل (Workers Free)</td><td>—</td></tr>
+        <tr><td>OpenRouter — مدل‌های رایگان</td><td>۵۰ درخواست/روز (۲۰ در دقیقه)</td><td>با خرید ≥ ۱۰ اعتبار → ۱۰۰۰ درخواست/روز</td></tr>
+        <tr><td>OpenRouter — مدل‌های پولی</td><td>—</td><td>به‌ازای هر توکن؛ حداقل خرید ۵ دلار</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>سرور واسط خودش رایگان است، اما <strong>هزینه‌ی مدل پولی از بین نمی‌رود</strong> و به کلید OpenRouter کاربر/مالک برمی‌گردد.</p>
+
+  <h2>۴) معماری پیشنهادی (اگر بخواهی)</h2>
+  <p>اگر با وجود موانع تصمیم گرفتی، معماری «امن و بدون افشای کلید» این است:</p>
+  <pre>اپ دستیار من  ──HTTPS──▶  Cloudflare Worker (کلید فقط اینجا)  ──▶  OpenRouter</pre>
+  <ul>
+    <li><strong>کلید در APK نیست:</strong> کلید OpenRouter فقط به‌صورت Secret در Cloudflare ذخیره می‌شود، نه در کد/مخزن/APK. (الان هم کلید در اپ کاربر ذخیره می‌شود، نه در APK.)</li>
+    <li><strong>احراز هویت اپ↔واسط:</strong> یک توکن مشترک/امضای درخواست تا فقط اپِ تو بتواند از واسط استفاده کند.</li>
+    <li><strong>محدودیت مصرف:</strong> Rate-limit و Budget-limit روی Cloudflare (از طریق Dynamic Routes / AI Gateway) تا سوءاستفاده و هزینه‌ی سرسام‌آور جلوگیری شود.</li>
+    <li><strong>بدون تغییر بخش‌های دیگر:</strong> فقط یک ارائه‌دهنده/Base URL اضافه می‌شود؛ Atria، CodeCraft، تصویرسازی و آشپزی دست‌نخورده می‌مانند.</li>
+  </ul>
+  <p>نقطه‌ی اتصال جایگزینِ رسمی (اگر Cloudflare را انتخاب کنی): <code>https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openrouter</code></p>
+
+  <h2>۵) آیا سرور واسط مشکل را حل می‌کند؟ — پاسخ صریح</h2>
+  <div class="callout bad">
+    <strong>خیر، به‌تنهایی تضمین نمی‌کند.</strong> چون خودِ دامنه/آی‌پی Cloudflare (از جمله <code>workers.dev</code>) در ایران فیلتر است،
+    کاربر باز هم بدون فیلترشکن به سرور واسط نمی‌رسد. یعنی واسط «فیلترِ OpenRouter» را دور می‌زند ولی «فیلترِ Cloudflare» سر جایش می‌ماند.
+    تنها راه واقعی این می‌شد که دامنه‌ی واسط روی میزبانی باشد که در ایران فیلتر نیست — که تضمینی و پایدار نیست.
+  </div>
+
+  <h2>۶) پیشنهاد عملی</h2>
+  <ol>
+    <li><strong>راه‌حل پایدار و قانونی:</strong> همان کاری که برای Atria شد — استفاده از ارائه‌دهنده‌ای که در ایران فیلتر نیست (Atria تست شد و کار می‌کند).</li>
+    <li><strong>اگر OpenRouter لازم است:</strong> کاربر خودش با فیلترشکن وصل شود (همان رفتار فعلی).</li>
+    <li><strong>واسط Cloudflare:</strong> فقط اگر میزبانی با دامنه‌ی غیرفیلتر و پایدار پیدا شود؛ و با آگاهی از بند ۵.۷ شرایط OpenRouter.</li>
+  </ol>
+
+  <h2>وضعیت بررسی‌ها</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>بررسی</th><th>وضعیت</th></tr></thead>
+      <tbody>
+        <tr><td>۱</td><td>علت قطع OpenRouter (کد درست، فیلترینگ شبکه)</td><td><span class="tag ok">انجام شد</span></td></tr>
+        <tr><td>۲</td><td>مستندات رسمی Cloudflare Workers (سقف، قیمت، سیاست)</td><td><span class="tag ok">انجام شد</span></td></tr>
+        <tr><td>۳</td><td>مستندات رسمی OpenRouter (خطاها، محدودیت، شرایط)</td><td><span class="tag ok">انجام شد</span></td></tr>
+        <tr><td>۴</td><td>تست زنده‌ی Endpointها</td><td><span class="tag ok">انجام شد (openrouter 200)</span></td></tr>
+        <tr><td>۵</td><td>امکان‌سنجی واسط بدون فیلترشکن</td><td><span class="tag bad">مطمئن نیست (موانع دارد)</span></td></tr>
+        <tr><td>۶</td><td>تست زنده از داخل ایران</td><td><span class="tag check">انجام‌نشده (دسترسی ندارم)</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>منابع</h2>
+  <ol class="sources">
+    <li><a href="https://developers.cloudflare.com/workers/platform/pricing/">Cloudflare Workers — Pricing</a> — ۱۰۰٬۰۰۰ درخواست/روز رایگان</li>
+    <li><a href="https://developers.cloudflare.com/workers/platform/limits/">Cloudflare Workers — Limits</a> — ۱۰ms CPU، خطای 1027</li>
+    <li><a href="https://developers.cloudflare.com/ai-gateway/reference/pricing/">Cloudflare AI Gateway — Pricing</a> — هسته رایگان</li>
+    <li><a href="https://developers.cloudflare.com/ai-gateway/usage/providers/openrouter/">Cloudflare AI Gateway — OpenRouter</a> — نقطه‌ی اتصال رسمی</li>
+    <li><a href="https://openrouter.ai/docs/api-reference/errors">OpenRouter — Errors &amp; Debugging</a> — کدهای خطا</li>
+    <li><a href="https://openrouter.ai/docs/faq">OpenRouter — FAQ</a> — محدودیت مدل‌های رایگان</li>
+    <li><a href="https://openrouter.ai/terms">OpenRouter — Terms of Service</a> — بند ۵.۷ منع پروکسی/VPN</li>
+    <li><a href="https://github.com/net4people/bbs/issues/215">net4people/bbs#215</a> — مسدودسازی workers.dev در ایران</li>
+    <li><a href="https://community.cloudflare.com/t/filtering-of-some-cloudflare-dns-ips-in-iran/695200">Cloudflare Community</a> — فیلتر شدن برخی IPهای Cloudflare در ایران</li>
+    <li><a href="https://www.usenix.org/system/files/usenixsecurity25-tai.pdf">IRBlock (USENIX Security 2025)</a> — مطالعه‌ی فیلترینگ ایران</li>
+  </ol>
+
+  <footer>این گزارش فقط خواندنی است: هیچ فایل، کد، شاخه، تگ، Release یا تنظیمی در این نشست تغییر نکرد. کلیدها در هیچ‌جا ذخیره یا نمایش داده نشدند.</footer>
+</main>
+</body>
+</html>

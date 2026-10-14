@@ -9,8 +9,9 @@ import android.content.Context
  *
  * Each service keeps its own state, so one service being broken never marks
  * another as disconnected:
- *   - Text provider -> chat / text features; either OpenRouter or CodeCraft,
- *                      chosen by the user, each with its own key and model
+ *   - Text provider -> chat / text features; 1xAI, OpenRouter, Cloudflare,
+ *                      Atria, Groq or Aion, chosen by the user, each with its
+ *                      own key and model
  *   - Cloudflare AI -> image generation and editing
  *   - Pollinations  -> image fallback (key optional)
  */
@@ -28,10 +29,10 @@ object ServiceKeys {
     private const val OR_SUPPORTS_EDIT = "or_supports_edit"
     private const val OR_STATE = "or_state"
 
-    // CodeCraft
-    private const val CC_KEY = "cc_key"
-    private const val CC_MODEL = "cc_text_model"
-    private const val CC_STATE = "cc_state"
+    // 1xAI (1xai.ir)
+    private const val XAI_KEY = "xai_key"
+    private const val XAI_MODEL = "xai_text_model"
+    private const val XAI_STATE = "xai_state"
 
     // Atria (Atria Dawn Preview)
     private const val AT_KEY = "at_key"
@@ -47,11 +48,6 @@ object ServiceKeys {
     private const val AL_KEY = "al_key"
     private const val AL_MODEL = "al_text_model"
     private const val AL_STATE = "al_state"
-
-    // kie.ai (GPT-6 Luna)
-    private const val KE_KEY = "ke_key"
-    private const val KE_MODEL = "ke_text_model"
-    private const val KE_STATE = "ke_state"
 
     // Cloudflare (image account)
     private const val CF_ACCOUNT = "cf_account"
@@ -82,9 +78,9 @@ object ServiceKeys {
     @Volatile private var orSupportsEdit: Boolean = true
     @Volatile private var orState: State = State.NOT_SET
 
-    @Volatile private var ccKey: String? = null
-    @Volatile private var ccTextModel: String = AiProviders.codeCraft.textModel
-    @Volatile private var ccState: State = State.NOT_SET
+    @Volatile private var xaiKey: String? = null
+    @Volatile private var xaiTextModel: String = AiProviders.oneXai.textModel
+    @Volatile private var xaiState: State = State.NOT_SET
 
     @Volatile private var atKey: String? = null
     @Volatile private var atTextModel: String = AiProviders.atria.textModel
@@ -97,10 +93,6 @@ object ServiceKeys {
     @Volatile private var alKey: String? = null
     @Volatile private var alTextModel: String = AiProviders.aion.textModel
     @Volatile private var alState: State = State.NOT_SET
-
-    @Volatile private var keKey: String? = null
-    @Volatile private var keTextModel: String = AiProviders.kie.textModel
-    @Volatile private var keState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -184,42 +176,42 @@ object ServiceKeys {
             .apply()
     }
 
-    // ----------------------------------------------------------- CodeCraft
+    // --------------------------------------------------------------- 1xAI
 
-    fun codeCraftKey(): String? = ccKey
-    fun codeCraftTextModel(): String = ccTextModel
-    fun codeCraftState(): State = ccState
-    fun codeCraftReady(): Boolean = ccState == State.CONNECTED && !ccKey.isNullOrBlank()
+    fun oneXaiKey(): String? = xaiKey
+    fun oneXaiTextModel(): String = xaiTextModel
+    fun oneXaiState(): State = xaiState
+    fun oneXaiReady(): Boolean = xaiState == State.CONNECTED && !xaiKey.isNullOrBlank()
 
-    fun saveCodeCraft(ctx: Context, key: String, state: State = State.CONNECTED,
-                      textModel: String? = null) {
+    fun saveOneXai(ctx: Context, key: String, state: State = State.CONNECTED,
+                   textModel: String? = null) {
         val clean = key.trim()
         if (clean.isBlank()) return
-        ccKey = clean
-        ccState = state
-        textModel?.takeIf { it.isNotBlank() }?.let { ccTextModel = it }
+        xaiKey = clean
+        xaiState = state
+        textModel?.takeIf { it.isNotBlank() }?.let { xaiTextModel = it }
         prefs(ctx).edit()
-            .putString(CC_KEY, clean)
-            .putString(CC_MODEL, ccTextModel)
-            .putString(CC_STATE, state.name)
+            .putString(XAI_KEY, clean)
+            .putString(XAI_MODEL, xaiTextModel)
+            .putString(XAI_STATE, state.name)
             .apply()
     }
 
-    fun setCodeCraftState(ctx: Context, state: State) {
-        ccState = state
-        prefs(ctx).edit().putString(CC_STATE, state.name).apply()
+    fun setOneXaiState(ctx: Context, state: State) {
+        xaiState = state
+        prefs(ctx).edit().putString(XAI_STATE, state.name).apply()
     }
 
-    fun setCodeCraftTextModel(ctx: Context, model: String) {
+    fun setOneXaiTextModel(ctx: Context, model: String) {
         if (model.isBlank()) return
-        ccTextModel = model
-        prefs(ctx).edit().putString(CC_MODEL, model).apply()
+        xaiTextModel = model
+        prefs(ctx).edit().putString(XAI_MODEL, model).apply()
     }
 
-    fun clearCodeCraft(ctx: Context) {
-        ccKey = null
-        ccState = State.NOT_SET
-        prefs(ctx).edit().remove(CC_KEY).remove(CC_MODEL).remove(CC_STATE).apply()
+    fun clearOneXai(ctx: Context) {
+        xaiKey = null
+        xaiState = State.NOT_SET
+        prefs(ctx).edit().remove(XAI_KEY).remove(XAI_MODEL).remove(XAI_STATE).apply()
     }
 
     // --------------------------------------------------------------- Atria
@@ -336,44 +328,6 @@ object ServiceKeys {
         prefs(ctx).edit().remove(AL_KEY).remove(AL_MODEL).remove(AL_STATE).apply()
     }
 
-    // ------------------------------------------------------------- kie.ai
-
-    fun kieKey(): String? = keKey
-    fun kieTextModel(): String = keTextModel
-    fun kieState(): State = keState
-    fun kieReady(): Boolean = keState == State.CONNECTED && !keKey.isNullOrBlank()
-
-    fun saveKie(ctx: Context, key: String, state: State = State.CONNECTED,
-                textModel: String? = null) {
-        val clean = key.trim()
-        if (clean.isBlank()) return
-        keKey = clean
-        keState = state
-        textModel?.takeIf { it.isNotBlank() }?.let { keTextModel = it }
-        prefs(ctx).edit()
-            .putString(KE_KEY, clean)
-            .putString(KE_MODEL, keTextModel)
-            .putString(KE_STATE, state.name)
-            .apply()
-    }
-
-    fun setKieState(ctx: Context, state: State) {
-        keState = state
-        prefs(ctx).edit().putString(KE_STATE, state.name).apply()
-    }
-
-    fun setKieTextModel(ctx: Context, model: String) {
-        if (model.isBlank()) return
-        keTextModel = model
-        prefs(ctx).edit().putString(KE_MODEL, model).apply()
-    }
-
-    fun clearKie(ctx: Context) {
-        keKey = null
-        keState = State.NOT_SET
-        prefs(ctx).edit().remove(KE_KEY).remove(KE_MODEL).remove(KE_STATE).apply()
-    }
-
     // ------------------------------------------------------ text provider
 
     /**
@@ -399,11 +353,10 @@ object ServiceKeys {
     /** The key of the selected text provider, or empty when none is set. */
     fun textKey(): String =
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> ccKey.orEmpty()
+            AiProviders.oneXai.id -> xaiKey.orEmpty()
             AiProviders.atria.id -> atKey.orEmpty()
             AiProviders.groq.id -> gqKey.orEmpty()
             AiProviders.aion.id -> alKey.orEmpty()
-            AiProviders.kie.id -> keKey.orEmpty()
             AiProviders.cloudflareText.id -> cftToken.orEmpty()
             else -> orKey.orEmpty()
         }
@@ -411,11 +364,10 @@ object ServiceKeys {
     /** The stored chat model of the selected text provider. */
     fun textModel(): String =
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> ccTextModel
+            AiProviders.oneXai.id -> xaiTextModel
             AiProviders.atria.id -> atTextModel
             AiProviders.groq.id -> gqTextModel
             AiProviders.aion.id -> alTextModel
-            AiProviders.kie.id -> keTextModel
             AiProviders.cloudflareText.id -> cftModel
             else -> orTextModel
         }
@@ -423,11 +375,10 @@ object ServiceKeys {
     /** State of the selected text provider. */
     fun textState(): State =
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> ccState
+            AiProviders.oneXai.id -> xaiState
             AiProviders.atria.id -> atState
             AiProviders.groq.id -> gqState
             AiProviders.aion.id -> alState
-            AiProviders.kie.id -> keState
             AiProviders.cloudflareText.id -> cftState
             else -> orState
         }
@@ -435,11 +386,10 @@ object ServiceKeys {
     /** True when the selected text provider is connected and verified. */
     fun textReady(): Boolean =
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> codeCraftReady()
+            AiProviders.oneXai.id -> oneXaiReady()
             AiProviders.atria.id -> atriaReady()
             AiProviders.groq.id -> groqReady()
             AiProviders.aion.id -> aionReady()
-            AiProviders.kie.id -> kieReady()
             AiProviders.cloudflareText.id -> cloudflareTextReady()
             else -> openRouterReady()
         }
@@ -447,11 +397,10 @@ object ServiceKeys {
     /** Saves a key + model for whichever provider serves text right now. */
     fun saveTextProvider(ctx: Context, key: String, model: String, state: State = State.CONNECTED) {
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> saveCodeCraft(ctx, key, state, model)
+            AiProviders.oneXai.id -> saveOneXai(ctx, key, state, model)
             AiProviders.atria.id -> saveAtria(ctx, key, state, model)
             AiProviders.groq.id -> saveGroq(ctx, key, state, model)
             AiProviders.aion.id -> saveAion(ctx, key, state, model)
-            AiProviders.kie.id -> saveKie(ctx, key, state, model)
             // Cloudflare text needs an account as well as a token; when one is
             // already stored, saving a new key keeps it. The dedicated
             // saveCloudflareText call is used by the screens so both are set.
@@ -463,11 +412,10 @@ object ServiceKeys {
 
     fun setTextProviderState(ctx: Context, state: State) {
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> setCodeCraftState(ctx, state)
+            AiProviders.oneXai.id -> setOneXaiState(ctx, state)
             AiProviders.atria.id -> setAtriaState(ctx, state)
             AiProviders.groq.id -> setGroqState(ctx, state)
             AiProviders.aion.id -> setAionState(ctx, state)
-            AiProviders.kie.id -> setKieState(ctx, state)
             AiProviders.cloudflareText.id -> setCloudflareTextState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
@@ -475,11 +423,10 @@ object ServiceKeys {
 
     fun setTextModel(ctx: Context, model: String) {
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> setCodeCraftTextModel(ctx, model)
+            AiProviders.oneXai.id -> setOneXaiTextModel(ctx, model)
             AiProviders.atria.id -> setAtriaTextModel(ctx, model)
             AiProviders.groq.id -> setGroqTextModel(ctx, model)
             AiProviders.aion.id -> setAionTextModel(ctx, model)
-            AiProviders.kie.id -> setKieTextModel(ctx, model)
             AiProviders.cloudflareText.id -> setCloudflareTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
@@ -488,14 +435,54 @@ object ServiceKeys {
     /** Clears the key of whichever provider serves text right now. */
     fun clearTextProvider(ctx: Context) {
         when (textProvider().id) {
-            AiProviders.codeCraft.id -> clearCodeCraft(ctx)
+            AiProviders.oneXai.id -> clearOneXai(ctx)
             AiProviders.atria.id -> clearAtria(ctx)
             AiProviders.groq.id -> clearGroq(ctx)
             AiProviders.aion.id -> clearAion(ctx)
-            AiProviders.kie.id -> clearKie(ctx)
             AiProviders.cloudflareText.id -> clearCloudflareText(ctx)
             else -> clearOpenRouter(ctx)
         }
+    }
+
+    // ------------------------------------------- per-conversation model
+
+    private const val CHAT_MODEL_PREFIX = "chat_model_"
+
+    @Volatile private var conversationModels: Map<String, String> = emptyMap()
+
+    /**
+     * The model the user picked for one conversation (a chat channel), or an
+     * empty string when the conversation should use the provider's default.
+     *
+     * The stored value is tied to the provider it was chosen on, so a model
+     * picked on 1xAI is ignored instead of being sent to a different provider
+     * after the text provider is switched in Settings.
+     */
+    fun conversationModel(channel: String): String {
+        val stored = conversationModels[channel] ?: return ""
+        val sep = stored.indexOf('\u001F')
+        if (sep <= 0) return ""
+        val providerId = stored.substring(0, sep)
+        val model = stored.substring(sep + 1)
+        return if (providerId == textProvider().id && model.isNotBlank()) model else ""
+    }
+
+    /** Remembers the chat model for one conversation; blank clears it. */
+    fun setConversationModel(ctx: Context, channel: String, model: String) {
+        val key = CHAT_MODEL_PREFIX + channel
+        val clean = model.trim()
+        val map = conversationModels.toMutableMap()
+        val e = prefs(ctx).edit()
+        if (clean.isBlank()) {
+            map.remove(channel)
+            e.remove(key)
+        } else {
+            val value = textProvider().id + '\u001F' + clean
+            map[channel] = value
+            e.putString(key, value)
+        }
+        e.apply()
+        conversationModels = map
     }
 
     // ---------------------------------------------------------- Cloudflare
@@ -632,7 +619,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, CC_KEY, AT_KEY, GQ_KEY, AL_KEY, KE_KEY,
+            listOf(OR_KEY, XAI_KEY, AT_KEY, GQ_KEY, AL_KEY,
                 CF_ACCOUNT, CF_TOKEN, CFT_ACCOUNT, CFT_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
@@ -645,9 +632,9 @@ object ServiceKeys {
         orSupportsEdit = p.getBoolean(OR_SUPPORTS_EDIT, true)
         orState = if (orKey == null) State.NOT_SET else stateOf(p.getString(OR_STATE, null))
 
-        ccKey = p.getString(CC_KEY, null)?.trim()?.ifBlank { null }
-        ccTextModel = p.getString(CC_MODEL, null)?.ifBlank { null } ?: AiProviders.codeCraft.textModel
-        ccState = if (ccKey == null) State.NOT_SET else stateOf(p.getString(CC_STATE, null))
+        xaiKey = p.getString(XAI_KEY, null)?.trim()?.ifBlank { null }
+        xaiTextModel = p.getString(XAI_MODEL, null)?.ifBlank { null } ?: AiProviders.oneXai.textModel
+        xaiState = if (xaiKey == null) State.NOT_SET else stateOf(p.getString(XAI_STATE, null))
 
         atKey = p.getString(AT_KEY, null)?.trim()?.ifBlank { null }
         atTextModel = p.getString(AT_MODEL, null)?.ifBlank { null } ?: AiProviders.atria.textModel
@@ -661,11 +648,15 @@ object ServiceKeys {
         alTextModel = p.getString(AL_MODEL, null)?.ifBlank { null } ?: AiProviders.aion.textModel
         alState = if (alKey == null) State.NOT_SET else stateOf(p.getString(AL_STATE, null))
 
-        keKey = p.getString(KE_KEY, null)?.trim()?.ifBlank { null }
-        keTextModel = p.getString(KE_MODEL, null)?.ifBlank { null } ?: AiProviders.kie.textModel
-        keState = if (keKey == null) State.NOT_SET else stateOf(p.getString(KE_STATE, null))
-
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
+
+        // Per-conversation model choices (chat_model_<channel> = "<providerId>\u001F<model>").
+        conversationModels = p.all
+            .mapNotNull { (k, v) ->
+                if (k.startsWith(CHAT_MODEL_PREFIX) && v is String)
+                    k.removePrefix(CHAT_MODEL_PREFIX) to v else null
+            }
+            .toMap()
 
         cfAccount = p.getString(CF_ACCOUNT, null)?.trim()?.ifBlank { null }
         cfToken = p.getString(CF_TOKEN, null)?.trim()?.ifBlank { null }

@@ -585,6 +585,11 @@ private fun ChatPanel(
             }
         }
 
+        // model chooser — shows which model the next message uses and, when the
+        // provider has several, lets the user switch it for this conversation
+        // without leaving the chat.
+        ChatModelBar(channel = channel, accent = accent)
+
         // composer — always the last row, pinned above the keyboard
         Row(
             Modifier
