@@ -409,16 +409,27 @@ private fun MealChatScreen(vm: MainViewModel, meal: Meal, onBack: () -> Unit) {
                                 r = d,
                                 accent = meal.accent,
                                 busy = busy,
+                                fullText = m.content,
                                 onSave = { vm.saveRecipe(d.name, meal.title, d.raw) }
                             )
                         }
                     } else {
-                        Card {
-                            Text(
-                                "⚠️ پیشنهاد غذا کامل دریافت نشد؛ «${meal.newLabel}» را دوباره بزن.",
-                                fontSize = 12.5.sp,
-                                color = MaterialTheme.colorScheme.error
-                            )
+                        // The model's reply could not be parsed into a recipe, so
+                        // it is not rendered as one — but its stored text stays
+                        // copyable for the user.
+                        MessageActionBox(
+                            text = m.content,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                        ) {
+                            Card {
+                                Text(
+                                    "⚠️ پیشنهاد غذا کامل دریافت نشد؛ «${meal.newLabel}» را دوباره بزن.",
+                                    fontSize = 12.5.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
                 }
@@ -532,8 +543,9 @@ private fun ChatOverflowMenu(onClear: () -> Unit) {
 @Composable
 private fun UserBubble(m: ChatMessage) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        Box(
-            Modifier
+        MessageActionBox(
+            text = m.content,
+            modifier = Modifier
                 .widthIn(max = 290.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(Purple.copy(alpha = .14f))
@@ -554,10 +566,20 @@ private fun RecipeCard(
     r: Recipe,
     accent: Color,
     busy: Boolean,
+    fullText: String,
     onSave: () -> Unit
 ) {
     DastyarCard(accent = accent) {
-        Text("🍲 ${r.name}", fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 3)
+        Row(verticalAlignment = Alignment.Top) {
+            Text(
+                "🍲 ${r.name}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                maxLines = 3,
+                modifier = Modifier.weight(1f)
+            )
+            CopyMessageButton(fullText)
+        }
 
         if (r.intro.isNotBlank()) {
             Spacer(Modifier.height(4.dp))

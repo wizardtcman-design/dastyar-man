@@ -649,8 +649,9 @@ private fun MessageBubble(m: ChatMessage, accent: Color) {
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.Start else Arrangement.End
     ) {
-        Box(
-            Modifier
+        MessageActionBox(
+            text = m.content,
+            modifier = Modifier
                 .widthIn(max = 290.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .then(
