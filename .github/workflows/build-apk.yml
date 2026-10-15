@@ -115,6 +115,9 @@ jobs:
           cat /tmp/release_body.md
 
       - name: Publish Release with APK
+        # A build dispatched on a feature branch is a compile/verification run:
+        # it must not publish a release or move "latest". Only main publishes.
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.name }}
@@ -127,6 +130,7 @@ jobs:
           make_latest: true
 
       - name: Move the "latest" tag to this build
+        if: github.ref == 'refs/heads/main'
         run: |
           git tag -f latest
           git push -f origin latest

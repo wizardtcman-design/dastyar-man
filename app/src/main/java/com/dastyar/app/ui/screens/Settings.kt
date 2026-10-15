@@ -594,11 +594,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         shape = RoundedCornerShape(14.dp), singleLine = true
                     )
                     Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
+                    SecretField(
                         value = cftToken, onValueChange = { cftToken = it.trim() },
-                        label = { Text("API Token (Workers AI + Account Analytics Read)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp), singleLine = true
+                        label = "API Token (Workers AI + Account Analytics Read)",
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
@@ -657,11 +656,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 }
                 if (showOrEdit) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    SecretField(
                         value = orNewKey, onValueChange = { orNewKey = it.trim() },
-                        label = { Text("کلید جدید ${ServiceKeys.textProvider().label}") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp), singleLine = true
+                        label = "کلید جدید ${ServiceKeys.textProvider().label}",
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
@@ -797,11 +795,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     shape = RoundedCornerShape(14.dp), singleLine = true
                 )
                 Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
+                SecretField(
                     value = cfToken, onValueChange = { cfToken = it.trim() },
-                    label = { Text("API Token") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp), singleLine = true
+                    label = "API Token",
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
@@ -1073,11 +1070,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             }
             if (showPoEdit) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
+                SecretField(
                     value = poKey, onValueChange = { poKey = it.trim() },
-                    label = { Text("Pollinations API Key (اختیاری)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp), singleLine = true
+                    label = "Pollinations API Key (اختیاری)",
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
