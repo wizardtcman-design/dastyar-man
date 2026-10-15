@@ -586,59 +586,27 @@ private fun ChatPanel(
             }
         }
 
-        // composer — always the last row, pinned above the keyboard. The model
-        // chooser lives inside this box, as a small caption under the field, so
-        // the model can be changed right where the message is written.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            Column(Modifier.weight(1f)) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("پیامت را بنویس…", fontSize = 13.sp) },
-                    shape = RoundedCornerShape(20.dp),
-                    maxLines = 4
-                )
-                ChatModelCaption(
-                    channel = channel,
-                    accent = accent,
-                    modifier = Modifier.padding(start = 6.dp, top = 3.dp)
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (input.isNotBlank() && !busy)
-                            Brush.linearGradient(listOf(Purple, accent))
-                        else
-                            Brush.linearGradient(
-                                listOf(
-                                    Color.Gray.copy(alpha = .35f),
-                                    Color.Gray.copy(alpha = .35f)
-                                )
-                            )
-                    )
-                    .clickable(enabled = input.isNotBlank() && !busy) {
-                        val text = input.trim()
-                        if (text.isNotEmpty() && !busy) {
-                            input = ""
-                            busy = true
-                            vm.chat(channel, text)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.Send, contentDescription = "ارسال", tint = Color.White)
-            }
-        }
+        // composer — always the last row, pinned above the keyboard. The shared
+        // ChatComposer keeps the input field and the send action in one row and
+        // the model chooser below them, so the button never drifts from the
+        // field when the chooser is shown, the field grows or the keyboard opens.
+        ChatComposer(
+            value = input,
+            onValueChange = { input = it },
+            placeholder = "پیامت را بنویس…",
+            accent = accent,
+            channel = channel,
+            sendEnabled = input.isNotBlank() && !busy,
+            onSend = {
+                val text = input.trim()
+                if (text.isNotEmpty() && !busy) {
+                    input = ""
+                    busy = true
+                    vm.chat(channel, text)
+                }
+            },
+            modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 10.dp)
+        )
     }
 
     // Delete confirmation for a single message. Only this row is removed; the
