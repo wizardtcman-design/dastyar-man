@@ -120,9 +120,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
-    // Networking
+    // Networking. No logging interceptor is included on purpose: it was never
+    // used, and a BODY-level logger would risk writing API keys into logcat.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // DataStore for settings
@@ -130,7 +130,8 @@ dependencies {
 
     // Encrypted preferences for the user's own AI service keys, so a key the
     // user typed is never left as plain text in the app's preferences file.
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // Pinned to the stable 1.1.0 release instead of an alpha build.
+    implementation("androidx.security:security-crypto:1.1.0")
 
     // WorkManager for reminders
     implementation("androidx.work:work-runtime-ktx:2.9.0")

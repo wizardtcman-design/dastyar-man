@@ -3,15 +3,12 @@ package com.dastyar.app.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.ai.AiClient
@@ -73,6 +70,10 @@ fun ConnectGate(onConnected: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // Say plainly, before the first key is entered, where the data goes.
+        AiPrivacyCard()
+        Spacer(Modifier.height(14.dp))
+
         // ------------------------------------------------- text provider
         // One card, two providers: the user picks which service handles text and
         // enters the matching key. Whichever is chosen is used everywhere in the
@@ -118,29 +119,14 @@ fun ConnectGate(onConnected: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            OutlinedTextField(
+            SecretField(
                 value = keyInput,
                 onValueChange = { keyInput = it.trim() },
-                label = {
-                    Text(
-                        if (selectedProviderId == AiProviders.cloudflareText.id)
-                            "Cloudflare API Token" else gateKeyLabel(selectedProviderId)
-                    )
-                },
-                placeholder = {
-                    Text(
-                        if (selectedProviderId == AiProviders.cloudflareText.id)
-                            "Workers AI + Account Analytics Read"
-                        else gateKeyHint(selectedProviderId)
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done
-                )
+                label = if (selectedProviderId == AiProviders.cloudflareText.id)
+                    "Cloudflare API Token" else gateKeyLabel(selectedProviderId),
+                placeholder = if (selectedProviderId == AiProviders.cloudflareText.id)
+                    "Workers AI + Account Analytics Read" else gateKeyHint(selectedProviderId),
+                modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -229,17 +215,11 @@ fun ConnectGate(onConnected: () -> Unit) {
                 singleLine = true
             )
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
+            SecretField(
                 value = cfToken,
                 onValueChange = { cfToken = it.trim() },
-                label = { Text("API Token") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done
-                )
+                label = "API Token",
+                modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(10.dp))
             GradientButton(
@@ -291,13 +271,11 @@ fun ConnectGate(onConnected: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
+            SecretField(
                 value = poKey,
                 onValueChange = { poKey = it.trim() },
-                label = { Text("Pollinations API Key (اختیاری)") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                singleLine = true
+                label = "Pollinations API Key (اختیاری)",
+                modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(10.dp))
             OutlinedButton(

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>گزارش ممیزی امنیتی — دستیار من</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0e1116; --card:#161b22; --card2:#1c232c; --line:#2a323d;
+    --txt:#e6edf3; --muted:#9aa7b4; --accent:#7c5cff;
+    --crit:#ff4d5e; --high:#ff8a3d; --med:#ffcf4d; --low:#5cc8ff; --ok:#3ddc97;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:Vazirmatn,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.85;
+    font-size:15px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 20px 64px}
+  header.hero{background:linear-gradient(135deg,#1a1330,#12151d 60%);
+    border:1px solid var(--line);border-radius:20px;padding:26px 24px;position:relative;overflow:hidden}
+  header.hero::after{content:"";position:absolute;inset:auto -60px -80px auto;
+    width:260px;height:260px;background:radial-gradient(circle,var(--accent),transparent 70%);opacity:.25}
+  h1{font-size:26px;margin:0 0 6px;font-weight:800;letter-spacing:-.2px}
+  .sub{color:var(--muted);font-size:14px}
+  .pill{display:inline-block;background:#21183c;color:#c3b5ff;border:1px solid #3a2f66;
+    border-radius:999px;padding:3px 12px;font-size:12px;margin-inline-start:8px}
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:20px 0 8px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
+  .kpi b{display:block;font-size:26px;font-weight:800;line-height:1.2}
+  .kpi span{font-size:12px;color:var(--muted)}
+  h2{font-size:18px;margin:34px 0 12px;font-weight:800;display:flex;align-items:center;gap:8px}
+  h2::before{content:"";width:5px;height:18px;border-radius:3px;background:var(--accent)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:12px 0}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:11px 12px;text-align:right;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:none}
+  .sev{display:inline-block;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:700;white-space:nowrap}
+  .s-crit{background:#3a1520;color:var(--crit)} .s-high{background:#3a2412;color:var(--high)}
+  .s-med{background:#3a3416;color:var(--med)} .s-low{background:#12303f;color:var(--low)}
+  .s-ok{background:#12331f;color:var(--ok)}
+  code{background:#0b0e13;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
+    font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#d8c9ff;direction:ltr;display:inline-block}
+  ul{margin:8px 0;padding-inline-start:20px} li{margin:5px 0}
+  .finding{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:14px 0}
+  .finding .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px}
+  .finding h3{font-size:16px;margin:0;font-weight:700}
+  .finding .meta{font-size:12.5px;color:var(--muted);margin:2px 0 10px;direction:ltr;text-align:left}
+  .finding .meta b{color:#c3b5ff}
+  .lbl{font-size:12px;color:var(--muted);font-weight:700;margin-top:10px}
+  .ok-list{background:#0f1a15;border:1px solid #1d3a2b}
+  .footer{color:var(--muted);font-size:12.5px;text-align:center;margin-top:36px;border-top:1px solid var(--line);padding-top:16px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:640px){
+    .kpis{grid-template-columns:repeat(2,1fr)} .grid2{grid-template-columns:1fr}
+    h1{font-size:21px} body{font-size:14.5px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>ممیزی امنیتی برنامه «دستیار من» <span class="pill">Kotlin / Android</span></h1>
+    <div class="sub">
+      مخزن: wizardtcman-design/dastyar-man &nbsp;•&nbsp; نسخهٔ فعلی: v1.0.125 &nbsp;•&nbsp;
+      دامنه: کد منبع، مانیفست، تنظیمات ساخت، CI، رمزنگاری و مسیر شبکه<br/>
+      نوع بررسی: ایستا (Static) روی کد و پیکربندی — بدون اجرا روی دستگاه واقعی
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><b style="color:var(--crit)">۰</b><span>بحرانی</span></div>
+    <div class="kpi"><b style="color:var(--high)">۰</b><span>بالا</span></div>
+    <div class="kpi"><b style="color:var(--med)">۳</b><span>متوسط</span></div>
+    <div class="kpi"><b style="color:var(--low)">۵</b><span>کم</span></div>
+    <div class="kpi"><b style="color:var(--ok)">۸</b><span>نقطهٔ قوت</span></div>
+  </div>
+
+  <h2>خلاصهٔ مدیریتی</h2>
+  <div class="card">
+    برنامه از نظر معماری امنیتی <b>پاک و اصولی</b> نوشته شده است: هیچ کلید API داخل کد یا
+    تاریخچهٔ گیت نیست، کلیدهای کاربر با <code>EncryptedSharedPreferences</code> (AES‑256‑GCM)
+    رمز می‌شوند، همهٔ ارتباطات HTTPS است، اجزای برنامه به‌درستی <code>exported=false</code>
+    هستند، پشتیبان‌گیری ابری کامل غیرفعال است، و فایل به‌روزرسانی APK پیش از نصب با
+    <b>اثر انگشت امضای نسخهٔ نصب‌شده</b> اعتبارسنجی می‌شود.
+    <br/><br/>
+    هیچ آسیب‌پذیری <b>بحرانی یا بالا</b> پیدا نشد. یافته‌ها در دستهٔ <b>سخت‌سازی و حریم خصوصی</b>
+    هستند: نمایش بدون پوشش کلید در فیلد ورودی، انتقال داده‌های حساس سلامت به سرویس‌های
+    هوش مصنوعی ثالث، و چند مورد جزئی مانند نبود <code>FLAG_SECURE</code> و هش تک‌مرحله‌ای رمز قفل.
+    این موارد خطر شکست امنیتی ایجاد نمی‌کنند، اما توصیه می‌شود اصلاح شوند.
+  </div>
+
+  <h2>نقاط قوت (کنترل‌های درست)</h2>
+  <div class="card ok-list">
+    <ul>
+      <li>هیچ کلید/توکنی در کد منبع، فایل تنظیمات یا تاریخچهٔ گیت وجود ندارد (اسکن کامل بی‌نتیجه بود).</li>
+      <li>کلیدهای AI فقط در حافظهٔ رمزنگاری‌شدهٔ خصوصی (Keystore + AES‑256) ذخیره می‌شوند و تنها در هدر <code>Authorization</code> روی HTTPS فرستاده می‌شوند.</li>
+      <li>تمام URLهای برنامه HTTPS هستند؛ <code>usesCleartextTraffic</code> تنظیم نشده ⇒ از اندروید ۹ به بعد ترافیک بدون رمز بسته است.</li>
+      <li>مانیفست: همهٔ Receiver‌ها و FileProvider با <code>exported=false</code>؛ تنها Activity لانچر exported است.</li>
+      <li>پشتیبان‌گیری: <code>allowBackup=false</code> + قواعد exclude کامل (cloud + device‑transfer).</li>
+      <li>به‌روزرسانی اپ: تطبیق <code>packageName</code>، جلوگیری از نسخهٔ قدیمی‌تر، و تطبیق SHA‑256 گواهی امضا پیش از نصب.</li>
+      <li>فایل‌ها با <code>FileProvider</code> به‌صورت <code>content://</code> و با گرنت موقت به نصب‌کننده داده می‌شوند (نه <code>file://</code>).</li>
+      <li>رمز قفل برنامه به‌صورت متن ذخیره نمی‌شود؛ فقط هش نمک‌دار (<code>AppLock.kt</code>).</li>
+    </ul>
+  </div>
+
+  <h2>فهرست یافته‌ها</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>#</th><th>یافته</th><th>شدت</th><th>محل</th></tr></thead>
+      <tbody>
+        <tr><td>S1</td><td>کلید/توکن API در فیلد ورودی بدون پوشش نمایش داده می‌شود</td><td><span class="sev s-med">متوسط</span></td><td>ConnectGate.kt, Settings.kt</td></tr>
+        <tr><td>S2</td><td>داده‌های سلامت حساس و تصاویر کاربر به سرویس AI ثالث ارسال می‌شود</td><td><span class="sev s-med">متوسط</span></td><td>Prompts.kt, AiClient.kt</td></tr>
+        <tr><td>S3</td><td>بازگشت خودکار به حافظهٔ بدون رمز هنگام خطای Keystore</td><td><span class="sev s-med">متوسط</span></td><td>SecurePrefs.kt</td></tr>
+        <tr><td>S4</td><td>نبود FLAG_SECURE: امکان اسکرین‌شات و نمایش در پیش‌نمایش برنامه‌ها</td><td><span class="sev s-low">کم</span></td><td>MainActivity.kt</td></tr>
+        <tr><td>S5</td><td>هش رمز قفل با SHA‑256 تک‌مرحله‌ای (نه KDF کند)</td><td><span class="sev s-low">کم</span></td><td>AppLock.kt</td></tr>
+        <tr><td>S6</td><td>استفاده از کتابخانهٔ <code>security-crypto</code> نسخهٔ alpha</td><td><span class="sev s-low">کم</span></td><td>app/build.gradle.kts</td></tr>
+        <tr><td>S7</td><td>کد مردهٔ <code>ApiKeys</code> با مستندات گمراه‌کننده</td><td><span class="sev s-low">کم</span></td><td>ai/ApiKeys.kt</td></tr>
+        <tr><td>S8</td><td>وابستگی بی‌استفادهٔ <code>logging-interceptor</code></td><td><span class="sev s-low">کم</span></td><td>app/build.gradle.kts</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>جزئیات یافته‌ها و اصلاح پیشنهادی</h2>
+
+  <div class="finding">
+    <div class="top"><h3>S1 — کلید API بدون پوشش در فیلد ورودی</h3><span class="sev s-med">متوسط</span></div>
+    <div class="meta"><b>فایل:</b> ui/screens/ConnectGate.kt (~L126)، ui/screens/Settings.kt (~L660, L795)</div>
+    <p>فیلدهای کلید API فقط <code>KeyboardType.Password</code> دارند؛ این فقط چیدمان صفحه‌کلید را
+    عوض می‌کند و <b>متن را پنهان نمی‌کند</b>. هیچ جای برنامه از <code>PasswordVisualTransformation()</code>
+    استفاده نشده، پس کلید کاربر هنگام تایپ روی صفحه دیده می‌شود.</p>
+    <div class="lbl">اثر واقعی</div>
+    <ul>
+      <li>خطر «نگاه از روی شانه» و ضبط/اسکرین‌شات صفحه هنگام وارد کردن کلید پرداختی کاربر.</li>
+      <li>در مرورگرِ فایلِ دستگاه یا پیش‌نمایش برنامه‌های اخیر قابل مشاهده است.</li>
+    </ul>
+    <div class="lbl">اصلاح پیشنهادی (کم‌ریسک، بدون تغییر رفتار)</div>
+    <p>افزودن <code>visualTransformation = PasswordVisualTransformation()</code> به همهٔ فیلدهای
+    کلید/توکن، همراه یک آیکون «نمایش/پنهان». ذخیره‌سازی و ارسال دست‌نخورده می‌مانند.</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S2 — ارسال دادهٔ سلامت و تصاویر به سرویس AI ثالث</h3><span class="sev s-med">متوسط</span></div>
+    <div class="meta"><b>فایل:</b> ai/Prompts.kt (L46‑L116)، ai/AiClient.kt (base64 تصویر L772/L1138)</div>
+    <p>برای پاسخ‌دادن، برنامه جزئیات حساس سلامت را در متن درخواست به سرویس هوش مصنوعی
+    (OpenRouter / 1xAI / Cloudflare / Groq / Atria یا هر سرور سازگار OpenAI که کاربر تعیین کند)
+    می‌فرستد: چرخهٔ پریود، شدت درد، رنگ خون، وضعیت گوارش، ترشح، وزن و وزن هدف. در بخش تصویر
+    نیز عکس کاربر (Base64) به سرویس ارسال می‌شود.</p>
+    <div class="lbl">اثر واقعی</div>
+    <ul>
+      <li>این داده‌ها از دستگاه خارج و در سرویس ثالث پردازش می‌شوند؛ سیاست نگه‌داری آن سرویس خارج از کنترل برنامه است.</li>
+      <li>کلید AI را خودِ کاربر وارد می‌کند، پس انتخاب سرویس آگاهانه است — اما در برنامه افشای صریحِ همین جریان دیده نشد.</li>
+    </ul>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>افزودن یک توضیح/رضایت روشن در اولین استفاده و در تنظیمات («این داده‌ها برای پاسخ‌دهی به سرویس
+    هوش مصنوعی انتخابی شما ارسال می‌شوند») و یک کلید «بدون ارسال جزئیات سلامت». تغییر فعلی فقط
+    شفاف‌سازی است و رفتار هوش مصنوعی را عوض نمی‌کند.</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S3 — بازگشت خودکار به ذخیرهٔ بدون رمز</h3><span class="sev s-med">متوسط</span></div>
+    <div class="meta"><b>فایل:</b> security/SecurePrefs.kt (catch → getSharedPreferences)</div>
+    <p>اگر ساخت Keystore ناموفق باشد، برنامه بی‌سروصدا به SharedPreferences رمزنشده برمی‌گردد.
+    این انتخاب برای «بالا نیامدن برنامه» منطقی است، اما یعنی در آن حالت کلیدها به‌صورت متنِ
+    ساده ذخیره می‌شوند و کاربر هم باخبر نمی‌شود.</p>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>ثبت وضعیت fallback و نمایش یک هشدار کوچک به کاربر («ذخیره‌سازی امن در دسترس نیست»)؛
+    در صورت امکان، تلاش دوباره برای ساخت Keystore. رفتار فعلی داده را از دست نمی‌دهد، پس تغییر
+    باید محافظه‌کارانه باشد.</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S4 — نبود FLAG_SECURE</h3><span class="sev s-low">کم</span></div>
+    <div class="meta"><b>فایل:</b> MainActivity.kt</div>
+    <p>هیچ‌جا <code>FLAG_SECURE</code> تنظیم نشده، بنابراین از صفحهٔ برنامه می‌توان اسکرین‌شات/فیلم
+    گرفت و تصویر آن در thumbnail برنامه‌های اخیر می‌ماند — برای اپلی که دادهٔ سلامت نگه می‌دارد
+    مطلوب نیست.</p>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>افزودن <code>window.setFlags(FLAG_SECURE, FLAG_SECURE)</code> در <code>MainActivity</code>
+    (اختیاری: فقط وقتی قفل برنامه فعال است، تا کاربر بتواند در صورت نیاز اسکرین‌شات بگیرد).</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S5 — هش تک‌مرحله‌ای رمز قفل</h3><span class="sev s-low">کم</span></div>
+    <div class="meta"><b>فایل:</b> security/AppLock.kt (hash = SHA‑256 نمک‌دار، یک دور)</div>
+    <p>رمز قفل به‌صورت هش SHA‑256 نمک‌دار ذخیره می‌شود. نمک خوب است، اما SHA‑256 یک تابع
+    <b>سریع</b> است: برای PIN چهاررقمی، اگر فایل خصوصی Preferences به هر دلیلی در دسترس قرار گیرد
+    (دستگاه روت، استخراج پشتیبان)، شکستن آن با brute‑force کاملاً عملی است.</p>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>استفاده از یک KDF کند مانند <code>PBKDF2WithHmacSHA256</code> با حداقل ~۱۰۰٬۰۰۰ تکرار
+    (یا Argon2) به‌جای یک دور SHA‑256. داده‌های موجود با یک مسیر مهاجرت سازگار منتقل شوند.</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S6 — نسخهٔ alpha کتابخانهٔ امنیتی</h3><span class="sev s-low">کم</span></div>
+    <div class="meta"><b>فایل:</b> app/build.gradle.kts → <code>androidx.security:security-crypto:1.1.0-alpha06</code></div>
+    <p>لایهٔ رمزنگاری کلیدها روی یک نسخهٔ <b>alpha</b> بنا شده است. alpha ممکن است تغییرات ناسازگار
+    یا باگ داشته باشد.</p>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>در فرصت مناسب به نسخهٔ پایدار (یا آخرین alpha تثبیت‌شده) به‌روزرسانی و رمزگشایی سالمِ کلیدهای
+    موجود آزمایش شود؛ این تغییر باید با تست مهاجرت انجام شود.</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S7 — کد مردهٔ ApiKeys</h3><span class="sev s-low">کم</span></div>
+    <div class="meta"><b>فایل:</b> ai/ApiKeys.kt (هیچ ارجاعی بیرون از خودش ندارد)</div>
+    <p>شیء <code>ApiKeys</code> هیچ‌کجا استفاده نمی‌شود و مستند آن از «کلید داخلی» حرف می‌زند که وجود
+    ندارد؛ این می‌تواند در آینده باعث اشتباه و دوباره‌کاریِ کلید شود.</p>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>حذف فایل (یا اگر نگه‌داشته می‌شود، تصحیح مستند و علامت‌گذاری به‌عنوان legacy).</p>
+  </div>
+
+  <div class="finding">
+    <div class="top"><h3>S8 — وابستگی بی‌استفادهٔ logging-interceptor</h3><span class="sev s-low">کم</span></div>
+    <div class="meta"><b>فایل:</b> app/build.gradle.kts (تنها اعلان وابستگی، بدون استفاده در کد)</div>
+    <p>کتابخانهٔ <code>okhttp3:logging-interceptor</code> اضافه شده اما هیچ‌جا به کار نرفته. اگر روزی
+    کسی آن را با سطح <code>BODY</code> وصل کند، ممکن است هدرها (شامل کلید) و بدنهٔ خواسته‌ها را ثبت کند.</p>
+    <div class="lbl">اصلاح پیشنهادی</div>
+    <p>حذف وابستگی؛ یا اگر لازم شد، هرگز با سطح <code>BODY</code> و تنها در build نوع debug استفاده شود.</p>
+  </div>
+
+  <h2>اقدام بعدی</h2>
+  <div class="card">
+    <p>طبق ترتیب توافق‌شده، اصلاحات یکی‌یکی و با تست انجام می‌شوند: ابتدا <b>S1</b> (کم‌ریسک و
+    بیشترین فایده)، سپس S4 و S5، بعد S2 (شفاف‌سازی)، و در آخر موارد جزئی S3، S6، S7، S8.
+    هیچ‌یک نیازمند تغییر معماری، سرور یا هزینه نیست. برای هر اصلاح جداگانه: تغییر کد →
+    تأیید کامپایل در CI → تازه‌سازی گزارش و انتشار نسخه.</p>
+  </div>
+
+  <div class="footer">
+    این گزارش یک ممیزی ایستا روی کد و پیکربندی است؛ مواردی که نیاز به اجرای زنده/دستگاه واقعی
+    دارند (رفتار زمان اجرا، هشدارهای TLS در عمل، رمزگشایی Keystore روی دستگاه) مشخص و محدود
+    ذکر شده‌اند. — دستیار من • memuzi امنیتی • v1.0.125
+  </div>
+
+</div>
+</body>
+</html>

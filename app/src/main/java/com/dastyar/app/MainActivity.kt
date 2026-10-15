@@ -2,6 +2,7 @@ package com.dastyar.app
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
 import androidx.core.view.WindowCompat
@@ -49,6 +50,11 @@ class MainActivity : FragmentActivity() {
         applyPersianLocale()
 
         super.onCreate(savedInstanceState)
+
+        // Health data must not leak through screenshots or the recent-apps
+        // thumbnail while the app lock is on. Applied here and on every resume,
+        // so toggling the lock in settings takes effect at once.
+        applyScreenshotGuard()
 
         // Explicit, deterministic edge-to-edge. On targetSdk 34 the system does
         // not reliably resize the window for the keyboard any more; with insets
@@ -153,6 +159,25 @@ class MainActivity : FragmentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyScreenshotGuard()
+    }
+
+    /**
+     * Blocks screenshots and the recent-apps thumbnail while the app lock is on,
+     * so the period history, check-ins and keys on screen cannot be captured or
+     * shown in the app switcher. A user who has not set a lock keeps the normal
+     * screenshot behaviour, because the guard is tied to that choice.
+     */
+    private fun applyScreenshotGuard() {
+        if (AppLock.isEnabled(this)) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
 

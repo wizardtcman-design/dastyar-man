@@ -28,6 +28,7 @@ import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.ai.UsageLog
 import com.dastyar.app.data.Health
 import com.dastyar.app.security.AppLock
+import com.dastyar.app.security.SecurePrefs
 import com.dastyar.app.security.LockScreen
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Profile
@@ -473,6 +474,30 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
+        // ---- privacy: say plainly where the data goes ----
+        AiPrivacyCard()
+
+        Spacer(Modifier.height(14.dp))
+
+        // ---- honest warning when the keystore could not be opened ----
+        // Storage never silently drops to unencrypted: if the encrypted store
+        // could not be created, the user is told here instead.
+        if (!SecurePrefs.encryptedStorageInUse()) {
+            DastyarCard(accent = MaterialTheme.colorScheme.error) {
+                SectionTitle("هشدار: ذخیره‌سازی امن در دسترس نیست", "⚠️")
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "رمزنگاری محلی (Keystore) در این دستگاه بالا نیامد، بنابراین کلیدها " +
+                        "به‌صورت رمزنگاری‌نشده در حافظهٔ خصوصیِ همین برنامه نگه داشته " +
+                        "می‌شوند. هیچ داده‌ای پاک نشده است و همهٔ قابلیت‌ها کار می‌کنند؛ " +
+                        "با راه‌اندازی دوبارهٔ دستگاه معمولاً حل می‌شود.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+        }
+
         // ---- three AI services, managed independently ----
 
         // Text-provider card: pick the chat/text service and manage its key.
@@ -594,11 +619,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         shape = RoundedCornerShape(14.dp), singleLine = true
                     )
                     Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
+                    SecretField(
                         value = cftToken, onValueChange = { cftToken = it.trim() },
-                        label = { Text("API Token (Workers AI + Account Analytics Read)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp), singleLine = true
+                        label = "API Token (Workers AI + Account Analytics Read)",
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
@@ -657,11 +681,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                 }
                 if (showOrEdit) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    SecretField(
                         value = orNewKey, onValueChange = { orNewKey = it.trim() },
-                        label = { Text("کلید جدید ${ServiceKeys.textProvider().label}") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp), singleLine = true
+                        label = "کلید جدید ${ServiceKeys.textProvider().label}",
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
@@ -797,11 +820,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                     shape = RoundedCornerShape(14.dp), singleLine = true
                 )
                 Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
+                SecretField(
                     value = cfToken, onValueChange = { cfToken = it.trim() },
-                    label = { Text("API Token") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp), singleLine = true
+                    label = "API Token",
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
@@ -1073,11 +1095,10 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
             }
             if (showPoEdit) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
+                SecretField(
                     value = poKey, onValueChange = { poKey = it.trim() },
-                    label = { Text("Pollinations API Key (اختیاری)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp), singleLine = true
+                    label = "Pollinations API Key (اختیاری)",
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(

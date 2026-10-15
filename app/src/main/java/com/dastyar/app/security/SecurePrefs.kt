@@ -14,8 +14,13 @@ import androidx.security.crypto.MasterKey
  * Safety first: the app must never fail to start just because encryption is
  * unavailable (a broken keystore, an emulator quirk, an OS upgrade). If the
  * encrypted store cannot be created, [get] falls back to the ordinary private
- * preferences, so the app keeps working and the feature is never lost — it is
- * simply back to the previous, still-private storage.
+ * preferences, so the app keeps working and the feature is never lost.
+ *
+ * That fallback is never silent: [encryptedStorageInUse] reports it, and the
+ * settings screen shows the user an explicit warning that keys are being kept
+ * without encryption. Nothing is ever deleted in either mode, and the one-time
+ * migration in [migrateFromPlain] is skipped entirely while the fallback is
+ * active, so an existing key is never moved into unencrypted storage.
  *
  * [migrateFromPlain] copies any values that already exist in an older, plaintext
  * preferences file into the encrypted store once, so existing users keep their
@@ -28,8 +33,23 @@ object SecurePrefs {
     private const val SUFFIX = "_enc"
 
     /**
+     * Whether the most recent store access could use real encryption. Starts
+     * optimistically (assume yes) and is corrected on the first [get].
+     */
+    @Volatile
+    private var encryptedInUse: Boolean = true
+
+    /**
+     * True when encrypted storage is actually being used. When false, keys are
+     * being kept in the ordinary private preferences because the keystore could
+     * not be opened; the UI must warn the user instead of hiding this.
+     */
+    fun encryptedStorageInUse(): Boolean = encryptedInUse
+
+    /**
      * Returns the encrypted preferences for [name], or the ordinary private
-     * preferences if encryption could not be initialised.
+     * preferences if encryption could not be initialised. The fallback is
+     * recorded in [encryptedStorageInUse] so it is never invisible.
      */
     fun get(ctx: Context, name: String): SharedPreferences {
         return try {
@@ -42,9 +62,12 @@ object SecurePrefs {
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+            ).also { encryptedInUse = true }
         } catch (_: Exception) {
-            // Keystore unavailable: keep the app running with private prefs.
+            // Keystore unavailable: keep the app and every feature running with
+            // private prefs, but remember that storage is no longer encrypted so
+            // the warning can be shown. No existing data is removed.
+            encryptedInUse = false
             ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
         }
     }
