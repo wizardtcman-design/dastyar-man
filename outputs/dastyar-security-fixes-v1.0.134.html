@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>اصلاحات امنیتی — دستیار من v1.0.134</title>
+<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0e1116; --card:#161b22; --line:#2a323d; --txt:#e6edf3; --muted:#9aa7b4;
+    --accent:#7c5cff; --ok:#3ddc97; --med:#ffcf4d; --low:#5cc8ff; --err:#ff6b7a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:Vazirmatn,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.85;
+    font-size:15px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 20px 60px}
+  header.hero{background:linear-gradient(135deg,#12291f,#12151d 60%);
+    border:1px solid var(--line);border-radius:20px;padding:26px 24px;position:relative;overflow:hidden}
+  header.hero::after{content:"";position:absolute;inset:auto -60px -80px auto;width:260px;height:260px;
+    background:radial-gradient(circle,var(--ok),transparent 70%);opacity:.2}
+  h1{font-size:25px;margin:0 0 6px;font-weight:800;letter-spacing:-.2px}
+  .sub{color:var(--muted);font-size:14px}
+  .badge{display:inline-block;background:#12331f;color:var(--ok);border:1px solid #1d5a3b;
+    border-radius:999px;padding:3px 12px;font-size:12px;margin-inline-start:8px;font-weight:700}
+  h2{font-size:18px;margin:32px 0 12px;font-weight:800;display:flex;align-items:center;gap:8px}
+  h2::before{content:"";width:5px;height:18px;border-radius:3px;background:var(--accent)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:12px 0}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:11px 12px;text-align:right;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:none}
+  .sev{display:inline-block;border-radius:8px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap}
+  .s-med{background:#3a3416;color:var(--med)} .s-low{background:#12303f;color:var(--low)}
+  .done{color:var(--ok);font-weight:700;white-space:nowrap}
+  code{background:#0b0e13;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
+    font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#d8c9ff;direction:ltr;display:inline-block}
+  ul{margin:8px 0;padding-inline-start:20px} li{margin:5px 0}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0 4px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center}
+  .kpi b{display:block;font-size:22px;font-weight:800;color:var(--ok)}
+  .kpi span{font-size:12px;color:var(--muted)}
+  .step{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+  .step:last-child{border-bottom:none}
+  .step .n{flex:0 0 34px;height:34px;border-radius:10px;background:#1c232c;border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:#c3b5ff}
+  .step .b{flex:1}
+  .step .t{font-weight:700}
+  .step .d{color:var(--muted);font-size:13.5px}
+  .footer{color:var(--muted);font-size:12.5px;text-align:center;margin-top:34px;border-top:1px solid var(--line);padding-top:16px}
+  @media(max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)} h1{font-size:20px} body{font-size:14.5px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>اصلاحات امنیتی «دستیار من» <span class="badge">v1.0.134 منتشر شد</span></h1>
+    <div class="sub">
+      ۸ مورد از ممیزی امنیتی، یکی‌یکی اصلاح و آزمایش شد — بدون حذف هیچ قابلیتی.<br/>
+      شاخه: <code>fix/security-hardening</code> → ادغام در <code>main</code> • همهٔ تست‌ها سبز
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><b>۸</b><span>مورد اصلاح‌شده</span></div>
+    <div class="kpi"><b>۹</b><span>بیلد CI موفق</span></div>
+    <div class="kpi"><b>۶۹</b><span>تأییدیهٔ تست</span></div>
+    <div class="kpi"><b>۰</b><span>تست شکست‌خورده</span></div>
+  </div>
+
+  <h2>فهرست اصلاحات (به ترتیب اجرا)</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>#</th><th>مورد</th><th>شدت</th><th>وضعیت</th></tr></thead>
+      <tbody>
+        <tr><td>S1</td><td>پوشاندن کلیدهای API در فیلدهای ورودی</td><td><span class="sev s-med">متوسط</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S4</td><td>جلوگیری از اسکرین‌شات و پیش‌نمایش برنامه‌ها (FLAG_SECURE)</td><td><span class="sev s-low">کم</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S5</td><td>هش رمز قفل با PBKDF2 به‌جای یک دور SHA-256</td><td><span class="sev s-low">کم</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S2</td><td>اطلاع‌رسانی شفاف ارسال دادهٔ سلامت و تصاویر</td><td><span class="sev s-med">متوسط</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S3</td><td>هشدار در صورت فعال‌نبودن ذخیره‌سازی امن</td><td><span class="sev s-med">متوسط</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S6</td><td>به‌روزرسانی security-crypto به نسخهٔ پایدار ۱.۱.۰</td><td><span class="sev s-low">کم</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S7</td><td>حذف کد مردهٔ ApiKeys</td><td><span class="sev s-low">کم</span></td><td class="done">✓ انجام شد</td></tr>
+        <tr><td>S8</td><td>حذف وابستگی بی‌استفادهٔ لاگ‌گیری OkHttp</td><td><span class="sev s-low">کم</span></td><td class="done">✓ انجام شد</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>چه چیزی تغییر کرد</h2>
+  <div class="card">
+    <div class="step"><div class="n">۱</div><div class="b">
+      <div class="t">پوشاندن کلیدها</div>
+      <div class="d">کامپوننت مشترک <code>SecretField.kt</code> با <code>PasswordVisualTransformation</code> و دکمهٔ چشم؛
+      روی ۷ فیلد کلید/توکن در صفحهٔ اتصال و تنظیمات اعمال شد. ذخیره‌سازی و ارسال دست‌نخورده.</div>
+    </div></div>
+    <div class="step"><div class="n">۴</div><div class="b">
+      <div class="t">FLAG_SECURE</div>
+      <div class="d">در <code>MainActivity</code> هنگام ایجاد و هر بار بازگشت به برنامه؛ فقط زمانی که قفل برنامه روشن است.
+      بدون قفل، رفتار اسکرین‌شات عادی می‌ماند.</div>
+    </div></div>
+    <div class="step"><div class="n">۵</div><div class="b">
+      <div class="t">هش رمز قفل</div>
+      <div class="d"><code>AppLock.kt</code> حالا PBKDF2-HMAC-SHA256 با ۱۲۰٬۰۰۰ تکرار. دادهٔ قدیمی همچنان کار می‌کند و در
+      اولین ورود موفق بی‌صدا ارتقا می‌یابد.</div>
+    </div></div>
+    <div class="step"><div class="n">۲</div><div class="b">
+      <div class="t">اطلاع‌رسانی شفاف</div>
+      <div class="d">کامپوننت <code>PrivacyNotice.kt</code> در صفحهٔ اتصال اولیه و در تنظیمات: صریح می‌گوید چه داده‌ای
+      (گفتگو، جزئیات سلامت، تصویر) به سرویس انتخابی کاربر می‌رود. هیچ رفتاری حذف نشد.</div>
+    </div></div>
+    <div class="step"><div class="n">۳</div><div class="b">
+      <div class="t">ذخیره‌سازی امن شفاف</div>
+      <div class="d"><code>SecurePrefs.encryptedStorageInUse()</code> وضعیت واقعی را برمی‌گرداند؛ در خطای Keystore برنامه
+      کار می‌کند اما کارت هشدار نشان داده می‌شود و مهاجرت/حذف داده انجام نمی‌شود.</div>
+    </div></div>
+    <div class="step"><div class="n">۶۷۸</div><div class="b">
+      <div class="t">تمیزکاری</div>
+      <div class="d">security-crypto به ۱.۱.۰ پایدار، حذف فایل مردهٔ <code>ApiKeys.kt</code>، حذف
+      <code>logging-interceptor</code>.</div>
+    </div></div>
+  </div>
+
+  <h2>تست و راستی‌آزمایی</h2>
+  <div class="card">
+    <ul>
+      <li><b>هر مرحله جداگانه آزمایش شد:</b> یک بیلد کامل CI (Debug + Release) برای هر اصلاح، همه موفق.</li>
+      <li><b>تست منطقی محلی (بدون دستگاه):</b> ۶۹ تأییدیه، همه سبز —
+        یادآورها (۲۹)، چک‌این/پریود (۱۴)، قفل برنامه/PBKDF2 (۱۷)، ذخیره‌سازی امن (۹).</li>
+      <li><b>راستی‌آزمایی استاتیک روی APK منتشرشده:</b> همهٔ قابلیت‌های جدید در dex موجود،
+        و قابلیت‌های قبلی (چت، Cloudflare، Pollinations، یادآورها، پریود، آشپزی) سالم.</li>
+      <li><b>سازگاری امضای نصب:</b> نسخهٔ منتشرشده با همان کلید پایدار نسخه‌های قبل امضا شده
+        (<code>c568aabd…</code>) — یعنی آپدیت روی نسخهٔ نصب‌شده بدون حذف اطلاعات انجام می‌شود.</li>
+      <li><b>محیط CI بهبود یافت:</b> مراحل انتشار Release فقط روی <code>main</code> اجرا می‌شوند؛
+        بیلد شاخه‌ای صرفاً برای بررسی کامپایل است و نسخهٔ ناخواسته منتشر نمی‌کند.</li>
+    </ul>
+  </div>
+
+  <h2>نتیجهٔ نهایی</h2>
+  <div class="card">
+    <p>هر ۸ مورد ممیزی اصلاح و آزمایش شد. هیچ آسیب‌پذیری بحرانی/بالا وجود نداشت و در کل این کار
+    <b>هیچ قابلیت سالمی حذف یا محدود نشد</b>. نسخهٔ <b>v1.0.134</b> منتشر شد و فایل نصب آن
+    (<code>dastyar-man-release.apk</code>) در صفحهٔ Releases گیت‌هاب در دسترس است و روی نسخهٔ
+    قبلی به‌صورت درجا آپدیت می‌شود.</p>
+  </div>
+
+  <div class="footer">
+    دستیار من • اصلاحات امنیتی v1.0.134 • گزارش ممیزی کامل: <code>dastyar-security-audit.html</code>
+  </div>
+
+</div>
+</body>
+</html>
