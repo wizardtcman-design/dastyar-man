@@ -14,6 +14,8 @@ import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.DastyarDatabase
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Health
+import com.dastyar.app.data.Jalali
+import com.dastyar.app.data.PeriodDayPrefs
 import com.dastyar.app.data.PeriodEvent
 import com.dastyar.app.data.Profile
 import com.dastyar.app.data.SavedImage
@@ -73,6 +75,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val _completedDay = MutableStateFlow(CheckInPrefs.doneDay(app))
     val completedDay: StateFlow<String?> = _completedDay.asStateFlow()
+
+    /**
+     * Today's answer to "are you on your period today?", read synchronously from
+     * disk at start-up. `null` means not answered today. It is the single switch
+     * that opens and closes the period-specific questions, so answering «نه»
+     * keeps them closed after leaving and re-entering, and «پایان پریود» can
+     * close them immediately.
+     */
+    private val _periodDayAnswer = MutableStateFlow(PeriodDayPrefs.answer(app, Dates.today()))
+    val periodDayAnswer: StateFlow<Boolean?> = _periodDayAnswer.asStateFlow()
 
     private val _suggestion = MutableStateFlow<DailySuggestion?>(null)
     val suggestion: StateFlow<DailySuggestion?> = _suggestion.asStateFlow()
@@ -413,6 +425,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val t = Dates.today()
         val row = dao.checkIn(t)
         _todayCheckIn.value = row
+        // Back-fill a row saved by an older build that did not write the marker,
+        // so a previous «بله» is still honoured. A row without a "yes" is not a
+        // recorded answer -- it may just be the row water logging created.
+        _periodDayAnswer.value =
+            PeriodDayPrefs.effective(PeriodDayPrefs.answer(app, t), row?.isPeriodDay == true)
         // A real row for today means today is done: keep the durable marker in
         // step so the decision does not depend on this read finishing in time.
         if (row != null) {
@@ -578,10 +595,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ?: PeriodEvent(startIso = anchor, endIso = dateIso, source = "user")
         )
 
+        // Ending the period closes the period questions at once and returns the
+        // check-in state to «نه، پریود نیستم», exactly as the user expects. The
+        // answer for today and today's row are both moved back to "no"; the
+        // recorded history is untouched, so nothing is lost.
+        val today = Dates.today()
+        PeriodDayPrefs.put(getApplication(), today, false)
+        dao.checkIn(today)?.let { dao.saveCheckIn(it.copy(isPeriodDay = false)) }
+
         // The learned period length changed, so re-arm the whole cycle schedule
         // and refresh the tip.
         com.dastyar.app.notifications.PeriodReminder.scheduleNext(getApplication(), current)
         withContext(Dispatchers.Main) {
+            _periodDayAnswer.value = false
+            _todayCheckIn.value = dao.checkIn(today)
             _toast.value = "پایان پریود ثبت شد ✅"
             _cycleTip.value = null
             cycleTipLoadedFor = null
@@ -697,7 +724,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             dao.saveCheckIn(row)
             CheckInPrefs.markDone(getApplication(), today)
+            // Keep the durable period-day answer in step with the saved row.
+            PeriodDayPrefs.put(getApplication(), today, row.isPeriodDay)
             withContext(Dispatchers.Main) {
+                _periodDayAnswer.value = row.isPeriodDay
                 _completedDay.value = today
                 _todayCheckIn.value = row
                 _toast.value = "وضعیت امروز ذخیره شد ✅"
@@ -706,6 +736,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.Main) {
                 _toast.value = "ذخیره نشد؛ لطفاً دوباره تلاش کن"
             }
+        }
+    }
+
+    /**
+     * Records today's answer to "are you on your period today?" the moment the
+     * user taps it, before the check-in is saved, so the choice survives leaving
+     * the screen and can never be reversed by a later re-entry.
+     *
+     * Answering «بله» also makes the period actually active -- otherwise the
+     * period questions would open today and vanish again tomorrow. An already
+     * running period is left untouched (its start date must not move); a period
+     * whose start is recent is re-opened rather than duplicated; anything older
+     * starts a genuinely new cycle today.
+     */
+    fun setPeriodDay(yes: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+        val today = Dates.today()
+        PeriodDayPrefs.put(getApplication(), today, yes)
+        withContext(Dispatchers.Main) { _periodDayAnswer.value = yes }
+        if (!yes) return@launch
+
+        val current = dao.profile() ?: return@launch
+        val anchor = current.lastPeriodDate
+        val open = anchor.isNotBlank() &&
+                dao.periodEvent(anchor)?.endIso?.isBlank() == true
+        if (open) return@launch
+
+        val recent = anchor.isNotBlank() && runCatching {
+            val days = Jalali.daysBetween(anchor, today)
+            days in 0..current.periodDays.coerceAtLeast(1)
+        }.getOrDefault(false)
+        if (recent) {
+            val ev = dao.periodEvent(anchor)
+            dao.savePeriodEvent(
+                ev?.copy(endIso = "")
+                    ?: PeriodEvent(startIso = anchor, endIso = "", source = "user")
+            )
+        } else {
+            recordPeriodStart(today)
         }
     }
 
@@ -1243,10 +1311,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         dao.clearFacts()
         if (!keepProfile) dao.saveProfile(Profile(id = 1, onboardingDone = false))
         CheckInPrefs.clear(getApplication())
+        PeriodDayPrefs.clear(getApplication())
         withContext(Dispatchers.Main) {
             _suggestion.value = null
             _todayCheckIn.value = null
             _completedDay.value = null
+            _periodDayAnswer.value = null
             _toast.value = "اطلاعات پاک شد"
         }
     }

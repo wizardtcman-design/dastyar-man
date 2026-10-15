@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dastyar.app.data.CheckIn
 import com.dastyar.app.data.Dates
+import com.dastyar.app.data.PeriodDayPrefs
 import com.dastyar.app.ui.MainViewModel
 import com.dastyar.app.ui.components.*
 import com.dastyar.app.ui.theme.Amber
@@ -64,16 +65,28 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
     // is something to report, or the cycle says a period is expected.
     var showSkinDetail by remember { mutableStateOf(isFirstEver) }
     var showFatigueDetail by remember { mutableStateOf(isFirstEver) }
-    // The period questions stay open while a period is running: today's answer
-    // was "yes", or an open period event exists (started but not yet ended).
+
+    // The period questions have exactly one switch: today's answer. It is read
+    // from a durable per-day record, so «نه» keeps them closed after leaving and
+    // re-entering the screen, and it is not remembered in a local variable that
+    // a re-entry would reset.
+    val savedAnswer = vm.periodDayAnswer.collectAsState().value
+    var periodYes by remember(todayStr) { mutableStateOf<Boolean?>(savedAnswer) }
+    LaunchedEffect(savedAnswer) { if (savedAnswer != null) periodYes = savedAnswer }
+
+    // The period is genuinely running only while an open period event exists
+    // (started from the ring or by answering «بله», and not yet ended).
     val periodRunning = vm.periodEvents.collectAsState().value.let { events ->
         val p = profile
         if (p == null || p.lastPeriodDate.isBlank()) false
         else events.firstOrNull { it.startIso == p.lastPeriodDate }?.endIso?.isBlank() == true
     }
-    var showPeriodDetail by remember {
-        mutableStateOf(isFirstEver || expectedPeriod || cycleDay in listOf(1, 2) || periodRunning)
-    }
+
+    // Period-specific questions show ONLY while the period is active: the user
+    // answered «بله» today, or has not answered yet today while a period is
+    // running. Answering «نه» closes them, and after «پایان پریود» they stay
+    // closed until a new period is started.
+    val showPeriodDetail = PeriodDayPrefs.detailVisible(periodYes, periodRunning)
 
     Column(
         Modifier
@@ -230,10 +243,22 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
         // which this returns to the single yes/no question.
         SectionCard("🩷", "پریود", "فقط اگر پریود هستی", Pink) {
             LabeledText("امروز روز پریود هستی؟")
-            ChoiceChips(listOf("بله", "نه"), if (c.isPeriodDay) "بله" else "نه", accent = Pink) {
+            ChoiceChips(listOf("بله", "نه"), if (periodYes == true) "بله" else "نه", accent = Pink) {
                 val yes = it == "بله"
-                draft = c.copy(isPeriodDay = yes)
-                showPeriodDetail = yes
+                // Saved straight away, not only on «ذخیره», so the answer can
+                // never be lost by leaving the screen -- and answering «بله»
+                // makes the period itself active, so the questions come back
+                // tomorrow instead of disappearing.
+                periodYes = yes
+                vm.setPeriodDay(yes)
+            }
+            if (!showPeriodDetail && expectedPeriod) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "طبق چرخه‌ات امروز حدود روز پریود است. اگر شروع شده، «بله» را بزن.",
+                    fontSize = 11.5.sp,
+                    color = Amber
+                )
             }
             if (showPeriodDetail) {
                 Spacer(Modifier.height(18.dp))
@@ -331,7 +356,7 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
         GradientButton("ذخیره وضعیت امروز ✅") {
-            vm.saveCheckIn(c.copy(cycleDay = cycleDay))
+            vm.saveCheckIn(c.copy(isPeriodDay = periodYes == true, cycleDay = cycleDay))
             vm.generateSuggestion(true)
             onDone()
         }
