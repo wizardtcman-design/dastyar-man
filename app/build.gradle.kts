@@ -130,7 +130,8 @@ dependencies {
 
     // Encrypted preferences for the user's own AI service keys, so a key the
     // user typed is never left as plain text in the app's preferences file.
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // Pinned to the stable 1.1.0 release instead of an alpha build.
+    implementation("androidx.security:security-crypto:1.1.0")
 
     // WorkManager for reminders
     implementation("androidx.work:work-runtime-ktx:2.9.0")
