@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dastyar.app.notifications.DailyReminder
+import com.dastyar.app.notifications.ReminderScheduler
 import com.dastyar.app.ai.ServiceKeys
 import com.dastyar.app.security.AppLock
 import com.dastyar.app.security.LockScreen
@@ -57,6 +58,12 @@ class MainActivity : FragmentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         DailyReminder.reschedule(this)
+        // Re-arm every task reminder on app start. Android silently drops
+        // pending alarms when the exact-alarm permission is revoked or the app
+        // is updated, so this is what keeps a task reminder from disappearing
+        // for good. It is idempotent: each alarm has a stable id, so this only
+        // ever replaces, never duplicates.
+        ReminderScheduler.rescheduleAll(this)
         val openCheckIn = intent?.getBooleanExtra(EXTRA_OPEN_CHECKIN, false) == true
         val openTask = intent?.getLongExtra(EXTRA_OPEN_TASK, 0L) ?: 0L
         val openUpdate = intent?.getBooleanExtra(EXTRA_OPEN_UPDATE, false) == true

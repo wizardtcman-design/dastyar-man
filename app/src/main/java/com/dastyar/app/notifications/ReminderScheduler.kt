@@ -338,11 +338,12 @@ object PeriodReminder {
 /**
  * Schedules real system alarms for task reminders.
  *
- * Every task has one stable alarm and one stable notification id derived from
- * its row id, so re-scheduling always replaces the previous alarm instead of
- * piling up duplicates, and cancelling always hits the right one. A repeating
- * task is re-armed by [ReminderReceiver] for its next occurrence the moment it
- * fires, so the chain survives with the app closed.
+ * Every task gets TWO independent alarms and notification ids derived only
+ * from its row id: the night-before reminder and the reminder at the task's own
+ * date and time. Re-scheduling always replaces the previous pair instead of
+ * piling up duplicates, and cancelling always removes both. A repeating task is
+ * re-armed by [ReminderReceiver] for its next occurrence the moment it fires,
+ * so the chain survives with the app closed.
  *
  * The alarms use `setExactAndAllowWhileIdle` so they fire with the app closed,
  * in the background, with the screen off and the phone locked. Where Android
@@ -352,23 +353,37 @@ object PeriodReminder {
  */
 object ReminderScheduler {
 
+    /** Local hour of the night-before reminder: 21:00 the day before the task. */
+    const val NIGHT_HOUR = 21
+
     /** True when this Android version lets the app schedule exact alarms. */
     fun canScheduleExact(ctx: Context): Boolean {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return true
         return ctx.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
     }
 
+    /**
+     * Places BOTH reminders of a task: the night-before one at 21:00 the day
+     * before, and the one at the task's own date and time. A moment already in
+     * the past is skipped, so a missed reminder is never delivered late.
+     */
     fun schedule(ctx: Context, task: com.dastyar.app.data.Task) {
         if (!task.reminderEnabled || task.done) return
         if (task.date.isBlank()) return
-        scheduleAt(ctx, task, nextTrigger(task) ?: return)
+        nextTrigger(task)?.let { scheduleAt(ctx, task, it, night = false) }
+        nightTrigger(task)?.let { scheduleAt(ctx, task, it, night = true) }
     }
 
     /** Fires at [trigger]; used both for the first time and for repeats. */
-    fun scheduleAt(ctx: Context, task: com.dastyar.app.data.Task, trigger: Long) {
+    fun scheduleAt(
+        ctx: Context,
+        task: com.dastyar.app.data.Task,
+        trigger: Long,
+        night: Boolean = false
+    ) {
         if (trigger <= System.currentTimeMillis()) return
         val alarm = ctx.getSystemService(AlarmManager::class.java)
-        val pi = pendingIntent(ctx, task)
+        val pi = pendingIntent(ctx, task, night)
         try {
             if (canScheduleExact(ctx)) {
                 alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pi)
@@ -382,11 +397,19 @@ object ReminderScheduler {
         }
     }
 
+    /** Cancels BOTH reminders of a task: the night-before one and the due one. */
     fun cancel(ctx: Context, task: com.dastyar.app.data.Task) {
         val alarm = ctx.getSystemService(AlarmManager::class.java)
-        alarm.cancel(pendingIntent(ctx, task))
+        alarm.cancel(pendingIntent(ctx, task, night = false))
+        alarm.cancel(pendingIntent(ctx, task, night = true))
     }
 
+    /**
+     * Re-arms every pending task reminder. Called on app start, after a reboot,
+     * after an app update and after the device clock or time zone changes --
+     * Android drops or shifts alarms in all of those cases, so without this the
+     * reminders would silently disappear for good.
+     */
     fun rescheduleAll(ctx: Context) {
         CoroutineScope(Dispatchers.IO).launch {
             val dao = DastyarDatabase.get(ctx).dao()
@@ -404,6 +427,21 @@ object ReminderScheduler {
         val now = System.currentTimeMillis()
         if (base > now) return base
         return rollForward(task, base, now)
+    }
+
+    /**
+     * The night-before reminder: 21:00 on the day before the task's next
+     * occurrence. Returns null when that moment has already passed, so a missed
+     * night-before reminder is neither delivered late nor shown twice.
+     */
+    fun nightTrigger(task: com.dastyar.app.data.Task): Long? {
+        val due = nextTrigger(task) ?: return null
+        val zone = ZoneId.systemDefault()
+        val dueDate = java.time.Instant.ofEpochMilli(due).atZone(zone).toLocalDate()
+        val night = dueDate.minusDays(1)
+            .atTime(NIGHT_HOUR, 0)
+            .atZone(zone).toInstant().toEpochMilli()
+        return if (night > System.currentTimeMillis()) night else null
     }
 
     /**
@@ -431,31 +469,77 @@ object ReminderScheduler {
         return null
     }
 
-    private fun pendingIntent(ctx: Context, task: com.dastyar.app.data.Task): PendingIntent {
+    private fun pendingIntent(
+        ctx: Context,
+        task: com.dastyar.app.data.Task,
+        night: Boolean
+    ): PendingIntent {
+        val body = when {
+            night && task.time.isNotBlank() ->
+                "فردا ساعت ${com.dastyar.app.data.Dates.faTime(task.time)} موعدشه 🌙"
+            night -> "فردا موعدشه 🌙"
+            task.description.isNotBlank() -> task.description
+            else -> "وقت یادآوری این کاره ✅"
+        }
         val i = Intent(ctx, ReminderReceiver::class.java).apply {
             putExtra("taskId", task.id)
-            putExtra("title", task.title)
-            putExtra("body", task.description.ifBlank { "وقت یادآوری این کاره ✅" })
+            putExtra("night", night)
+            putExtra("title", if (night) "🌙 ${task.title}" else task.title)
+            putExtra("body", body)
             putExtra("repeat", task.repeat)
             putExtra("date", task.date)
             putExtra("time", task.time)
         }
         return PendingIntent.getBroadcast(
-            ctx, task.notifyId, i,
+            ctx, if (night) task.preNotifyId else task.notifyId, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
     private fun triggerMillis(date: String, time: String): Long? {
-        return try {
-            // task.date is a JALALI ISO string, so it must be converted to a real
-            // Gregorian day before building the instant -- parsing it as Gregorian
-            // would fire the reminder on a completely wrong day.
-            val d = com.dastyar.app.data.Jalali.toGregorian(date) ?: return null
-            val t = LocalTime.parse(time)
-            LocalDateTime.of(d, t).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        } catch (_: Exception) {
-            null
-        }
+        // task.date is a JALALI ISO string, so it must be converted to a real
+        // Gregorian day before building the instant -- parsing it as Gregorian
+        // would fire the reminder on a completely wrong day.
+        val d = com.dastyar.app.data.Jalali.toGregorian(date) ?: return null
+        val t = parseTime(time) ?: return null
+        return LocalDateTime.of(d, t).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
+
+    /**
+     * A tolerant HH:mm parser. The manual form stores whatever the user typed
+     * ("9", "9:30", "۰۹:۳۰"), and `LocalTime.parse` rejects anything without a
+     * two-digit hour -- which silently dropped those reminders. This pads and
+     * validates instead, so the alarm is always placed. Accepts Persian or Latin
+     * digits, "H", "HH", "H:mm", "HH:mm" and "HHmm".
+     */
+    fun parseTime(raw: String): LocalTime? {
+        if (raw.isBlank()) return null
+        val sb = StringBuilder()
+        var sep = false
+        for (c in raw) {
+            val idx = "۰۱۲۳۴۵۶۷۸۹".indexOf(c)
+            when {
+                idx >= 0 -> sb.append(('0' + idx))
+                c.isDigit() -> sb.append(c)
+                (c == ':' || c == '٫' || c == '.') && !sep && sb.isNotEmpty() -> {
+                    sep = true; sb.append(':')
+                }
+            }
+        }
+        val s = sb.toString()
+        if (s.isBlank()) return null
+        val colon = s.indexOf(':')
+        val (hStr, mStr) = when {
+            colon >= 0 -> s.substring(0, colon) to s.substring(colon + 1)
+            s.length >= 3 -> s.substring(0, 2) to s.substring(2).take(2)
+            else -> s to ""
+        }
+        val h = hStr.toIntOrNull() ?: return null
+        val m = if (mStr.isBlank()) 0 else mStr.toIntOrNull() ?: return null
+        return if (h in 0..23 && m in 0..59) LocalTime.of(h, m) else null
+    }
+
+    /** Canonical "HH:mm" for storage, or "" when the text is not a real time. */
+    fun normalizeTime(raw: String): String =
+        parseTime(raw)?.let { "%02d:%02d".format(it.hour, it.minute) } ?: ""
 }

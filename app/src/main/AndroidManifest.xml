@@ -59,6 +59,11 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- An in-place update cancels every alarm; re-arm them. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- Clock / time-zone changes shift RTC alarms; re-arm them. -->
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
 
