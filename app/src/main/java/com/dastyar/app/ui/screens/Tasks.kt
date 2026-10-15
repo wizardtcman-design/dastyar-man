@@ -22,11 +22,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.dastyar.app.data.Dates
 import com.dastyar.app.data.Task
 import com.dastyar.app.notifications.NotificationHelper
@@ -106,6 +109,13 @@ fun TasksScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(14.dp))
 
+        // Never hide a missing permission: without these two switches Android
+        // drops or delays every reminder, and the user would just think the app
+        // is broken.
+        ReminderPermissionBanner()
+
+        Spacer(Modifier.height(14.dp))
+
         // All four status filters sit in one responsive row (see FilterRow).
         FilterRow(filter, groups) { filter = it }
 
@@ -165,6 +175,91 @@ fun TasksScreen(vm: MainViewModel) {
             onSave = { vm.saveTask(it); editing = null },
             onDelete = { vm.deleteTask(it); editing = null }
         )
+    }
+}
+
+/**
+ * Tells the user, in the open, when a needed permission is off. Notifications
+ * cannot appear at all without the notification permission, and Android drops
+ * task alarms when the exact-alarm permission is revoked, so hiding either
+ * would just look like "reminders are broken".
+ */
+@Composable
+private fun ReminderPermissionBanner() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var notifOk by remember { mutableStateOf(NotificationHelper.canPost(context)) }
+    var exactOk by remember { mutableStateOf(ReminderScheduler.canScheduleExact(context)) }
+
+    // Re-check whenever the screen comes back to the front, so returning from
+    // the system permission screens immediately clears the warning.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notifOk = NotificationHelper.canPost(context)
+                exactOk = ReminderScheduler.canScheduleExact(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val notifPerm = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { notifOk = NotificationHelper.canPost(context) }
+
+    if (notifOk && exactOk) return
+
+    DastyarCard(accent = Amber) {
+        Text("🔔 یادآوری‌ها کامل کار نمی‌کنند", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        if (!notifOk) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "اجازهٔ نمایش اعلان خاموش است؛ تا روشنش نکنی هیچ یادآوری‌ای روی گوشی دیده نمی‌شود.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (!exactOk) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "اجازهٔ «آلارم دقیق» خاموش است؛ یادآوری‌ها با کمی تأخیر می‌رسند.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!notifOk) {
+                OutlinedButton(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                )
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("روشن‌کردن اعلان", fontSize = 12.sp) }
+            }
+            if (!exactOk) {
+                OutlinedButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("اجازهٔ آلارم دقیق", fontSize = 12.sp) }
+            }
+        }
     }
 }
 
@@ -467,6 +562,14 @@ private fun ManualAddCard(
             Spacer(Modifier.width(10.dp))
             Text("یادآوری با اعلان گوشی", fontSize = 13.5.sp)
         }
+        if (reminder && (date.isBlank() || time.isBlank())) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "برای یادآوری واقعی، تاریخ و ساعت را هم مشخص کن.",
+                fontSize = 12.sp,
+                color = Amber
+            )
+        }
         Spacer(Modifier.height(12.dp))
         GradientButton("✅ ثبت کار", enabled = title.isNotBlank()) {
             if (reminder) ensurePermissions()
@@ -478,7 +581,7 @@ private fun ManualAddCard(
                     time = time.trim(),
                     repeat = repeat,
                     priority = priority,
-                    reminderEnabled = reminder && date.isNotBlank()
+                    reminderEnabled = reminder && date.isNotBlank() && time.isNotBlank()
                 )
             )
             onSaved()
@@ -795,7 +898,7 @@ private fun ManualTaskSheet(
                     time = time.trim(),
                     repeat = repeat,
                     priority = priority,
-                    reminderEnabled = reminder && date.isNotBlank()
+                    reminderEnabled = reminder && date.isNotBlank() && time.isNotBlank()
                 ) ?: Task(
                     title = title.trim(),
                     description = desc.trim(),
@@ -803,7 +906,7 @@ private fun ManualTaskSheet(
                     time = time.trim(),
                     repeat = repeat,
                     priority = priority,
-                    reminderEnabled = reminder && date.isNotBlank()
+                    reminderEnabled = reminder && date.isNotBlank() && time.isNotBlank()
                 )
                 onSave(clean)
             }

@@ -115,9 +115,17 @@ class DailyReminderReceiver : BroadcastReceiver() {
     }
 }
 
+/**
+ * Fires one of a task's two reminders -- the night-before one or the one at the
+ * task's own time. The two use separate notification ids, so they can never
+ * overwrite each other, and the fired alarm is re-armed for the next occurrence
+ * of a repeating task straight from here, so the chain continues with the app
+ * closed and after a reboot.
+ */
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val taskId = intent.getLongExtra("taskId", -1L)
+        val night = intent.getBooleanExtra("night", false)
         val title = intent.getStringExtra("title") ?: "یادآوری"
         val body = intent.getStringExtra("body") ?: ""
         val repeat = intent.getStringExtra("repeat") ?: "none"
@@ -125,9 +133,10 @@ class ReminderReceiver : BroadcastReceiver() {
         val time = intent.getStringExtra("time") ?: ""
 
         if (NotificationHelper.canPost(context)) {
+            val task = com.dastyar.app.data.Task(id = if (taskId > 0) taskId else 1L)
             NotificationHelper.show(
                 context,
-                com.dastyar.app.data.Task(id = if (taskId > 0) taskId else 1L).notifyId,
+                if (night) task.preNotifyId else task.notifyId,
                 title,
                 body,
                 NotificationHelper.CHANNEL_REMINDERS,
@@ -135,28 +144,17 @@ class ReminderReceiver : BroadcastReceiver() {
             )
         }
 
-        // Re-arm a repeating task for its next occurrence, straight from the
-        // alarm so the chain continues with the app closed and after a reboot.
+        // Re-arm a repeating task. [ReminderScheduler.schedule] places BOTH the
+        // next night-before alarm and the next due alarm, and skips any moment
+        // already in the past, so a repeating reminder never dies and never
+        // duplicates.
         if (repeat != "none" && repeat.isNotBlank()) {
             val task = com.dastyar.app.data.Task(
                 id = if (taskId > 0) taskId else 0L,
                 title = title, description = body,
                 date = date, time = time, repeat = repeat, reminderEnabled = true
             )
-            val from = try {
-                // date is a Jalali ISO string: convert to a real Gregorian day
-                // before building the instant for the repeat roll-forward.
-                val d = com.dastyar.app.data.Jalali.toGregorian(date)
-                    ?: throw IllegalArgumentException("bad jalali date")
-                java.time.LocalDateTime.of(
-                    d,
-                    java.time.LocalTime.parse(time)
-                ).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-            } catch (_: Exception) {
-                System.currentTimeMillis()
-            }
-            val next = ReminderScheduler.rollForward(task, from, System.currentTimeMillis())
-            if (next != null) ReminderScheduler.scheduleAt(context, task, next)
+            ReminderScheduler.schedule(context, task)
         }
     }
 }
@@ -250,12 +248,23 @@ class PeriodReminderReceiver : BroadcastReceiver() {
     }
 }
 
+/**
+ * Re-arms every reminder after the events that make Android drop or shift
+ * alarms: a reboot, an in-place app update (which cancels all alarms), and a
+ * change of the device clock or time zone. Without this the alarms are simply
+ * gone and the user never learns why nothing rang.
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            ReminderScheduler.rescheduleAll(context)
-            DailyReminder.reschedule(context)
-            PeriodReminder.reschedule(context)
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED -> {
+                ReminderScheduler.rescheduleAll(context)
+                DailyReminder.reschedule(context)
+                PeriodReminder.reschedule(context)
+            }
         }
     }
 }

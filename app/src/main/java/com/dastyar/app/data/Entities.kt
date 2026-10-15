@@ -23,8 +23,17 @@ data class Task(
      */
     val notifyId: Int get() = NOTIFY_BASE + (id % NOTIFY_SPAN).toInt()
 
+    /**
+     * The independent key for the night-before reminder, on a separate id range
+     * so it can never collide with [notifyId] or with any other notification in
+     * the app. Stable, exactly like [notifyId], so re-scheduling replaces the
+     * old alarm and cancelling always finds it.
+     */
+    val preNotifyId: Int get() = PRE_NOTIFY_BASE + (id % NOTIFY_SPAN).toInt()
+
     companion object {
         private const val NOTIFY_BASE = 10000
+        private const val PRE_NOTIFY_BASE = 5_000_000
         private const val NOTIFY_SPAN = 1_000_000
     }
 }

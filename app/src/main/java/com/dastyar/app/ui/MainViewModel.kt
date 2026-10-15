@@ -1199,11 +1199,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun saveTask(t: Task) = viewModelScope.launch(Dispatchers.IO) {
         val app = getApplication<Application>()
+        // Store the time canonically as HH:mm. The manual form keeps exactly what
+        // the user typed ("9", "9:30"), and an un-padded hour used to make the
+        // alarm silently unschedulable; normalising here fixes old rows too.
+        val clean = if (t.time.isBlank()) t
+        else t.copy(
+            time = com.dastyar.app.notifications.ReminderScheduler.normalizeTime(t.time)
+                .ifBlank { t.time }
+        )
         if (t.id != 0L) {
             dao.task(t.id)?.let { com.dastyar.app.notifications.ReminderScheduler.cancel(app, it) }
         }
-        val id = dao.saveTask(t)
-        val saved = t.copy(id = if (t.id == 0L) id else t.id)
+        val id = dao.saveTask(clean)
+        val saved = clean.copy(id = if (clean.id == 0L) id else clean.id)
         com.dastyar.app.notifications.ReminderScheduler.schedule(app, saved)
     }
 
