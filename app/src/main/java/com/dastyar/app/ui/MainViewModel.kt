@@ -428,8 +428,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Back-fill a row saved by an older build that did not write the marker,
         // so a previous «بله» is still honoured. A row without a "yes" is not a
         // recorded answer -- it may just be the row water logging created.
-        _periodDayAnswer.value =
-            PeriodDayPrefs.effective(PeriodDayPrefs.answer(app, t), row?.isPeriodDay == true)
+        _periodDayAnswer.value = PeriodDayPrefs.effective(
+            PeriodDayPrefs.answer(getApplication(), t),
+            row?.isPeriodDay == true
+        )
         // A real row for today means today is done: keep the durable marker in
         // step so the decision does not depend on this read finishing in time.
         if (row != null) {
