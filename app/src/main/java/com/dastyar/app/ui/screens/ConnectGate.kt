@@ -70,6 +70,10 @@ fun ConnectGate(onConnected: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // Say plainly, before the first key is entered, where the data goes.
+        AiPrivacyCard()
+        Spacer(Modifier.height(14.dp))
+
         // ------------------------------------------------- text provider
         // One card, two providers: the user picks which service handles text and
         // enters the matching key. Whichever is chosen is used everywhere in the

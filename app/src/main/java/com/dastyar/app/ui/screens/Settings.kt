@@ -473,6 +473,11 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
 
+        // ---- privacy: say plainly where the data goes ----
+        AiPrivacyCard()
+
+        Spacer(Modifier.height(14.dp))
+
         // ---- three AI services, managed independently ----
 
         // Text-provider card: pick the chat/text service and manage its key.
