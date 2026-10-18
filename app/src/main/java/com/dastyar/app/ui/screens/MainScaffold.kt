@@ -248,25 +248,28 @@ fun MainScaffold(vm: MainViewModel) {
     // There is deliberately no permanent card or panel for it in the dashboard.
     // Once today's row is saved, `shouldAskCheckIn` is false, so it appears only
     // once per day no matter how many times the app is opened.
-    var dismissed by rememberSaveable { mutableStateOf(false) }
-    if (needsCheckIn && !dismissed) {
+    // Remembered per calendar day, not per process: skipping or finishing today
+    // hides it until tomorrow, when `vm.today` changes and it re-opens on its own.
+    var dismissedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    if (needsCheckIn && dismissedDay != vm.today) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            Box(Modifier.fillMaxSize()) {
-                CheckInScreen(vm, onDone = { dismissed = true })
-                // A small, safe way out if the user is busy right now; the
-                // questions return the next time the app is opened today.
-                TextButton(
-                    onClick = { dismissed = true },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(bottom = 8.dp)
-                ) {
-                    Text("بعداً", fontSize = 13.sp)
-                }
+            // A small, safe way out if the user is busy right now. It is part of
+            // the scrolling content, not a floating button: the old bottom-
+            // centred "بعداً" sat on top of "ذخیره" and stole its taps, which is
+            // exactly how answers looked "saved" but were never written.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+            ) {
+                CheckInScreen(
+                    vm,
+                    onDone = { dismissedDay = vm.today },
+                    onSkip = { dismissedDay = vm.today }
+                )
             }
         }
     }

@@ -10,6 +10,7 @@ import com.dastyar.app.data.ChatMessage
 import com.dastyar.app.data.CheckIn
 import com.dastyar.app.data.CheckInPrefs
 import com.dastyar.app.data.Cycle
+import com.dastyar.app.data.DailyGate
 import com.dastyar.app.data.DailySuggestion
 import com.dastyar.app.data.DastyarDatabase
 import com.dastyar.app.data.Dates
@@ -415,6 +416,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             refreshToday()
             profile.collect { p -> if (p != null) refreshToday() }
         }
+        // The database is the source of truth for today's cards. Whenever a row
+        // is committed -- from the check-in screen, the water buttons, or a
+        // write that finished after a resume refresh -- the in-memory copy and
+        // the durable marker catch up, so the dashboard never shows 0 for a row
+        // that really exists and the questions never come back for it.
+        viewModelScope.launch {
+            checkIns.collect { list ->
+                val t = Dates.today()
+                val row = list.firstOrNull { it.date == t } ?: return@collect
+                if (_todayCheckIn.value != row) _todayCheckIn.value = row
+                if (_completedDay.value != t) _completedDay.value = t
+            }
+        }
         // Look for a new release as soon as the app opens; onAppResumed() repeats
         // this (interval-gated) every time the user returns to the app.
         checkForUpdates()
@@ -702,13 +716,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * already exists.
      */
     fun shouldAskCheckIn(profile: Profile?, todayCheckIn: CheckIn?): Boolean {
-        if (profile?.onboardingDone != true) return false
         val today = Dates.today()
-        // Done if the durable marker says today is finished, or a row for today
-        // really exists. The day is recomputed every call, so tomorrow the
-        // questions come back on their own.
-        if (_completedDay.value == today) return false
-        return todayCheckIn?.date != today
+        // A row loaded from the database counts even when the screen still
+        // holds an older in-memory copy, so a committed save can never make the
+        // questions reappear on the next open. The decision itself lives in a
+        // pure object so it is covered by the logic tests.
+        val row = todayCheckIn
+            ?: checkIns.value.firstOrNull { it.date == today }
+        return DailyGate.shouldAsk(
+            onboardingDone = profile?.onboardingDone == true,
+            today = today,
+            completedDay = _completedDay.value,
+            row = row
+        )
     }
 
     /**
@@ -720,26 +740,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * marker is set only AFTER the write actually succeeds: a failed save leaves
      * the questions available instead of silently marking the day done.
      */
-    fun saveCheckIn(c: CheckIn) = viewModelScope.launch(Dispatchers.IO) {
-        val today = Dates.today()
-        val row = c.copy(date = today)
-        try {
-            dao.saveCheckIn(row)
-            CheckInPrefs.markDone(getApplication(), today)
-            // Keep the durable period-day answer in step with the saved row.
-            PeriodDayPrefs.put(getApplication(), today, row.isPeriodDay)
-            withContext(Dispatchers.Main) {
-                _periodDayAnswer.value = row.isPeriodDay
-                _completedDay.value = today
-                _todayCheckIn.value = row
-                _toast.value = "وضعیت امروز ذخیره شد ✅"
-            }
-        } catch (_: Exception) {
-            withContext(Dispatchers.Main) {
-                _toast.value = "ذخیره نشد؛ لطفاً دوباره تلاش کن"
+    fun saveCheckIn(c: CheckIn, onResult: ((Boolean) -> Unit)? = null) =
+        viewModelScope.launch(Dispatchers.IO) {
+            val today = Dates.today()
+            val row = c.copy(date = today)
+            try {
+                dao.saveCheckIn(row)
+                CheckInPrefs.markDone(getApplication(), today)
+                // Keep the durable period-day answer in step with the saved row.
+                PeriodDayPrefs.put(getApplication(), today, row.isPeriodDay)
+                withContext(Dispatchers.Main) {
+                    _periodDayAnswer.value = row.isPeriodDay
+                    _completedDay.value = today
+                    _todayCheckIn.value = row
+                    _toast.value = "وضعیت امروز ذخیره شد ✅"
+                    onResult?.invoke(true)
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    // The screen stays open so the answers are not lost.
+                    _toast.value = "ذخیره نشد؛ لطفاً دوباره تلاش کن"
+                    onResult?.invoke(false)
+                }
             }
         }
-    }
 
     /**
      * Records today's answer to "are you on your period today?" the moment the

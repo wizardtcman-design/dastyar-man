@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -28,10 +29,15 @@ import com.dastyar.app.ui.theme.Rose
  * ask only what is relevant to the user's current situation, so it stays short.
  */
 @Composable
-fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
+fun CheckInScreen(
+    vm: MainViewModel,
+    onDone: () -> Unit,
+    onSkip: (() -> Unit)? = null
+) {
     val profile by vm.profile.collectAsState()
     val checkIns by vm.checkIns.collectAsState()
     val todayStr = Dates.today()
+    var saving by remember { mutableStateOf(false) }
 
     var draft by remember { mutableStateOf<CheckIn?>(null) }
     LaunchedEffect(todayStr, checkIns) {
@@ -107,6 +113,16 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        // The way out lives in the scrolling header, never floating over the
+        // save button at the bottom: an overlapping "بعداً" used to swallow the
+        // tap on "ذخیره" itself, so the answers silently went nowhere.
+        if (onSkip != null) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                TextButton(onClick = onSkip) {
+                    Text("بعداً می‌پرسم", fontSize = 12.sp)
+                }
+            }
         }
         Spacer(Modifier.height(16.dp))
 
@@ -355,10 +371,21 @@ fun CheckInScreen(vm: MainViewModel, onDone: () -> Unit) {
         }
 
         Spacer(Modifier.height(20.dp))
-        GradientButton("ذخیره وضعیت امروز ✅") {
-            vm.saveCheckIn(c.copy(isPeriodDay = periodYes == true, cycleDay = cycleDay))
-            vm.generateSuggestion(true)
-            onDone()
+        GradientButton(
+            if (saving) "در حال ذخیره…" else "ذخیره وضعیت امروز ✅",
+            enabled = !saving
+        ) {
+            saving = true
+            // Close the screen only after the row is really committed, so a
+            // fast exit can never cancel the write. On failure the answers stay
+            // on screen and the button becomes usable again.
+            vm.saveCheckIn(c.copy(isPeriodDay = periodYes == true, cycleDay = cycleDay)) { ok ->
+                saving = false
+                if (ok) {
+                    vm.generateSuggestion(true)
+                    onDone()
+                }
+            }
         }
         Spacer(Modifier.height(30.dp))
     }
