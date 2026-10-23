@@ -566,6 +566,12 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                if (ServiceKeys.textProvider().id == AiProviders.dahl.id) {
+                    Text(
+                        "اگر مدل انتخابی شلوغ باشد (مثلاً DeepSeek)، برنامه خودکار از مدل دیگر Dahl استفاده می‌کند.",
+                        fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             if (ServiceKeys.textProvider().id == AiProviders.openRouter.id) {
                 Text(
@@ -727,6 +733,16 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
                         balanceLoading -> "در حال دریافت اعتبار…"
                         balance?.remaining != null -> "اعتبار OpenRouter: ${money(balance!!.remaining!!)}"
                         else -> "اعتبار OpenRouter: قابل دریافت نیست"
+                    },
+                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (ServiceKeys.textProvider().id == AiProviders.dahl.id) {
+                Text(
+                    when {
+                        balanceLoading -> "در حال دریافت موجودی…"
+                        balance?.remaining != null ->
+                            "موجودی Dahl: ${"%,.0f".format(balance!!.remaining)} توکن"
+                        else -> "موجودی Dahl از API قابل دریافت نیست؛ از داشبورد خودشان ببین."
                     },
                     fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

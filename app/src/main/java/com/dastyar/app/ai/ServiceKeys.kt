@@ -47,6 +47,11 @@ object ServiceKeys {
     private const val GQ_MODEL = "gq_text_model"
     private const val GQ_STATE = "gq_state"
 
+    // Dahl AI (DeepSeek / MiniMax / GLM via inference.dahl.global)
+    private const val DH_KEY = "dh_key"
+    private const val DH_MODEL = "dh_text_model"
+    private const val DH_STATE = "dh_state"
+
     // (CodeCraft, kie.ai and Aion Labs were removed; their key slots are gone.)
 
     // Cloudflare (image account)
@@ -90,6 +95,10 @@ object ServiceKeys {
     @Volatile private var gqKey: String? = null
     @Volatile private var gqTextModel: String = AiProviders.groq.textModel
     @Volatile private var gqState: State = State.NOT_SET
+
+    @Volatile private var dhKey: String? = null
+    @Volatile private var dhTextModel: String = AiProviders.dahl.textModel
+    @Volatile private var dhState: State = State.NOT_SET
 
     @Volatile private var cfAccount: String? = null
     @Volatile private var cfToken: String? = null
@@ -262,6 +271,44 @@ object ServiceKeys {
         prefs(ctx).edit().remove(AT_KEY).remove(AT_MODEL).remove(AT_STATE).apply()
     }
 
+    // ----------------------------------------------------------------- Dahl
+
+    fun dahlKey(): String? = dhKey
+    fun dahlTextModel(): String = dhTextModel
+    fun dahlState(): State = dhState
+    fun dahlReady(): Boolean = dhState == State.CONNECTED && !dhKey.isNullOrBlank()
+
+    fun saveDahl(ctx: Context, key: String, state: State = State.CONNECTED,
+                 textModel: String? = null) {
+        val clean = key.trim()
+        if (clean.isBlank()) return
+        dhKey = clean
+        dhState = state
+        textModel?.takeIf { it.isNotBlank() }?.let { dhTextModel = it }
+        prefs(ctx).edit()
+            .putString(DH_KEY, clean)
+            .putString(DH_MODEL, dhTextModel)
+            .putString(DH_STATE, state.name)
+            .apply()
+    }
+
+    fun setDahlState(ctx: Context, state: State) {
+        dhState = state
+        prefs(ctx).edit().putString(DH_STATE, state.name).apply()
+    }
+
+    fun setDahlTextModel(ctx: Context, model: String) {
+        if (model.isBlank()) return
+        dhTextModel = model
+        prefs(ctx).edit().putString(DH_MODEL, model).apply()
+    }
+
+    fun clearDahl(ctx: Context) {
+        dhKey = null
+        dhState = State.NOT_SET
+        prefs(ctx).edit().remove(DH_KEY).remove(DH_MODEL).remove(DH_STATE).apply()
+    }
+
     // ----------------------------------------------------------------- Groq
 
     fun groqKey(): String? = gqKey
@@ -328,6 +375,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> xaiKey.orEmpty()
             AiProviders.atria.id -> atKey.orEmpty()
             AiProviders.groq.id -> gqKey.orEmpty()
+            AiProviders.dahl.id -> dhKey.orEmpty()
             AiProviders.cloudflareText.id -> cftToken.orEmpty()
             else -> orKey.orEmpty()
         }
@@ -338,6 +386,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> xaiTextModel
             AiProviders.atria.id -> atTextModel
             AiProviders.groq.id -> gqTextModel
+            AiProviders.dahl.id -> dhTextModel
             AiProviders.cloudflareText.id -> cftModel
             else -> orTextModel
         }
@@ -348,6 +397,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> oneXaiReady()
             AiProviders.atria.id -> atriaReady()
             AiProviders.groq.id -> groqReady()
+            AiProviders.dahl.id -> dahlReady()
             AiProviders.cloudflareText.id -> cloudflareTextReady()
             else -> openRouterReady()
         }
@@ -364,6 +414,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> xaiState
             AiProviders.atria.id -> atState
             AiProviders.groq.id -> gqState
+            AiProviders.dahl.id -> dhState
             AiProviders.cloudflareText.id -> cftState
             else -> orState
         }
@@ -385,6 +436,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> saveOneXai(ctx, key, state, model)
             AiProviders.atria.id -> saveAtria(ctx, key, state, model)
             AiProviders.groq.id -> saveGroq(ctx, key, state, model)
+            AiProviders.dahl.id -> saveDahl(ctx, key, state, model)
             // Cloudflare text needs an account as well as a token; when one is
             // already stored, saving a new key keeps it. The dedicated
             // saveCloudflareText call is used by the screens so both are set.
@@ -399,6 +451,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> setOneXaiState(ctx, state)
             AiProviders.atria.id -> setAtriaState(ctx, state)
             AiProviders.groq.id -> setGroqState(ctx, state)
+            AiProviders.dahl.id -> setDahlState(ctx, state)
             AiProviders.cloudflareText.id -> setCloudflareTextState(ctx, state)
             else -> setOpenRouterState(ctx, state)
         }
@@ -409,6 +462,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> setOneXaiTextModel(ctx, model)
             AiProviders.atria.id -> setAtriaTextModel(ctx, model)
             AiProviders.groq.id -> setGroqTextModel(ctx, model)
+            AiProviders.dahl.id -> setDahlTextModel(ctx, model)
             AiProviders.cloudflareText.id -> setCloudflareTextModel(ctx, model)
             else -> setOpenRouterTextModel(ctx, model)
         }
@@ -420,6 +474,7 @@ object ServiceKeys {
             AiProviders.oneXai.id -> clearOneXai(ctx)
             AiProviders.atria.id -> clearAtria(ctx)
             AiProviders.groq.id -> clearGroq(ctx)
+            AiProviders.dahl.id -> clearDahl(ctx)
             AiProviders.cloudflareText.id -> clearCloudflareText(ctx)
             else -> clearOpenRouter(ctx)
         }
@@ -609,7 +664,7 @@ object ServiceKeys {
         // the encrypted store, before anything is read.
         com.dastyar.app.security.SecurePrefs.migrateFromPlain(
             ctx, PREFS,
-            listOf(OR_KEY, XAI_KEY, AT_KEY, GQ_KEY,
+            listOf(OR_KEY, XAI_KEY, AT_KEY, GQ_KEY, DH_KEY,
                 CF_ACCOUNT, CF_TOKEN, CFT_ACCOUNT, CFT_TOKEN, PO_KEY)
         )
         val p = prefs(ctx)
@@ -635,6 +690,10 @@ object ServiceKeys {
         gqKey = p.getString(GQ_KEY, null)?.trim()?.ifBlank { null }
         gqTextModel = p.getString(GQ_MODEL, null)?.ifBlank { null } ?: AiProviders.groq.textModel
         gqState = if (gqKey == null) State.NOT_SET else stateOf(p.getString(GQ_STATE, null))
+
+        dhKey = p.getString(DH_KEY, null)?.trim()?.ifBlank { null }
+        dhTextModel = p.getString(DH_MODEL, null)?.ifBlank { null } ?: AiProviders.dahl.textModel
+        dhState = if (dhKey == null) State.NOT_SET else stateOf(p.getString(DH_STATE, null))
 
         textProviderId = AiProviders.byId(p.getString(TEXT_PROVIDER, null)).id
 

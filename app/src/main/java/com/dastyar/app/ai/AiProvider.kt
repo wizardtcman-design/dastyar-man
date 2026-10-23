@@ -72,18 +72,22 @@ data class AiProvider(
         get() = if (modelOptions.isNotEmpty()) modelOptions else listOf(textModel to textModel)
 
     fun chatUrl(): String = when (apiStyle) {
-        ApiStyle.CHAT -> "${baseUrl.trimEnd('/')}/chat/completions"
-        ApiStyle.RESPONSES -> "${baseUrl.trimEnd('/')}/responses"
+        ApiStyle.CHAT -> "${actualBaseUrl().trimEnd('/')}/chat/completions"
+        ApiStyle.RESPONSES -> "${actualBaseUrl().trimEnd('/')}/responses"
     }
 
+    /** The base URL in force, including any configured relay override. */
+    fun actualBaseUrl(): String =
+        if (id == AiProviders.dahl.id) AiProviders.dahlBaseUrl() else baseUrl.trimEnd('/')
+
     fun creditsUrl(): String? =
-        creditsPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
+        creditsPath.takeIf { it.isNotBlank() }?.let { "${actualBaseUrl()}/$it" }
 
     fun keyInfoUrl(): String? =
-        keyInfoPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
+        keyInfoPath.takeIf { it.isNotBlank() }?.let { "${actualBaseUrl()}/$it" }
 
     fun modelsUrl(): String? =
-        modelsPath.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/$it" }
+        modelsPath.takeIf { it.isNotBlank() }?.let { "${actualBaseUrl()}/$it" }
 }
 
 object AiProviders {
@@ -210,6 +214,70 @@ object AiProviders {
         textModel = "@cf/google/gemma-4-26b-a4b-it"
     )
 
+    /**
+     * Dahl AI (https://inference.dahl.global) is a text provider that reaches
+     * open-weight models from inside Iran through one OpenAI-compatible key.
+     *
+     * Its catalogue contains exactly three chat models (DeepSeek V4 Flash,
+     * MiniMax M2.7 and GLM-5.3 Flash). DeepSeek is the recommended and default
+     * choice; the other two are the same-provider fallback used automatically
+     * when the chosen one answers "at concurrency capacity" (HTTP 429) -- that
+     * is the normal state of DeepSeek on Dahl, so without the fallback the chat
+     * would look broken most of the time.
+     *
+     * The default base URL points at Dahl directly. When a relay is configured
+     * (see [setDahlBaseOverride]) the same OpenAI-compatible calls go through it, so
+     * the real key never has to be shipped inside the APK.
+     *
+     * Text-only: it offers no image model, so image features keep using
+     * Cloudflare / OpenRouter / Pollinations exactly as before.
+     */
+    val dahl = AiProvider(
+        id = "dahl",
+        label = "Dahl AI",
+        baseUrl = "https://inference.dahl.global/v1",
+        textModel = "deepseek-ai/DeepSeek-V4-Flash-0731",
+        creditsPath = "tokens/current",
+        modelsPath = "models",
+        modelOptions = listOf(
+            "deepseek-ai/DeepSeek-V4-Flash-0731" to "DeepSeek V4 Flash — پیش‌فرض، دقیق‌ترین",
+            "MiniMaxAI/MiniMax-M2.7" to "MiniMax M2.7 — جایگزین سریع",
+            "zai-org/GLM-5.3-Flash" to "GLM-5.3 Flash — جایگزین سبک"
+        )
+    )
+
+    /** The models Dahl tries, in order, when the chosen one is busy (429). */
+    val dahlModels: List<String> = listOf(
+        "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "MiniMaxAI/MiniMax-M2.7",
+        "zai-org/GLM-5.3-Flash"
+    )
+
+    /**
+     * Optional relay that forwards Dahl's OpenAI-compatible calls, so the Dahl
+     * key lives in the relay's secret instead of in the app. Empty means talk to
+     * Dahl directly with the key the user entered.
+     */
+    @Volatile private var dahlBaseOverride: String = ""
+
+    fun setDahlBaseOverride(url: String) {
+        dahlBaseOverride = url.trim().trimEnd('/')
+    }
+
+    /** The base URL Dahl actually uses, honouring a configured relay. */
+    fun dahlBaseUrl(): String =
+        dahlBaseOverride.ifBlank { dahl.baseUrl }.trimEnd('/')
+
+    /**
+     * How a Dahl text call is authenticated. A relay is given the app's own
+     * token; a direct call uses the key the user entered.
+     */
+    fun dahlApiKey(storedKey: String): String =
+        if (dahlBaseOverride.isBlank()) storedKey else dahlRelayToken
+
+    /** Token presented to the Dahl relay when one is configured. */
+    @Volatile var dahlRelayToken: String = ""
+
     /** Generic OpenAI-compatible endpoint, used for any user-supplied key. */
     val openAiCompatible = AiProvider(
         id = "openai_compatible",
@@ -224,10 +292,10 @@ object AiProviders {
      * provider that cannot do the job.
      */
     val textProviders: List<AiProvider> =
-        listOf(oneXai, openRouter, cloudflareText, atria, groq)
+        listOf(oneXai, openRouter, cloudflareText, atria, groq, dahl)
 
     val all: List<AiProvider> =
-        listOf(oneXai, openRouter, cloudflareText, atria, groq, openAiCompatible)
+        listOf(oneXai, openRouter, cloudflareText, atria, groq, dahl, openAiCompatible)
 
     fun byId(id: String?): AiProvider =
         all.firstOrNull { it.id == id } ?: openRouter

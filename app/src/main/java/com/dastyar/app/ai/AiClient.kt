@@ -564,7 +564,7 @@ object AiClient {
         }
 
         fun probe(key: String): Pair<Double?, Double?>? {
-            fun get(url: String): kotlinx.serialization.json.JsonObject? = try {
+            fun rawGet(url: String): kotlinx.serialization.json.JsonObject? = try {
                 val req = Request.Builder()
                     .url(url)
                     .addHeader("Authorization", "Bearer $key")
@@ -572,11 +572,20 @@ object AiClient {
                     .get().build()
                 http.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) null else
-                        json.parseToJsonElement(resp.body?.string().orEmpty())
-                            .jsonObject["data"]?.jsonObject
+                        json.parseToJsonElement(resp.body?.string().orEmpty()).jsonObject
                 }
             } catch (e: Exception) {
                 null
+            }
+            fun get(url: String): kotlinx.serialization.json.JsonObject? =
+                rawGet(url)?.get("data")?.jsonObject
+
+            // Dahl reports its balance at the top level in tokens
+            // (`{"available_tokens": 99999785}`), not as credits.
+            if (provider.id == AiProviders.dahl.id) {
+                val root = rawGet(provider.creditsUrl() ?: return null) ?: return null
+                val t = jsonDouble(root, "available_tokens") ?: return null
+                return t to null
             }
 
             var rem: Double? = null
@@ -622,6 +631,7 @@ object AiClient {
             supported = true,
             remaining = remaining,
             usage = usage,
+            currency = if (provider.id == AiProviders.dahl.id) "توکن" else "$",
             exhausted = remaining != null && remaining <= 0.0
         ).also { lastBalance = it }
     }
@@ -781,8 +791,16 @@ object AiClient {
      * no compiled-in key, so a fresh install with no key has nothing to leak and
      * nothing to fall back to.
      */
-    private fun candidateKeys(p: AiProvider): List<String> =
-        ServiceKeys.keyFor(p).takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+    private fun candidateKeys(p: AiProvider): List<String> {
+        val stored = ServiceKeys.keyFor(p).trim()
+        if (p.id == AiProviders.dahl.id) {
+            // Through a relay the app sends its own token and the Dahl key never
+            // leaves the relay's secret; without a relay the user's key is used.
+            val sent = AiProviders.dahlApiKey(stored)
+            return sent.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+        }
+        return stored.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList()
+    }
 
     private suspend fun complete(
         system: String,
@@ -880,12 +898,13 @@ object AiClient {
                                     // would wrongly look empty.
                                     hasImage = !msg?.get("images")?.jsonArray.isNullOrEmpty()
                                 }
-                                if (!content.isNullOrBlank() && !truncated) {
+                                val clean = stripThink(content)
+                                if (!clean.isNullOrBlank() && !truncated) {
                                     if (candidate.model != model) usedFreeFallback = true
                                     activeTextModel = candidate.model
                                     recordText(ctx, p, true, resp.code, startedMs, candidate.model)
                                     refreshBalanceQuietly()
-                                    return@withContext Result.success(content.trim())
+                                    return@withContext Result.success(clean.trim())
                                 }
                                 lastError = when {
                                     truncated -> "پاسخ ناقص از سرویس دریافت شد؛ دوباره تلاش کن."
@@ -933,6 +952,14 @@ object AiClient {
         // and never replaces the user's choice on a normal reply.
         if (provider.id == AiProviders.groq.id) {
             val others = AiProviders.groqModels.map { it.first }.filter { it != primary }
+            return buildChain(provider, primary, others, fallbackIsFree = false)
+        }
+        // Dahl's DeepSeek is routinely "at concurrency capacity" (HTTP 429)
+        // while its other two models stay free. The chosen model is still tried
+        // first (twice); the remaining Dahl models are the automatic fallback,
+        // so a busy DeepSeek does not turn the chat into an error.
+        if (provider.id == AiProviders.dahl.id) {
+            val others = AiProviders.dahlModels.filter { it != primary }
             return buildChain(provider, primary, others, fallbackIsFree = false)
         }
         // The free-model fallback exists because OpenRouter free accounts cannot
@@ -1216,6 +1243,25 @@ object AiClient {
      * an account with no credits is reported as "not enough credit", and only a
      * genuinely too-large request is reported that way.
      */
+    /**
+     * Some reasoning models (MiniMax on Dahl) wrap their chain of thought in a
+     * literal `<think>...</think>` block inside `content`. It is not part of the
+     * answer, so it is removed; when a reply is nothing but reasoning the empty
+     * result makes the caller try the next model instead of showing it.
+     */
+    private fun stripThink(raw: String?): String? {
+        if (raw.isNullOrBlank()) return raw
+        var out = raw
+        while (true) {
+            val start = out.indexOf("<think>", ignoreCase = true)
+            if (start < 0) break
+            val end = out.indexOf("</think>", startIndex = start, ignoreCase = true)
+            out = if (end < 0) out.substring(0, start)
+            else out.removeRange(start, end + "</think>".length)
+        }
+        return out.trim()
+    }
+
     private fun describeError(code: Int, raw: String, image: Boolean = false): String {
         val low = raw.lowercase()
         val noCredit = low.contains("never purchased") || low.contains("insufficient credits") ||
@@ -1240,7 +1286,9 @@ object AiClient {
                     "مدل فعلی قابلیت تولید تصویر ندارد؛ یک مدل تصویری فعال انتخاب کنید."
                 else -> "مدل درخواستی در دسترس نیست."
             }
-            429 -> "تعداد درخواست‌ها زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
+            429 -> if (low.contains("concurrency") || low.contains("capacity"))
+                "این مدل الان شلوغ است و ظرفیتش پر شده؛ کمی بعد دوباره تلاش کن یا مدل دیگری انتخاب کن."
+            else "تعداد درخواست‌ها زیاد شده؛ چند لحظه بعد دوباره تلاش کن."
             in 500..599 -> "سرویس موقتاً پاسخ نمی‌دهد؛ دوباره تلاش کن."
             else -> "خطای سرویس هوش مصنوعی (کد $code)."
         }
