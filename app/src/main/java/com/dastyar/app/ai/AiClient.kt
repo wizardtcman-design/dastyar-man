@@ -1250,14 +1250,14 @@ object AiClient {
      * result makes the caller try the next model instead of showing it.
      */
     private fun stripThink(raw: String?): String? {
-        if (raw.isNullOrBlank()) return raw
-        var out = raw
+        var out: String = raw ?: return raw
         while (true) {
             val start = out.indexOf("<think>", ignoreCase = true)
             if (start < 0) break
             val end = out.indexOf("</think>", startIndex = start, ignoreCase = true)
+            // MiniMax leaves a bare ">" after the closing tag; drop it too.
             out = if (end < 0) out.substring(0, start)
-            else out.removeRange(start, end + "</think>".length)
+            else out.removeRange(start, end + "</think>".length).trimStart('>')
         }
         return out.trim()
     }
